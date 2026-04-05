@@ -4,7 +4,9 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use crossterm::{
-    event::{self, EnableMouseCapture, DisableMouseCapture, Event, KeyCode, MouseButton, MouseEventKind},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, MouseButton, MouseEventKind,
+    },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -57,7 +59,11 @@ fn main() -> io::Result<()> {
     let result = run_app(&mut terminal, tmux_pane);
 
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
 
     result
 }
@@ -79,9 +85,8 @@ fn run_app(
 
     let (git_tx, git_rx) = mpsc::channel::<GitData>();
     let tmux_pane_clone = state.tmux_pane.clone();
-    let git_tab_active = std::sync::Arc::new(AtomicBool::new(
-        state.bottom_tab == BottomTab::GitStatus,
-    ));
+    let git_tab_active =
+        std::sync::Arc::new(AtomicBool::new(state.bottom_tab == BottomTab::GitStatus));
     let git_tab_flag = std::sync::Arc::clone(&git_tab_active);
     std::thread::spawn(move || {
         git_poll_loop(&tmux_pane_clone, &git_tx, &git_tab_flag);
@@ -172,10 +177,8 @@ fn run_app(
                         }
                         KeyCode::BackTab => {
                             state.next_bottom_tab();
-                            git_tab_active.store(
-                                state.bottom_tab == BottomTab::GitStatus,
-                                Ordering::Relaxed,
-                            );
+                            git_tab_active
+                                .store(state.bottom_tab == BottomTab::GitStatus, Ordering::Relaxed);
                         }
                         _ => {}
                     },
@@ -183,16 +186,27 @@ fn run_app(
                         let term_height = terminal.size().map(|s| s.height).unwrap_or(0);
                         match mouse.kind {
                             MouseEventKind::Down(MouseButton::Left) => {
-                                let bottom_start = term_height.saturating_sub(ui::BOTTOM_PANEL_HEIGHT);
+                                let bottom_start =
+                                    term_height.saturating_sub(ui::BOTTOM_PANEL_HEIGHT);
                                 if mouse.row < bottom_start {
                                     state.handle_mouse_click(mouse.row, mouse.column);
                                 }
                             }
                             MouseEventKind::ScrollDown => {
-                                state.handle_mouse_scroll(mouse.row, term_height, ui::BOTTOM_PANEL_HEIGHT, 3);
+                                state.handle_mouse_scroll(
+                                    mouse.row,
+                                    term_height,
+                                    ui::BOTTOM_PANEL_HEIGHT,
+                                    3,
+                                );
                             }
                             MouseEventKind::ScrollUp => {
-                                state.handle_mouse_scroll(mouse.row, term_height, ui::BOTTOM_PANEL_HEIGHT, -3);
+                                state.handle_mouse_scroll(
+                                    mouse.row,
+                                    term_height,
+                                    ui::BOTTOM_PANEL_HEIGHT,
+                                    -3,
+                                );
                             }
                             _ => {}
                         }
@@ -293,10 +307,7 @@ mod tests {
         });
 
         handle.join().unwrap();
-        assert!(
-            rx.try_recv().is_ok(),
-            "should poll when git tab is active"
-        );
+        assert!(rx.try_recv().is_ok(), "should poll when git tab is active");
     }
 
     #[test]
@@ -337,4 +348,3 @@ mod tests {
         assert!(active.load(Ordering::Relaxed));
     }
 }
-

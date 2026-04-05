@@ -76,16 +76,14 @@ pub(crate) fn extract_tool_label(
             basename(&np)
         }
         "LSP" => input_str("operation"),
-        "AskUserQuestion" => {
-            tool_input
-                .get("questions")
-                .and_then(|q| q.as_array())
-                .and_then(|arr| arr.first())
-                .and_then(|q| q.get("question"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string()
-        }
+        "AskUserQuestion" => tool_input
+            .get("questions")
+            .and_then(|q| q.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|q| q.get("question"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
         "CronCreate" => input_str("cron"),
         "CronDelete" => input_str("id"),
         "EnterWorktree" => input_str("name"),
@@ -124,13 +122,19 @@ mod tests {
     #[test]
     fn label_file_bare_filename() {
         let input = json!({"file_path": "README.md"});
-        assert_eq!(extract_tool_label("Read", &input, &json!(null)), "README.md");
+        assert_eq!(
+            extract_tool_label("Read", &input, &json!(null)),
+            "README.md"
+        );
     }
 
     #[test]
     fn label_bash_extracts_command() {
         let input = json!({"command": "cargo build"});
-        assert_eq!(extract_tool_label("Bash", &input, &json!(null)), "cargo build");
+        assert_eq!(
+            extract_tool_label("Bash", &input, &json!(null)),
+            "cargo build"
+        );
     }
 
     #[test]
@@ -155,31 +159,46 @@ mod tests {
     #[test]
     fn label_agent_extracts_description() {
         let input = json!({"description": "Search codebase"});
-        assert_eq!(extract_tool_label("Agent", &input, &json!(null)), "Search codebase");
+        assert_eq!(
+            extract_tool_label("Agent", &input, &json!(null)),
+            "Search codebase"
+        );
     }
 
     #[test]
     fn label_webfetch_strips_https() {
         let input = json!({"url": "https://example.com/docs"});
-        assert_eq!(extract_tool_label("WebFetch", &input, &json!(null)), "example.com/docs");
+        assert_eq!(
+            extract_tool_label("WebFetch", &input, &json!(null)),
+            "example.com/docs"
+        );
     }
 
     #[test]
     fn label_webfetch_strips_http() {
         let input = json!({"url": "http://example.com"});
-        assert_eq!(extract_tool_label("WebFetch", &input, &json!(null)), "example.com");
+        assert_eq!(
+            extract_tool_label("WebFetch", &input, &json!(null)),
+            "example.com"
+        );
     }
 
     #[test]
     fn label_webfetch_no_protocol_unchanged() {
         let input = json!({"url": "example.com/path"});
-        assert_eq!(extract_tool_label("WebFetch", &input, &json!(null)), "example.com/path");
+        assert_eq!(
+            extract_tool_label("WebFetch", &input, &json!(null)),
+            "example.com/path"
+        );
     }
 
     #[test]
     fn label_websearch_extracts_query() {
         let input = json!({"query": "rust tutorial"});
-        assert_eq!(extract_tool_label("WebSearch", &input, &json!(null)), "rust tutorial");
+        assert_eq!(
+            extract_tool_label("WebSearch", &input, &json!(null)),
+            "rust tutorial"
+        );
     }
 
     #[test]
@@ -191,20 +210,29 @@ mod tests {
     #[test]
     fn label_toolsearch_extracts_query() {
         let input = json!({"query": "select:Read"});
-        assert_eq!(extract_tool_label("ToolSearch", &input, &json!(null)), "select:Read");
+        assert_eq!(
+            extract_tool_label("ToolSearch", &input, &json!(null)),
+            "select:Read"
+        );
     }
 
     #[test]
     fn label_task_create_with_id() {
         let input = json!({"subject": "Add feature"});
         let response = json!({"task": {"id": "1"}});
-        assert_eq!(extract_tool_label("TaskCreate", &input, &response), "#1 Add feature");
+        assert_eq!(
+            extract_tool_label("TaskCreate", &input, &response),
+            "#1 Add feature"
+        );
     }
 
     #[test]
     fn label_task_create_without_id() {
         let input = json!({"subject": "Add feature"});
-        assert_eq!(extract_tool_label("TaskCreate", &input, &json!(null)), "Add feature");
+        assert_eq!(
+            extract_tool_label("TaskCreate", &input, &json!(null)),
+            "Add feature"
+        );
     }
 
     #[test]
@@ -217,13 +245,19 @@ mod tests {
     #[test]
     fn label_task_update_status_and_id() {
         let input = json!({"status": "completed", "taskId": "3"});
-        assert_eq!(extract_tool_label("TaskUpdate", &input, &json!(null)), "completed #3");
+        assert_eq!(
+            extract_tool_label("TaskUpdate", &input, &json!(null)),
+            "completed #3"
+        );
     }
 
     #[test]
     fn label_task_update_status_only() {
         let input = json!({"status": "in_progress"});
-        assert_eq!(extract_tool_label("TaskUpdate", &input, &json!(null)), "in_progress");
+        assert_eq!(
+            extract_tool_label("TaskUpdate", &input, &json!(null)),
+            "in_progress"
+        );
     }
 
     #[test]
@@ -234,7 +268,10 @@ mod tests {
 
     #[test]
     fn label_task_update_empty() {
-        assert_eq!(extract_tool_label("TaskUpdate", &json!({}), &json!(null)), "");
+        assert_eq!(
+            extract_tool_label("TaskUpdate", &json!({}), &json!(null)),
+            ""
+        );
     }
 
     #[test]
@@ -257,25 +294,37 @@ mod tests {
 
     #[test]
     fn label_task_output_empty() {
-        assert_eq!(extract_tool_label("TaskOutput", &json!({}), &json!(null)), "");
+        assert_eq!(
+            extract_tool_label("TaskOutput", &json!({}), &json!(null)),
+            ""
+        );
     }
 
     #[test]
     fn label_send_message() {
         let input = json!({"to": "agent-1"});
-        assert_eq!(extract_tool_label("SendMessage", &input, &json!(null)), "agent-1");
+        assert_eq!(
+            extract_tool_label("SendMessage", &input, &json!(null)),
+            "agent-1"
+        );
     }
 
     #[test]
     fn label_team_create() {
         let input = json!({"team_name": "reviewers"});
-        assert_eq!(extract_tool_label("TeamCreate", &input, &json!(null)), "reviewers");
+        assert_eq!(
+            extract_tool_label("TeamCreate", &input, &json!(null)),
+            "reviewers"
+        );
     }
 
     #[test]
     fn label_notebook_edit() {
         let input = json!({"notebook_path": "/home/user/analysis.ipynb"});
-        assert_eq!(extract_tool_label("NotebookEdit", &input, &json!(null)), "analysis.ipynb");
+        assert_eq!(
+            extract_tool_label("NotebookEdit", &input, &json!(null)),
+            "analysis.ipynb"
+        );
     }
 
     #[test]
@@ -287,48 +336,75 @@ mod tests {
     #[test]
     fn label_ask_user_question() {
         let input = json!({"questions": [{"question": "Which option?"}]});
-        assert_eq!(extract_tool_label("AskUserQuestion", &input, &json!(null)), "Which option?");
+        assert_eq!(
+            extract_tool_label("AskUserQuestion", &input, &json!(null)),
+            "Which option?"
+        );
     }
 
     #[test]
     fn label_ask_user_question_empty_array() {
-        assert_eq!(extract_tool_label("AskUserQuestion", &json!({"questions": []}), &json!(null)), "");
+        assert_eq!(
+            extract_tool_label("AskUserQuestion", &json!({"questions": []}), &json!(null)),
+            ""
+        );
     }
 
     #[test]
     fn label_ask_user_question_no_questions_key() {
-        assert_eq!(extract_tool_label("AskUserQuestion", &json!({}), &json!(null)), "");
+        assert_eq!(
+            extract_tool_label("AskUserQuestion", &json!({}), &json!(null)),
+            ""
+        );
     }
 
     #[test]
     fn label_cron_create() {
         let input = json!({"cron": "*/5 * * * *"});
-        assert_eq!(extract_tool_label("CronCreate", &input, &json!(null)), "*/5 * * * *");
+        assert_eq!(
+            extract_tool_label("CronCreate", &input, &json!(null)),
+            "*/5 * * * *"
+        );
     }
 
     #[test]
     fn label_cron_delete() {
         let input = json!({"id": "abc123"});
-        assert_eq!(extract_tool_label("CronDelete", &input, &json!(null)), "abc123");
+        assert_eq!(
+            extract_tool_label("CronDelete", &input, &json!(null)),
+            "abc123"
+        );
     }
 
     #[test]
     fn label_enter_worktree() {
         let input = json!({"name": "feature-branch"});
-        assert_eq!(extract_tool_label("EnterWorktree", &input, &json!(null)), "feature-branch");
+        assert_eq!(
+            extract_tool_label("EnterWorktree", &input, &json!(null)),
+            "feature-branch"
+        );
     }
 
     #[test]
     fn label_unknown_tool_returns_empty() {
-        assert_eq!(extract_tool_label("UnknownTool", &json!({"anything": "value"}), &json!(null)), "");
+        assert_eq!(
+            extract_tool_label("UnknownTool", &json!({"anything": "value"}), &json!(null)),
+            ""
+        );
     }
 
     #[test]
     fn label_null_inputs() {
         assert_eq!(extract_tool_label("Read", &json!(null), &json!(null)), "");
-        assert_eq!(extract_tool_label("TaskCreate", &json!(null), &json!(null)), "");
+        assert_eq!(
+            extract_tool_label("TaskCreate", &json!(null), &json!(null)),
+            ""
+        );
         assert_eq!(extract_tool_label("Bash", &json!(null), &json!(null)), "");
-        assert_eq!(extract_tool_label("WebFetch", &json!(null), &json!(null)), "");
+        assert_eq!(
+            extract_tool_label("WebFetch", &json!(null), &json!(null)),
+            ""
+        );
     }
 
     #[test]
@@ -338,11 +414,17 @@ mod tests {
 
     #[test]
     fn label_exit_plan_mode_is_unknown() {
-        assert_eq!(extract_tool_label("ExitPlanMode", &json!({}), &json!(null)), "");
+        assert_eq!(
+            extract_tool_label("ExitPlanMode", &json!({}), &json!(null)),
+            ""
+        );
     }
 
     #[test]
     fn label_team_delete_is_unknown() {
-        assert_eq!(extract_tool_label("TeamDelete", &json!({}), &json!(null)), "");
+        assert_eq!(
+            extract_tool_label("TeamDelete", &json!({}), &json!(null)),
+            ""
+        );
     }
 }

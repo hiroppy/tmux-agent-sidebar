@@ -155,9 +155,7 @@ pub fn query_sessions() -> Vec<SessionInfo> {
         let window_id = parts[1];
         let pane_line = parts[6..].join("|");
 
-        let sessions_entry = sessions_map
-            .entry(session_name.to_string())
-            .or_default();
+        let sessions_entry = sessions_map.entry(session_name.to_string()).or_default();
 
         let window = sessions_entry
             .entry(window_id.to_string())
@@ -192,11 +190,7 @@ pub fn query_sessions() -> Vec<SessionInfo> {
                             .map(|(_, idx, pid)| (*idx, *pid))
                             .collect();
                         if !window_pids.is_empty() {
-                            apply_codex_permission_modes(
-                                &mut window.panes,
-                                &window_pids,
-                                &ps_out,
-                            );
+                            apply_codex_permission_modes(&mut window.panes, &window_pids, &ps_out);
                         }
                     }
                 }
@@ -331,7 +325,11 @@ fn parse_subagents(raw: &str) -> Vec<String> {
     if raw.is_empty() {
         return vec![];
     }
-    let items: Vec<&str> = raw.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+    let items: Vec<&str> = raw
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
     // Count occurrences of each type
     let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     for item in &items {
@@ -431,11 +429,7 @@ pub fn query_active_window_panes() -> Vec<(String, bool, String)> {
             if parts.len() < 3 {
                 return None;
             }
-            Some((
-                parts[0].to_string(),
-                parts[1] == "1",
-                parts[2].to_string(),
-            ))
+            Some((parts[0].to_string(), parts[1] == "1", parts[2].to_string()))
         })
         .collect()
 }
@@ -617,8 +611,14 @@ mod tests {
 
     #[test]
     fn sanitize_prompt_filters_system_injected() {
-        assert_eq!(sanitize_prompt("<system-reminder>noise</system-reminder>"), "");
-        assert_eq!(sanitize_prompt("hello <task-notification>abc</task-notification> world"), "");
+        assert_eq!(
+            sanitize_prompt("<system-reminder>noise</system-reminder>"),
+            ""
+        );
+        assert_eq!(
+            sanitize_prompt("hello <task-notification>abc</task-notification> world"),
+            ""
+        );
     }
 
     #[test]
@@ -675,23 +675,23 @@ mod tests {
 
     fn full_fields() -> Vec<&'static str> {
         vec![
-            "1",                   // 0: pane_active
-            "running",             // 1: @pane_status
-            "",                    // 2: @pane_attention
-            "claude",              // 3: @pane_agent
-            "my-agent",            // 4: @pane_name
-            "/home/user/project",  // 5: pane_current_path
-            "fish",                // 6: pane_current_command
-            "",                    // 7: @pane_role
-            "%1",                  // 8: pane_id
-            "fix the bug",         // 9: @pane_prompt
-            "user",                // 10: @pane_prompt_source
-            "1700000000",          // 11: @pane_started_at
-            "",                    // 12: @pane_wait_reason
-            "12345",               // 13: pane_pid
-            "Explore,Plan",        // 14: @pane_subagents
-            "/custom/cwd",         // 15: @pane_cwd
-            "auto",                // 16: @pane_permission_mode
+            "1",                  // 0: pane_active
+            "running",            // 1: @pane_status
+            "",                   // 2: @pane_attention
+            "claude",             // 3: @pane_agent
+            "my-agent",           // 4: @pane_name
+            "/home/user/project", // 5: pane_current_path
+            "fish",               // 6: pane_current_command
+            "",                   // 7: @pane_role
+            "%1",                 // 8: pane_id
+            "fix the bug",        // 9: @pane_prompt
+            "user",               // 10: @pane_prompt_source
+            "1700000000",         // 11: @pane_started_at
+            "",                   // 12: @pane_wait_reason
+            "12345",              // 13: pane_pid
+            "Explore,Plan",       // 14: @pane_subagents
+            "/custom/cwd",        // 15: @pane_cwd
+            "auto",               // 16: @pane_permission_mode
         ]
     }
 
@@ -724,7 +724,8 @@ mod tests {
     #[test]
     fn parse_pane_line_rejects_fewer_than_17_fields() {
         // Only 15 fields — should be rejected
-        let fields_15 = "1|running||claude|name|/path|fish||%1|prompt|1700000000||12345|Explore|/cwd";
+        let fields_15 =
+            "1|running||claude|name|/path|fish||%1|prompt|1700000000||12345|Explore|/cwd";
         assert!(
             parse_pane_line(fields_15).is_none(),
             "15 fields should be rejected"

@@ -195,32 +195,56 @@ mod tests {
         state.focused_pane_id = Some("%5".into());
         state.repo_groups = vec![];
         state.auto_switch_tab();
-        assert_eq!(state.bottom_tab, BottomTab::GitStatus, "step 1: non-agent → Git");
+        assert_eq!(
+            state.bottom_tab,
+            BottomTab::GitStatus,
+            "step 1: non-agent → Git"
+        );
 
         // Step 2: Agent %1 starts, focus moves to it
         state.repo_groups = vec![agent_group("%1")];
         state.focused_pane_id = Some("%1".into());
         state.auto_switch_tab();
-        assert_eq!(state.bottom_tab, BottomTab::Activity, "step 2: new agent → Activity");
+        assert_eq!(
+            state.bottom_tab,
+            BottomTab::Activity,
+            "step 2: new agent → Activity"
+        );
 
         // Step 3: Subsequent refresh (no focus change) → no change
         state.auto_switch_tab();
-        assert_eq!(state.bottom_tab, BottomTab::Activity, "step 3: same focus → no change");
+        assert_eq!(
+            state.bottom_tab,
+            BottomTab::Activity,
+            "step 3: same focus → no change"
+        );
 
         // Step 4: User manually switches to Git
         state.next_bottom_tab();
         state.auto_switch_tab();
-        assert_eq!(state.bottom_tab, BottomTab::GitStatus, "step 4: manual Git → respected");
+        assert_eq!(
+            state.bottom_tab,
+            BottomTab::GitStatus,
+            "step 4: manual Git → respected"
+        );
 
         // Step 5: Focus to non-agent %5
         state.focused_pane_id = Some("%5".into());
         state.auto_switch_tab();
-        assert_eq!(state.bottom_tab, BottomTab::GitStatus, "step 5: non-agent → Git");
+        assert_eq!(
+            state.bottom_tab,
+            BottomTab::GitStatus,
+            "step 5: non-agent → Git"
+        );
 
         // Step 6: Focus back to %1 → restores saved Git pref
         state.focused_pane_id = Some("%1".into());
         state.auto_switch_tab();
-        assert_eq!(state.bottom_tab, BottomTab::GitStatus, "step 6: restore %1's Git pref");
+        assert_eq!(
+            state.bottom_tab,
+            BottomTab::GitStatus,
+            "step 6: restore %1's Git pref"
+        );
     }
 
     // ─── scenario: per-pane tab memory ──────────────────────────
@@ -244,7 +268,11 @@ mod tests {
         state.repo_groups = vec![group];
         state.focused_pane_id = Some("%2".into());
         state.auto_switch_tab();
-        assert_eq!(state.bottom_tab, BottomTab::Activity, "%2: new agent → Activity");
+        assert_eq!(
+            state.bottom_tab,
+            BottomTab::Activity,
+            "%2: new agent → Activity"
+        );
 
         // Focus back to %1 → Git (saved)
         state.focused_pane_id = Some("%1".into());
@@ -254,7 +282,11 @@ mod tests {
         // Focus back to %2 → Activity (saved)
         state.focused_pane_id = Some("%2".into());
         state.auto_switch_tab();
-        assert_eq!(state.bottom_tab, BottomTab::Activity, "%2: restored Activity");
+        assert_eq!(
+            state.bottom_tab,
+            BottomTab::Activity,
+            "%2: restored Activity"
+        );
     }
 
     // ─── scenario: manual tab preserved across refreshes ────────
@@ -274,7 +306,11 @@ mod tests {
         for _ in 0..5 {
             state.auto_switch_tab();
         }
-        assert_eq!(state.bottom_tab, BottomTab::GitStatus, "manual Git survives refreshes");
+        assert_eq!(
+            state.bottom_tab,
+            BottomTab::GitStatus,
+            "manual Git survives refreshes"
+        );
     }
 
     // ─── scenario: new agent in same pane ───────────────────────
@@ -292,7 +328,11 @@ mod tests {
         // Agent starts in %1 (no focus change)
         state.repo_groups = vec![agent_group("%1")];
         state.auto_switch_tab();
-        assert_eq!(state.bottom_tab, BottomTab::Activity, "new agent without focus change");
+        assert_eq!(
+            state.bottom_tab,
+            BottomTab::Activity,
+            "new agent without focus change"
+        );
     }
 
     // ─── scenario: focus to existing agent (no saved pref) ──────
@@ -333,7 +373,11 @@ mod tests {
         state.focused_pane_id = None;
         state.auto_switch_tab();
         // restore_or_default_tab returns early for None, so tab stays
-        assert_eq!(state.bottom_tab, BottomTab::Activity, "None focus → tab unchanged");
+        assert_eq!(
+            state.bottom_tab,
+            BottomTab::Activity,
+            "None focus → tab unchanged"
+        );
     }
 
     // ─── scenario: non-agent pane with other agent present ─────

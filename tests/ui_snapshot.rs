@@ -1109,8 +1109,14 @@ fn snapshot_filter_hides_empty_groups() {
     ]);
     state.agent_filter = AgentFilter::Running;
     let output = render_to_string(&mut state, 30, 25);
-    assert!(output.contains("repo-a"), "group with running should appear");
-    assert!(!output.contains("repo-b"), "group with only idle should be hidden");
+    assert!(
+        output.contains("repo-a"),
+        "group with running should appear"
+    );
+    assert!(
+        !output.contains("repo-b"),
+        "group with only idle should be hidden"
+    );
 }
 
 #[test]
@@ -1138,29 +1144,43 @@ fn snapshot_filter_bar_icon_colors() {
 
     let styled = render_to_styled_string(&mut state, 30, 25);
     // Running icon (●) should use status_running color (114)
-    assert!(styled.contains("fg:114"), "running icon should use status_running color");
+    assert!(
+        styled.contains("fg:114"),
+        "running icon should use status_running color"
+    );
     // Waiting icon with 0 count should use border_inactive color (240)
     // Check that 240 appears (border_inactive is used for zero-count items)
-    assert!(styled.contains("fg:240"), "zero-count icons should use border_inactive color");
+    assert!(
+        styled.contains("fg:240"),
+        "zero-count icons should use border_inactive color"
+    );
 }
 
 #[test]
 fn snapshot_filter_bar_stays_fixed_on_scroll() {
     // Many agents to force scrolling, verify filter bar always present
-    let panes: Vec<_> = (0..6).map(|i| {
-        let mut p = make_pane(AgentType::Claude, PaneStatus::Running);
-        p.pane_id = format!("%{i}");
-        p.pane_active = i == 0;
-        p
-    }).collect();
+    let panes: Vec<_> = (0..6)
+        .map(|i| {
+            let mut p = make_pane(AgentType::Claude, PaneStatus::Running);
+            p.pane_id = format!("%{i}");
+            p.pane_active = i == 0;
+            p
+        })
+        .collect();
     let mut state = make_state_with_groups(vec![make_repo_group("project", panes)]);
     state.agents_scroll.offset = 3; // scroll down
 
     let output = render_to_string(&mut state, 30, 15);
     // Filter bar should always be the first line regardless of scroll
     let first_line = output.lines().next().unwrap();
-    assert!(first_line.contains("All"), "filter bar should be visible after scroll");
-    assert!(first_line.contains("●6"), "filter bar should show correct count");
+    assert!(
+        first_line.contains("All"),
+        "filter bar should be visible after scroll"
+    );
+    assert!(
+        first_line.contains("●6"),
+        "filter bar should show correct count"
+    );
 }
 
 #[test]
@@ -1171,7 +1191,10 @@ fn snapshot_filter_selected_has_underline() {
 
     let styled = render_to_styled_string(&mut state, 30, 25);
     // Selected filter (Running) should have underline
-    assert!(styled.contains("underline"), "selected filter should be underlined");
+    assert!(
+        styled.contains("underline"),
+        "selected filter should be underlined"
+    );
 }
 
 #[test]

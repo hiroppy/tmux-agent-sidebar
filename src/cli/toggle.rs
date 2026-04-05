@@ -34,7 +34,11 @@ pub(crate) fn cmd_toggle(args: &[String]) -> i32 {
             .unwrap_or(15);
         if window_width > 0 && pct > 0 {
             let w = window_width * pct / 100;
-            if w < 1 { "1".to_string() } else { w.to_string() }
+            if w < 1 {
+                "1".to_string()
+            } else {
+                w.to_string()
+            }
         } else {
             sidebar_width_setting
         }
@@ -142,8 +146,8 @@ pub(crate) fn cmd_auto_close(args: &[String]) -> i32 {
         None => return 0,
     };
 
-    let output = tmux::run_tmux(&["list-panes", "-t", window_id, "-F", "#{@pane_role}"])
-        .unwrap_or_default();
+    let output =
+        tmux::run_tmux(&["list-panes", "-t", window_id, "-F", "#{@pane_role}"]).unwrap_or_default();
 
     let non_sidebar = output.lines().filter(|line| *line != "sidebar").count();
 

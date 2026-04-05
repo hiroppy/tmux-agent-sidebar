@@ -91,10 +91,8 @@ impl AppState {
                 // Running/Waiting within that window, the timer is reset.
                 const INACTIVE_GRACE_SECS: u64 = 3;
 
-                let agent_inactive = !matches!(
-                    pane.status,
-                    PaneStatus::Running | PaneStatus::Waiting
-                );
+                let agent_inactive =
+                    !matches!(pane.status, PaneStatus::Running | PaneStatus::Waiting);
 
                 // Update the per-pane inactive timer:
                 // - Agent active → clear the timer
@@ -113,10 +111,15 @@ impl AppState {
                 let grace_expired = self
                     .pane_inactive_since
                     .get(&pane.pane_id)
-                    .map_or(false, |&since| self.now.saturating_sub(since) >= INACTIVE_GRACE_SECS);
+                    .map_or(false, |&since| {
+                        self.now.saturating_sub(since) >= INACTIVE_GRACE_SECS
+                    });
 
-                let decision = if grace_expired && !progress.is_empty() && !progress.all_completed() {
-                    TaskProgressDecision::Dismiss { total: progress.total() }
+                let decision = if grace_expired && !progress.is_empty() && !progress.all_completed()
+                {
+                    TaskProgressDecision::Dismiss {
+                        total: progress.total(),
+                    }
                 } else {
                     classify_task_progress(
                         &progress,

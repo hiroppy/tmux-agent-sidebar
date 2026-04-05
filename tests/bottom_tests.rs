@@ -267,7 +267,10 @@ fn snapshot_git_full_info_ui() {
     assert!(output.contains("-30"));
     assert!(output.contains("main"));
     assert!(output.contains("Unstaged"), "should show Unstaged section");
-    assert!(output.contains("Untracked"), "should show Untracked section");
+    assert!(
+        output.contains("Untracked"),
+        "should show Untracked section"
+    );
 }
 
 #[test]
@@ -338,13 +341,48 @@ fn snapshot_git_more_than_5_files() {
     state.sidebar_focused = true;
     state.git.branch = "main".into();
     state.git.unstaged_files = vec![
-        tmux_agent_sidebar::git::GitFileEntry { status: 'M', name: "a.rs".into(), additions: 100, deletions: 0 },
-        tmux_agent_sidebar::git::GitFileEntry { status: 'M', name: "b.rs".into(), additions: 80, deletions: 0 },
-        tmux_agent_sidebar::git::GitFileEntry { status: 'M', name: "c.rs".into(), additions: 60, deletions: 0 },
-        tmux_agent_sidebar::git::GitFileEntry { status: 'M', name: "d.rs".into(), additions: 40, deletions: 0 },
-        tmux_agent_sidebar::git::GitFileEntry { status: 'M', name: "e.rs".into(), additions: 20, deletions: 0 },
-        tmux_agent_sidebar::git::GitFileEntry { status: 'M', name: "f.rs".into(), additions: 10, deletions: 0 },
-        tmux_agent_sidebar::git::GitFileEntry { status: 'M', name: "g.rs".into(), additions: 5, deletions: 0 },
+        tmux_agent_sidebar::git::GitFileEntry {
+            status: 'M',
+            name: "a.rs".into(),
+            additions: 100,
+            deletions: 0,
+        },
+        tmux_agent_sidebar::git::GitFileEntry {
+            status: 'M',
+            name: "b.rs".into(),
+            additions: 80,
+            deletions: 0,
+        },
+        tmux_agent_sidebar::git::GitFileEntry {
+            status: 'M',
+            name: "c.rs".into(),
+            additions: 60,
+            deletions: 0,
+        },
+        tmux_agent_sidebar::git::GitFileEntry {
+            status: 'M',
+            name: "d.rs".into(),
+            additions: 40,
+            deletions: 0,
+        },
+        tmux_agent_sidebar::git::GitFileEntry {
+            status: 'M',
+            name: "e.rs".into(),
+            additions: 20,
+            deletions: 0,
+        },
+        tmux_agent_sidebar::git::GitFileEntry {
+            status: 'M',
+            name: "f.rs".into(),
+            additions: 10,
+            deletions: 0,
+        },
+        tmux_agent_sidebar::git::GitFileEntry {
+            status: 'M',
+            name: "g.rs".into(),
+            additions: 5,
+            deletions: 0,
+        },
     ];
 
     // Verify file list rendering (scroll to see overflow)

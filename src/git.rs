@@ -58,7 +58,11 @@ pub fn fetch_git_data(path: &str) -> GitData {
         }
     }
 
-    apply_numstat(path, &["diff", "--cached", "--numstat"], &mut data.staged_files);
+    apply_numstat(
+        path,
+        &["diff", "--cached", "--numstat"],
+        &mut data.staged_files,
+    );
     apply_numstat(path, &["diff", "--numstat"], &mut data.unstaged_files);
 
     if let Some(text) = run_git(path, &["remote", "get-url", "origin"]) {
@@ -132,7 +136,11 @@ pub(crate) fn parse_status_short(text: &str, data: &mut GitData) {
         };
         let is_dir = name.ends_with('/');
         let name_trimmed = name.trim_end_matches('/');
-        let mut basename = name_trimmed.rsplit('/').next().unwrap_or(name_trimmed).to_string();
+        let mut basename = name_trimmed
+            .rsplit('/')
+            .next()
+            .unwrap_or(name_trimmed)
+            .to_string();
         if is_dir {
             basename.push('/');
         }

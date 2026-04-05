@@ -1,10 +1,10 @@
 use crate::tmux;
 
+use super::label::extract_tool_label;
 use super::{
     json_str, local_time_hhmm, read_stdin_json, sanitize_tmux_value, set_attention, set_status,
     tmux_pane,
 };
-use super::label::extract_tool_label;
 
 fn set_agent_meta(pane: &str, agent: &str, json: &serde_json::Value) {
     tmux::set_pane_option(pane, "@pane_agent", agent);
@@ -485,7 +485,11 @@ mod tests {
 
         let content = fs::read_to_string(&path).unwrap();
         let lines: Vec<&str> = content.lines().collect();
-        assert_eq!(lines.len(), 1, "newlines in label should not create extra lines");
+        assert_eq!(
+            lines.len(),
+            1,
+            "newlines in label should not create extra lines"
+        );
         let label = lines[0].splitn(3, '|').nth(2).unwrap();
         assert!(!label.contains('|'));
         assert!(!label.contains('\n'));

@@ -21,10 +21,26 @@ fn render_filter_bar<'a>(state: &AppState) -> Line<'a> {
 
     let items: Vec<(AgentFilter, Option<(&str, ratatui::style::Color)>, usize)> = vec![
         (AgentFilter::All, None, all),
-        (AgentFilter::Running, Some((PaneStatus::Running.icon(), theme.status_running)), running),
-        (AgentFilter::Waiting, Some((PaneStatus::Waiting.icon(), theme.status_waiting)), waiting),
-        (AgentFilter::Idle, Some((PaneStatus::Idle.icon(), theme.status_idle)), idle),
-        (AgentFilter::Error, Some((PaneStatus::Error.icon(), theme.status_error)), error),
+        (
+            AgentFilter::Running,
+            Some((PaneStatus::Running.icon(), theme.status_running)),
+            running,
+        ),
+        (
+            AgentFilter::Waiting,
+            Some((PaneStatus::Waiting.icon(), theme.status_waiting)),
+            waiting,
+        ),
+        (
+            AgentFilter::Idle,
+            Some((PaneStatus::Idle.icon(), theme.status_idle)),
+            idle,
+        ),
+        (
+            AgentFilter::Error,
+            Some((PaneStatus::Error.icon(), theme.status_error)),
+            error,
+        ),
     ];
 
     let mut spans: Vec<Span<'a>> = Vec::new();
@@ -49,7 +65,9 @@ fn render_filter_bar<'a>(state: &AppState) -> Line<'a> {
             spans.push(Span::styled(icon.to_string(), icon_style));
 
             let count_style = if is_selected {
-                Style::default().fg(theme.text_active).add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+                Style::default()
+                    .fg(theme.text_active)
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
             } else if count == 0 {
                 Style::default().fg(theme.border_inactive)
             } else {
@@ -58,7 +76,9 @@ fn render_filter_bar<'a>(state: &AppState) -> Line<'a> {
             spans.push(Span::styled(format!("{count}"), count_style));
         } else {
             let style = if is_selected {
-                Style::default().fg(theme.text_active).add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+                Style::default()
+                    .fg(theme.text_active)
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
             } else {
                 Style::default().fg(theme.text_muted)
             };
@@ -300,7 +320,8 @@ fn render_pane_lines<'a>(
     let padding = pad_to(left_dw + elapsed_dw, inner_width);
 
     let mut status_spans = vec![
-        Span::styled("│", border_style), Span::styled(" ", apply_bg(Style::default())),
+        Span::styled("│", border_style),
+        Span::styled(" ", apply_bg(Style::default())),
         Span::styled(icon.to_string(), apply_bg(Style::default().fg(icon_color))),
         Span::styled(
             format!(" {}", label),
@@ -337,9 +358,16 @@ fn render_pane_lines<'a>(
         let truncated = truncate_to_width(&branch, max_branch_width);
         let text = format!("{}{}", prefix, truncated);
         let text_dw = display_width(&text);
-        out.push(bordered_line(border_style, &apply_bg, inner_width,
-            vec![Span::styled(text, apply_bg(Style::default().fg(branch_color)))],
-            text_dw));
+        out.push(bordered_line(
+            border_style,
+            &apply_bg,
+            inner_width,
+            vec![Span::styled(
+                text,
+                apply_bg(Style::default().fg(branch_color)),
+            )],
+            text_dw,
+        ));
     }
 
     // Task progress line
@@ -363,9 +391,16 @@ fn render_pane_lines<'a>(
             );
             let summary_dw = display_width(&summary);
             let task_color = theme.task_progress;
-            out.push(bordered_line(border_style, &apply_bg, inner_width,
-                vec![Span::styled(summary, apply_bg(Style::default().fg(task_color)))],
-                summary_dw));
+            out.push(bordered_line(
+                border_style,
+                &apply_bg,
+                inner_width,
+                vec![Span::styled(
+                    summary,
+                    apply_bg(Style::default().fg(task_color)),
+                )],
+                summary_dw,
+            ));
         }
     }
 
@@ -385,10 +420,16 @@ fn render_pane_lines<'a>(
             let max_sa_w = inner_width.saturating_sub(prefix_dw);
             let truncated_sa = truncate_to_width(&numbered, max_sa_w);
             let text_dw = prefix_dw + display_width(&truncated_sa);
-            out.push(bordered_line(border_style, &apply_bg, inner_width, vec![
-                Span::styled(prefix, apply_bg(Style::default().fg(tree_color))),
-                Span::styled(truncated_sa, apply_bg(Style::default().fg(subagent_color))),
-            ], text_dw));
+            out.push(bordered_line(
+                border_style,
+                &apply_bg,
+                inner_width,
+                vec![
+                    Span::styled(prefix, apply_bg(Style::default().fg(tree_color))),
+                    Span::styled(truncated_sa, apply_bg(Style::default().fg(subagent_color))),
+                ],
+                text_dw,
+            ));
         }
     }
 
@@ -401,9 +442,16 @@ fn render_pane_lines<'a>(
         } else {
             theme.wait_reason
         };
-        out.push(bordered_line(border_style, &apply_bg, inner_width,
-            vec![Span::styled(text, apply_bg(Style::default().fg(reason_color)))],
-            text_dw));
+        out.push(bordered_line(
+            border_style,
+            &apply_bg,
+            inner_width,
+            vec![Span::styled(
+                text,
+                apply_bg(Style::default().fg(reason_color)),
+            )],
+            text_dw,
+        ));
     }
 
     if !pane.prompt.is_empty() {
@@ -424,29 +472,57 @@ fn render_pane_lines<'a>(
             if is_response && li == 0 {
                 let arrow_color = theme.diff_added;
                 let text_dw = 4 + display_width(wl); // "  ▶ " + text
-                out.push(bordered_line(border_style, &apply_bg, inner_width, vec![
-                    Span::styled(
-                        "  ▶ ",
-                        apply_bg(Style::default().fg(arrow_color).add_modifier(Modifier::BOLD)),
-                    ),
-                    Span::styled(wl.clone(), apply_bg(Style::default().fg(prompt_color))),
-                ], text_dw));
+                out.push(bordered_line(
+                    border_style,
+                    &apply_bg,
+                    inner_width,
+                    vec![
+                        Span::styled(
+                            "  ▶ ",
+                            apply_bg(
+                                Style::default()
+                                    .fg(arrow_color)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                        ),
+                        Span::styled(wl.clone(), apply_bg(Style::default().fg(prompt_color))),
+                    ],
+                    text_dw,
+                ));
             } else {
                 let indent = if is_response { "    " } else { "  " };
                 let text = format!("{}{}", indent, wl);
                 let text_dw = display_width(&text);
-                out.push(bordered_line(border_style, &apply_bg, inner_width,
-                    vec![Span::styled(text, apply_bg(Style::default().fg(prompt_color)))],
-                    text_dw));
+                out.push(bordered_line(
+                    border_style,
+                    &apply_bg,
+                    inner_width,
+                    vec![Span::styled(
+                        text,
+                        apply_bg(Style::default().fg(prompt_color)),
+                    )],
+                    text_dw,
+                ));
             }
         }
     } else if matches!(pane.status, PaneStatus::Idle) {
         let text = "  Waiting for prompt…";
         let text_dw = display_width(text);
-        let idle_color = if active { theme.text_active } else { theme.text_muted };
-        out.push(bordered_line(border_style, &apply_bg, inner_width,
-            vec![Span::styled(text.to_string(), apply_bg(Style::default().fg(idle_color)))],
-            text_dw));
+        let idle_color = if active {
+            theme.text_active
+        } else {
+            theme.text_muted
+        };
+        out.push(bordered_line(
+            border_style,
+            &apply_bg,
+            inner_width,
+            vec![Span::styled(
+                text.to_string(),
+                apply_bg(Style::default().fg(idle_color)),
+            )],
+            text_dw,
+        ));
     }
 
     out
@@ -480,7 +556,12 @@ mod tests {
         pane_with_response(permission_mode, status, prompt, false)
     }
 
-    fn pane_with_response(permission_mode: PermissionMode, status: PaneStatus, prompt: &str, is_response: bool) -> PaneInfo {
+    fn pane_with_response(
+        permission_mode: PermissionMode,
+        status: PaneStatus,
+        prompt: &str,
+        is_response: bool,
+    ) -> PaneInfo {
         PaneInfo {
             pane_id: "%1".into(),
             pane_active: false,
@@ -692,7 +773,12 @@ mod tests {
     #[test]
     fn render_pane_lines_response_shows_arrow() {
         let theme = ColorTheme::default();
-        let p = pane_with_response(PermissionMode::Default, PaneStatus::Idle, "Task completed successfully", true);
+        let p = pane_with_response(
+            PermissionMode::Default,
+            PaneStatus::Idle,
+            "Task completed successfully",
+            true,
+        );
         let lines = render_pane_lines(
             &p,
             &PaneGitInfo::default(),
@@ -716,7 +802,12 @@ mod tests {
     fn render_pane_lines_response_uses_char_wrap() {
         let theme = ColorTheme::default();
         // Long response that would word-wrap at spaces but should char-wrap instead
-        let p = pane_with_response(PermissionMode::Default, PaneStatus::Idle, "abcdef ghijk lmnop qrstu vwxyz", true);
+        let p = pane_with_response(
+            PermissionMode::Default,
+            PaneStatus::Idle,
+            "abcdef ghijk lmnop qrstu vwxyz",
+            true,
+        );
         // Width 20: inner_width=17, prefix=4, so wrap at 13 chars
         let lines = render_pane_lines(
             &p,

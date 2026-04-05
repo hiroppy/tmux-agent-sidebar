@@ -155,7 +155,10 @@ mod tests {
 
     #[test]
     fn sanitize_replaces_newlines() {
-        assert_eq!(sanitize_tmux_value("line1\nline2\nline3"), "line1 line2 line3");
+        assert_eq!(
+            sanitize_tmux_value("line1\nline2\nline3"),
+            "line1 line2 line3"
+        );
     }
 
     #[test]

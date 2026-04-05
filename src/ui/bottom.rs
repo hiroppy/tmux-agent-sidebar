@@ -156,10 +156,7 @@ fn render_git_header(state: &AppState, inner_w: usize) -> Vec<Line<'static>> {
         }
 
         // Build PR text (no trailing space — underline should not extend)
-        let pr_text = state
-            .git.pr_number
-            .as_ref()
-            .map(|n| format!("#{n}"));
+        let pr_text = state.git.pr_number.as_ref().map(|n| format!("#{n}"));
 
         // Reserve space: PR text + 1 trailing space for right margin
         let pr_w = pr_text.as_ref().map_or(0, |t| display_width(t) + 1);
@@ -315,7 +312,11 @@ fn render_file_section(
     }
 
     if files.len() > MAX_CHANGED_FILES {
-        lines.push(render_more_indicator(files.len() - MAX_CHANGED_FILES, inner_w, theme));
+        lines.push(render_more_indicator(
+            files.len() - MAX_CHANGED_FILES,
+            inner_w,
+            theme,
+        ));
     }
 
     lines
@@ -348,7 +349,11 @@ fn render_untracked_section(
     }
 
     if files.len() > MAX_CHANGED_FILES {
-        lines.push(render_more_indicator(files.len() - MAX_CHANGED_FILES, inner_w, theme));
+        lines.push(render_more_indicator(
+            files.len() - MAX_CHANGED_FILES,
+            inner_w,
+            theme,
+        ));
     }
 
     lines

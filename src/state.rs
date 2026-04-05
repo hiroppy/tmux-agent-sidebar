@@ -35,12 +35,18 @@ impl AgentFilter {
     ];
 
     pub fn next(self) -> Self {
-        let idx = AgentFilter::VARIANTS.iter().position(|v| *v == self).unwrap_or(0);
+        let idx = AgentFilter::VARIANTS
+            .iter()
+            .position(|v| *v == self)
+            .unwrap_or(0);
         AgentFilter::VARIANTS[(idx + 1) % AgentFilter::VARIANTS.len()]
     }
 
     pub fn prev(self) -> Self {
-        let idx = AgentFilter::VARIANTS.iter().position(|v| *v == self).unwrap_or(0);
+        let idx = AgentFilter::VARIANTS
+            .iter()
+            .position(|v| *v == self)
+            .unwrap_or(0);
         AgentFilter::VARIANTS[(idx + AgentFilter::VARIANTS.len() - 1) % AgentFilter::VARIANTS.len()]
     }
 
@@ -221,10 +227,8 @@ impl AppState {
         // Query tmux directly for the active pane, not through self.sessions
         // which only contains agent panes. This allows activity/git info to
         // be displayed even when the focused pane has no agent running.
-        self.focused_pane_id =
-            tmux::find_active_pane(&self.tmux_pane).map(|(id, _)| id);
+        self.focused_pane_id = tmux::find_active_pane(&self.tmux_pane).map(|(id, _)| id);
     }
-
 
     /// Move agent selection. Returns true if moved, false if at boundary.
     pub fn move_agent_selection(&mut self, delta: isize) -> bool {
@@ -262,7 +266,13 @@ impl AppState {
     }
 
     /// Handle mouse scroll event, routing to agents or bottom panel based on Y position.
-    pub fn handle_mouse_scroll(&mut self, row: u16, term_height: u16, bottom_panel_height: u16, delta: isize) {
+    pub fn handle_mouse_scroll(
+        &mut self,
+        row: u16,
+        term_height: u16,
+        bottom_panel_height: u16,
+        delta: isize,
+    ) {
         let bottom_start = term_height.saturating_sub(bottom_panel_height);
         if row >= bottom_start {
             self.scroll_bottom(delta);
@@ -279,7 +289,7 @@ impl AppState {
         // Calculate x ranges for each filter item
         let mut x = 1usize; // leading space
         let items: Vec<(AgentFilter, usize)> = vec![
-            (AgentFilter::All, 3), // "All"
+            (AgentFilter::All, 3),                                  // "All"
             (AgentFilter::Running, 1 + format!("{running}").len()), // icon + count
             (AgentFilter::Waiting, 1 + format!("{waiting}").len()),
             (AgentFilter::Idle, 1 + format!("{idle}").len()),
@@ -694,8 +704,7 @@ mod tests {
 
         // Pane removed — both dismissed and inactive_since should be cleaned up
         state.repo_groups.clear();
-        state.pane_inactive_since
-            .insert(pane_id.clone(), 100);
+        state.pane_inactive_since.insert(pane_id.clone(), 100);
         state.refresh_task_progress();
 
         assert!(state.pane_task_dismissed.is_empty());
@@ -1309,8 +1318,12 @@ mod tests {
     fn mouse_click_selects_agent_row() {
         let mut state = AppState::new("%99".into());
         state.agent_row_targets = vec![
-            RowTarget { pane_id: "%1".into() },
-            RowTarget { pane_id: "%2".into() },
+            RowTarget {
+                pane_id: "%1".into(),
+            },
+            RowTarget {
+                pane_id: "%2".into(),
+            },
         ];
         // line_to_row: line 0 = group header (None), line 1 = agent 0, line 2 = agent 1
         state.line_to_row = vec![None, Some(0), Some(1)];
@@ -1327,9 +1340,9 @@ mod tests {
     #[test]
     fn mouse_click_on_filter_bar_changes_filter() {
         let mut state = AppState::new("%99".into());
-        state.agent_row_targets = vec![
-            RowTarget { pane_id: "%1".into() },
-        ];
+        state.agent_row_targets = vec![RowTarget {
+            pane_id: "%1".into(),
+        }];
         state.line_to_row = vec![None, Some(0)];
         state.selected_agent_row = 0;
         state.agent_filter = AgentFilter::All;
@@ -1350,8 +1363,12 @@ mod tests {
     fn mouse_click_with_scroll_offset() {
         let mut state = AppState::new("%99".into());
         state.agent_row_targets = vec![
-            RowTarget { pane_id: "%1".into() },
-            RowTarget { pane_id: "%2".into() },
+            RowTarget {
+                pane_id: "%1".into(),
+            },
+            RowTarget {
+                pane_id: "%2".into(),
+            },
         ];
         // 5 lines total, scrolled down by 2
         state.line_to_row = vec![None, Some(0), Some(0), None, Some(1)];
@@ -1365,9 +1382,9 @@ mod tests {
     #[test]
     fn mouse_click_out_of_bounds() {
         let mut state = AppState::new("%99".into());
-        state.agent_row_targets = vec![
-            RowTarget { pane_id: "%1".into() },
-        ];
+        state.agent_row_targets = vec![RowTarget {
+            pane_id: "%1".into(),
+        }];
         state.line_to_row = vec![None, Some(0)];
         state.selected_agent_row = 0;
 
@@ -1507,11 +1524,13 @@ mod tests {
     fn filter_click_with_large_counts() {
         let mut state = AppState::new("%99".into());
         // Add 10 running agents to shift positions
-        let panes: Vec<_> = (0..10).map(|i| {
-            let mut p = test_pane(&format!("%{i}"));
-            p.status = PaneStatus::Running;
-            (p, PaneGitInfo::default())
-        }).collect();
+        let panes: Vec<_> = (0..10)
+            .map(|i| {
+                let mut p = test_pane(&format!("%{i}"));
+                p.status = PaneStatus::Running;
+                (p, PaneGitInfo::default())
+            })
+            .collect();
         state.repo_groups = vec![RepoGroup {
             name: "project".into(),
             has_focus: true,
