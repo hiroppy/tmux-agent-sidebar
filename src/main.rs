@@ -228,6 +228,8 @@ fn run_app(
                                     term_height.saturating_sub(ui::BOTTOM_PANEL_HEIGHT);
                                 if mouse.row < bottom_start {
                                     state.handle_mouse_click(mouse.row, mouse.column);
+                                } else if mouse.row == bottom_start {
+                                    state.handle_bottom_tab_click(mouse.column);
                                 }
                             }
                             MouseEventKind::ScrollDown => {
