@@ -75,70 +75,7 @@ cargo build --release
 
 Reload tmux config with `prefix + r`.
 
-## Usage
-
-### Toggle Sidebar
-
-| Key | Action |
-|---|---|
-| `prefix + e` | Toggle sidebar (default keybinding) |
-
-### Sidebar Navigation
-
-| Key | Action |
-|---|---|
-| `j` / `Down` | Move selection down (filter → agents → bottom panel) |
-| `k` / `Up` | Move selection up |
-| `h` / `Left` | Previous filter (when on filter bar) |
-| `l` / `Right` | Next filter (when on filter bar) |
-| `Enter` | Activate selected pane |
-| `Tab` | Cycle status filter (All → Running → Waiting → Idle → Error) |
-| `Shift+Tab` | Switch bottom panel tab (Activity / Git) |
-| `Esc` | Return focus to agents panel |
-| Mouse click | Click agent to jump to its pane, click filter bar to select filter |
-
-### Status Icons
-
-| Icon | State | Description |
-|---|---|---|
-| `●` | Running | Agent is actively processing (pulsing animation) |
-| `◐` | Waiting | Agent needs user attention (e.g. permission approval) |
-| `○` | Idle | Agent is ready and waiting for input |
-| `✕` | Error | Agent encountered an error |
-
-### Feature Support by Agent
-
-| Feature | Claude Code | Codex | Notes |
-|---|---|---|---|
-| Status tracking (running / idle / error) | :white_check_mark: | :white_check_mark: | Driven by `SessionStart` / `UserPromptSubmit` / `Stop` |
-| Prompt text display | :white_check_mark: | :white_check_mark: | Saved from `UserPromptSubmit` |
-| Response text display (`▶ ...`) | :white_check_mark: | :white_check_mark: | Populated from `Stop` payload |
-| Waiting status + wait reason | :white_check_mark: | :x: | Codex has no `Notification` hook |
-| API failure reason display | :white_check_mark: | :x: | `StopFailure` is wired only for Claude |
-| Permission badge | :white_check_mark: (`plan` / `edit` / `auto` / `!`) | :white_check_mark: (`auto` / `!` only) | Codex badges are inferred from process args |
-| Git branch display | :white_check_mark: | :white_check_mark: | Uses the pane `cwd` |
-| Elapsed time | :white_check_mark: | :white_check_mark: | Since the last prompt |
-| Task progress | :white_check_mark: | :x: | Requires `PostToolUse` |
-| Subagent display | :white_check_mark: | :x: | Requires `SubagentStart` / `SubagentStop` |
-| Activity log | :white_check_mark: | :x: | Requires `PostToolUse` |
-
-## Accessing Agent Status from Scripts
-
-The sidebar stores agent status in tmux pane options, which you can read from your own scripts or status bar:
-
-```sh
-# Get a specific pane's agent status
-tmux show -t "$pane_id" -pv @pane_status
-# Returns: running / waiting / idle / error / (empty)
-
-# Get agent type
-tmux show -t "$pane_id" -pv @pane_agent
-# Returns: claude / codex / (empty)
-```
-
-This is useful for integrating agent status into your tmux status bar, custom scripts, or notifications.
-
-## Setting Up Agent Hooks
+### Setting Up Agent Hooks
 
 The sidebar receives status updates through agent hooks. Add the following hook configurations to your agent settings.
 
@@ -280,6 +217,74 @@ Create or edit `~/.codex/hooks.json`:
 
 </details>
 
+## Usage
+
+### Toggle Sidebar
+
+| Key | Action |
+|---|---|
+| `prefix + e` | Toggle sidebar (default keybinding) |
+
+### Sidebar Navigation
+
+| Key | Action |
+|---|---|
+| `j` / `Down` | Move selection down (filter → agents → bottom panel) |
+| `k` / `Up` | Move selection up |
+| `h` / `Left` | Previous filter (when on filter bar) |
+| `l` / `Right` | Next filter (when on filter bar) |
+| `Enter` | Activate selected pane |
+| `Tab` | Cycle status filter (All → Running → Waiting → Idle → Error) |
+| `Shift+Tab` | Switch bottom panel tab (Activity / Git) |
+| `Esc` | Return focus to agents panel |
+| Mouse click | Click agent to jump to its pane, click filter bar to select filter |
+
+### Status Icons
+
+| Icon | State | Description |
+|---|---|---|
+| `●` | Running | Agent is actively processing (pulsing animation) |
+| `◐` | Waiting | Agent needs user attention (e.g. permission approval) |
+| `○` | Idle | Agent is ready and waiting for input |
+| `✕` | Error | Agent encountered an error |
+
+### Feature Support by Agent
+
+| Feature | Claude Code | Codex | Notes |
+|---|---|---|---|
+| Status tracking (running / idle / error) | :white_check_mark: | :white_check_mark: | Driven by `SessionStart` / `UserPromptSubmit` / `Stop` |
+| Prompt text display | :white_check_mark: | :white_check_mark: | Saved from `UserPromptSubmit` |
+| Response text display (`▶ ...`) | :white_check_mark: | :white_check_mark: | Populated from `Stop` payload |
+| Waiting status + wait reason | :white_check_mark: | :x: | Codex has no `Notification` hook |
+| API failure reason display | :white_check_mark: | :x: | `StopFailure` is wired only for Claude |
+| Permission badge | :white_check_mark: (`plan` / `edit` / `auto` / `!`) | :white_check_mark: (`auto` / `!` only) | Codex badges are inferred from process args |
+| Git branch display | :white_check_mark: | :white_check_mark: | Uses the pane `cwd` |
+| Elapsed time | :white_check_mark: | :white_check_mark: | Since the last prompt |
+| Task progress | :white_check_mark: | :x: | Requires `PostToolUse` |
+| Subagent display | :white_check_mark: | :x: | Requires `SubagentStart` / `SubagentStop` |
+| Activity log | :white_check_mark: | :x: | Requires `PostToolUse` |
+
+### Known Limitations
+
+- **Waiting status persists after tool approval (Claude Code)** — After approving a permission prompt, the status stays `waiting` until the next event. This is a limitation of the Claude Code hook system.
+- **No waiting status for Codex** — Codex does not support the `Notification` hook, so the `waiting` state is unavailable.
+
+## Accessing Agent Status from Scripts
+
+The sidebar stores agent status in tmux pane options, which you can read from your own scripts or status bar:
+
+```sh
+# Get a specific pane's agent status
+tmux show -t "$pane_id" -pv @pane_status
+# Returns: running / waiting / idle / error / (empty)
+
+# Get agent type
+tmux show -t "$pane_id" -pv @pane_agent
+# Returns: claude / codex / (empty)
+```
+
+This is useful for integrating agent status into your tmux status bar, custom scripts, or notifications.
+
 ## Customization
 
 All options can be set **before** loading the plugin in your `tmux.conf`:
@@ -310,11 +315,6 @@ set -g @sidebar_activity_lines 8         # max activity log entries (default: 8)
 
 run-shell ~/.tmux/plugins/tmux-agent-sidebar/tmux-agent-sidebar.tmux
 ```
-
-## Known Limitations
-
-- **Waiting status persists after tool approval (Claude Code)** — After approving a permission prompt, the status stays `waiting` until the next event. This is a limitation of the Claude Code hook system.
-- **No waiting status for Codex** — Codex does not support the `Notification` hook, so the `waiting` state is unavailable.
 
 ## Uninstalling
 
