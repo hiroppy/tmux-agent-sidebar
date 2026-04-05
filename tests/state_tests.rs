@@ -463,3 +463,59 @@ fn test_git_tab_equality_check() {
     let tab2 = BottomTab::Activity;
     assert!(tab2 != BottomTab::GitStatus);
 }
+
+// ─── State: global sync → rebuild consistency Tests ─────────────
+
+#[test]
+fn test_filter_change_rebuilds_row_targets() {
+    use tmux_agent_sidebar::state::AgentFilter;
+
+    let running_pane = PaneInfo {
+        pane_id: "%1".into(),
+        status: PaneStatus::Running,
+        ..make_pane(AgentType::Claude, PaneStatus::Running)
+    };
+    let idle_pane = PaneInfo {
+        pane_id: "%2".into(),
+        status: PaneStatus::Idle,
+        ..make_pane(AgentType::Claude, PaneStatus::Idle)
+    };
+    let mut state = make_state(vec![]);
+    state.repo_groups = vec![make_repo_group(
+        "project",
+        vec![running_pane, idle_pane],
+    )];
+
+    // All filter shows both
+    state.agent_filter = AgentFilter::All;
+    state.rebuild_row_targets();
+    assert_eq!(state.agent_row_targets.len(), 2);
+
+    // Simulates sync_global_state setting filter to Running
+    state.agent_filter = AgentFilter::Running;
+    state.rebuild_row_targets();
+    assert_eq!(state.agent_row_targets.len(), 1);
+    assert_eq!(state.agent_row_targets[0].pane_id, "%1");
+
+    // Simulates sync_global_state setting filter to Idle
+    state.agent_filter = AgentFilter::Idle;
+    state.rebuild_row_targets();
+    assert_eq!(state.agent_row_targets.len(), 1);
+    assert_eq!(state.agent_row_targets[0].pane_id, "%2");
+}
+
+#[test]
+fn test_cursor_sync_clamped_by_rebuild() {
+    use tmux_agent_sidebar::state::AgentFilter;
+
+    let pane = make_pane(AgentType::Claude, PaneStatus::Running);
+    let mut state = make_state(vec![]);
+    state.repo_groups = vec![make_repo_group("project", vec![pane])];
+
+    // Simulates sync_global_state setting cursor beyond bounds
+    state.selected_agent_row = 5;
+    state.agent_filter = AgentFilter::All;
+    state.rebuild_row_targets();
+    // Should be clamped to last valid index
+    assert_eq!(state.selected_agent_row, 0);
+}

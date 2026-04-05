@@ -23,6 +23,13 @@ fn clear_run_state(pane: &str) {
     tmux::unset_pane_option(pane, "@pane_wait_reason");
 }
 
+/// Check if a prompt is a system-injected message (not a real user prompt).
+fn is_system_message(s: &str) -> bool {
+    s.contains("<task-notification>")
+        || s.contains("<system-reminder>")
+        || s.contains("<task-")
+}
+
 fn clear_all_meta(pane: &str) {
     for key in &[
         "@pane_agent",
@@ -153,7 +160,6 @@ pub(crate) fn cmd_hook(args: &[String]) -> i32 {
                 tmux::set_pane_option(&pane, "@pane_prompt", &msg);
                 tmux::set_pane_option(&pane, "@pane_prompt_source", "response");
             }
-            tmux::unset_pane_option(&pane, "@pane_subagents");
             clear_run_state(&pane);
             set_status(&pane, "idle");
 
@@ -165,7 +171,6 @@ pub(crate) fn cmd_hook(args: &[String]) -> i32 {
             set_agent_meta(&pane, agent, &input);
             set_attention(&pane, "clear");
             clear_run_state(&pane);
-            tmux::unset_pane_option(&pane, "@pane_subagents");
             let error_type = json_str(&input, "error");
             let error_details = json_str(&input, "error_details");
             let reason = if !error_type.is_empty() {
@@ -208,7 +213,7 @@ pub(crate) fn cmd_hook(args: &[String]) -> i32 {
             set_attention(&pane, "clear");
             set_status(&pane, "running");
             let prompt = json_str(&input, "prompt");
-            if !prompt.is_empty() {
+            if !prompt.is_empty() && !is_system_message(prompt) {
                 let p = sanitize_tmux_value(prompt);
                 tmux::set_pane_option(&pane, "@pane_prompt", &p);
                 tmux::set_pane_option(&pane, "@pane_prompt_source", "user");
@@ -590,5 +595,74 @@ mod tests {
         let content = fs::read_to_string(&path).unwrap();
         assert!(content.contains("|TaskCreate|#42 Fix bug"));
         fs::remove_file(&path).ok();
+    }
+
+    // ─── is_system_message tests ────────────────────────────────────
+
+    #[test]
+    fn system_message_task_notification() {
+        assert!(is_system_message(
+            "<task-notification><task-id>abc</task-id></task-notification>"
+        ));
+    }
+
+    #[test]
+    fn system_message_system_reminder() {
+        assert!(is_system_message(
+            "<system-reminder>some reminder</system-reminder>"
+        ));
+    }
+
+    #[test]
+    fn system_message_task_prefix() {
+        assert!(is_system_message("<task-id>abc</task-id>"));
+    }
+
+    #[test]
+    fn system_message_normal_prompt() {
+        assert!(!is_system_message("fix the bug"));
+    }
+
+    #[test]
+    fn system_message_empty() {
+        assert!(!is_system_message(""));
+    }
+
+    #[test]
+    fn system_message_mixed_content() {
+        assert!(is_system_message(
+            "hello <system-reminder>noise</system-reminder> world"
+        ));
+    }
+
+    // ─── subagent lifecycle tests ───────────────────────────────────
+
+    #[test]
+    fn subagent_lifecycle_two_start_one_stop_leaves_one() {
+        // Simulate: two subagents start, then one stops
+        let list = append_subagent("", "Explore");
+        assert_eq!(list, "Explore");
+
+        let list = append_subagent(&list, "Explore");
+        assert_eq!(list, "Explore,Explore");
+
+        // First one completes
+        let remaining = remove_last_subagent(&list, "Explore").unwrap();
+        assert_eq!(remaining, "Explore");
+
+        // Second one completes
+        let remaining = remove_last_subagent(&remaining, "Explore").unwrap();
+        assert_eq!(remaining, "");
+    }
+
+    #[test]
+    fn subagent_lifecycle_mixed_types() {
+        let list = append_subagent("", "Explore");
+        let list = append_subagent(&list, "Plan");
+        assert_eq!(list, "Explore,Plan");
+
+        // Plan completes, Explore still running
+        let remaining = remove_last_subagent(&list, "Plan").unwrap();
+        assert_eq!(remaining, "Explore");
     }
 }

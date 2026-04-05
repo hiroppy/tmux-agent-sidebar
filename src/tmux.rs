@@ -330,23 +330,10 @@ fn parse_subagents(raw: &str) -> Vec<String> {
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .collect();
-    // Count occurrences of each type
-    let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
-    for item in &items {
-        *counts.entry(item).or_insert(0) += 1;
-    }
-    // Assign numbers for duplicates
-    let mut seen: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     items
         .iter()
         .map(|item| {
-            let n = seen.entry(item).or_insert(0);
-            *n += 1;
-            if counts[item] > 1 {
-                format!("{} #{}", item, n)
-            } else {
-                item.to_string()
-            }
+            item.to_string()
         })
         .collect()
 }
@@ -659,11 +646,11 @@ mod tests {
     }
 
     #[test]
-    fn parse_subagents_numbered() {
-        // Duplicate types get sequential numbers
+    #[test]
+    fn parse_subagents_duplicates() {
         assert_eq!(
             parse_subagents("Explore,Explore,Plan"),
-            vec!["Explore #1", "Explore #2", "Plan"]
+            vec!["Explore", "Explore", "Plan"]
         );
     }
 

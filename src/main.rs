@@ -225,10 +225,8 @@ fn run_app(
         }
 
         let sigusr1 = NEEDS_REFRESH.swap(false, Ordering::Relaxed);
-        if sigusr1 {
-            state.sync_global_state();
-        }
         if sigusr1 || last_refresh.elapsed() >= refresh_interval {
+            state.sync_global_state();
             state.refresh();
             git_tab_active.store(state.bottom_tab == BottomTab::GitStatus, Ordering::Relaxed);
             last_refresh = std::time::Instant::now();
