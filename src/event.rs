@@ -242,7 +242,9 @@ mod tests {
             agent_id: None,
         };
         match event {
-            AgentEvent::SessionStart { worktree, agent_id, .. } => {
+            AgentEvent::SessionStart {
+                worktree, agent_id, ..
+            } => {
                 assert!(worktree.is_none());
                 assert!(agent_id.is_none());
             }
@@ -266,7 +268,9 @@ mod tests {
             agent_id: Some("abc-123".into()),
         };
         match event {
-            AgentEvent::SessionStart { worktree, agent_id, .. } => {
+            AgentEvent::SessionStart {
+                worktree, agent_id, ..
+            } => {
                 let wt = worktree.unwrap();
                 assert_eq!(wt.original_repo_dir, "/home/user/repo");
                 assert_eq!(agent_id.unwrap(), "abc-123");
@@ -288,6 +292,80 @@ mod tests {
                 Some(AgentEvent::SessionEnd),
                 "{agent_name} should handle session-end"
             );
+        }
+    }
+
+    #[test]
+    fn claude_permission_denied_round_trip() {
+        let adapter = resolve_adapter("claude").unwrap();
+        let input = json!({
+            "cwd": "/tmp",
+            "permission_mode": "auto",
+            "tool_name": "Bash",
+            "agent_id": "sub-1"
+        });
+        let event = adapter.parse("permission-denied", &input).unwrap();
+        match event {
+            AgentEvent::PermissionDenied {
+                agent,
+                permission_mode,
+                agent_id,
+                ..
+            } => {
+                assert_eq!(agent, "claude");
+                assert_eq!(permission_mode, "auto");
+                assert_eq!(agent_id, Some("sub-1".into()));
+            }
+            other => panic!("expected PermissionDenied, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn claude_cwd_changed_round_trip() {
+        let adapter = resolve_adapter("claude").unwrap();
+        let input = json!({"cwd": "/new/dir"});
+        let event = adapter.parse("cwd-changed", &input).unwrap();
+        match event {
+            AgentEvent::CwdChanged {
+                cwd,
+                worktree,
+                agent_id,
+            } => {
+                assert_eq!(cwd, "/new/dir");
+                assert!(worktree.is_none());
+                assert!(agent_id.is_none());
+            }
+            other => panic!("expected CwdChanged, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn codex_ignores_new_events() {
+        let adapter = resolve_adapter("codex").unwrap();
+        assert!(adapter.parse("permission-denied", &json!({})).is_none());
+        assert!(adapter.parse("cwd-changed", &json!({})).is_none());
+    }
+
+    #[test]
+    fn claude_stop_with_worktree() {
+        let adapter = resolve_adapter("claude").unwrap();
+        let input = json!({
+            "cwd": "/tmp/wt",
+            "permission_mode": "auto",
+            "worktree": {
+                "name": "wt",
+                "path": "/tmp/wt",
+                "branch": "feat",
+                "originalRepoDir": "/home/user/repo"
+            }
+        });
+        let event = adapter.parse("stop", &input).unwrap();
+        match event {
+            AgentEvent::Stop { worktree, .. } => {
+                let wt = worktree.unwrap();
+                assert_eq!(wt.original_repo_dir, "/home/user/repo");
+            }
+            other => panic!("expected Stop, got {:?}", other),
         }
     }
 }
