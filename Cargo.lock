@@ -598,7 +598,7 @@ dependencies = [
 
 [[package]]
 name = "tmux-agent-sidebar"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "crossterm 0.29.0",
  "indexmap",
