@@ -1,4 +1,4 @@
-use crate::event::{AgentEvent, resolve_adapter};
+use crate::event::{AgentEvent, WorktreeInfo, resolve_adapter};
 use crate::tmux;
 
 use super::label::extract_tool_label;
@@ -13,12 +13,31 @@ fn should_update_cwd(current_subagents: &str) -> bool {
     current_subagents.is_empty()
 }
 
-fn set_agent_meta(pane: &str, agent: &str, cwd: &str, permission_mode: &str) {
+/// Resolve the effective cwd for pane metadata.
+/// When a worktree is active, prefer `original_repo_dir` so the sidebar
+/// groups the pane under the original repository, not the worktree path.
+fn resolve_cwd<'a>(raw_cwd: &'a str, worktree: &'a Option<WorktreeInfo>) -> &'a str {
+    if let Some(wt) = worktree
+        && !wt.original_repo_dir.is_empty()
+    {
+        return &wt.original_repo_dir;
+    }
+    raw_cwd
+}
+
+fn set_agent_meta(
+    pane: &str,
+    agent: &str,
+    cwd: &str,
+    permission_mode: &str,
+    worktree: &Option<WorktreeInfo>,
+) {
     tmux::set_pane_option(pane, "@pane_agent", agent);
     if !cwd.is_empty() {
+        let effective_cwd = resolve_cwd(cwd, worktree);
         let current_subagents = tmux::get_pane_option_value(pane, "@pane_subagents");
         if should_update_cwd(&current_subagents) {
-            tmux::set_pane_option(pane, "@pane_cwd", cwd);
+            tmux::set_pane_option(pane, "@pane_cwd", effective_cwd);
         }
     }
     if !permission_mode.is_empty() {
@@ -141,9 +160,10 @@ fn handle_event(pane: &str, event: AgentEvent) -> i32 {
             agent,
             cwd,
             permission_mode,
+            worktree,
             ..
         } => {
-            set_agent_meta(pane, &agent, &cwd, &permission_mode);
+            set_agent_meta(pane, &agent, &cwd, &permission_mode, &worktree);
             set_attention(pane, "clear");
             clear_run_state(pane);
             tmux::unset_pane_option(pane, "@pane_prompt");
@@ -163,9 +183,10 @@ fn handle_event(pane: &str, event: AgentEvent) -> i32 {
             cwd,
             permission_mode,
             prompt,
+            worktree,
             ..
         } => {
-            set_agent_meta(pane, &agent, &cwd, &permission_mode);
+            set_agent_meta(pane, &agent, &cwd, &permission_mode, &worktree);
             set_attention(pane, "clear");
             set_status(pane, "running");
             if !prompt.is_empty() && !is_system_message(&prompt) {
@@ -183,9 +204,10 @@ fn handle_event(pane: &str, event: AgentEvent) -> i32 {
             permission_mode,
             wait_reason,
             meta_only,
+            worktree,
             ..
         } => {
-            set_agent_meta(pane, &agent, &cwd, &permission_mode);
+            set_agent_meta(pane, &agent, &cwd, &permission_mode, &worktree);
             if meta_only {
                 return 0;
             }
@@ -201,9 +223,10 @@ fn handle_event(pane: &str, event: AgentEvent) -> i32 {
             permission_mode,
             last_message,
             response,
+            worktree,
             ..
         } => {
-            set_agent_meta(pane, &agent, &cwd, &permission_mode);
+            set_agent_meta(pane, &agent, &cwd, &permission_mode, &worktree);
             set_attention(pane, "clear");
             if !last_message.is_empty() {
                 let msg = sanitize_tmux_value(&last_message);
@@ -221,9 +244,10 @@ fn handle_event(pane: &str, event: AgentEvent) -> i32 {
             cwd,
             permission_mode,
             error,
+            worktree,
             ..
         } => {
-            set_agent_meta(pane, &agent, &cwd, &permission_mode);
+            set_agent_meta(pane, &agent, &cwd, &permission_mode, &worktree);
             set_attention(pane, "clear");
             clear_run_state(pane);
             if !error.is_empty() {
@@ -255,11 +279,30 @@ fn handle_event(pane: &str, event: AgentEvent) -> i32 {
         } => {
             return handle_activity_log(pane, &tool_name, &tool_input, &tool_response);
         }
-        AgentEvent::PermissionDenied { .. } => {
-            // Will be implemented in Task 4
+        AgentEvent::PermissionDenied {
+            agent,
+            cwd,
+            permission_mode,
+            worktree,
+            ..
+        } => {
+            set_agent_meta(pane, &agent, &cwd, &permission_mode, &worktree);
+            set_status(pane, "waiting");
+            set_attention(pane, "notification");
+            tmux::set_pane_option(pane, "@pane_wait_reason", "permission_denied");
         }
-        AgentEvent::CwdChanged { .. } => {
-            // Will be implemented in Task 4
+        AgentEvent::CwdChanged {
+            cwd,
+            worktree,
+            ..
+        } => {
+            if !cwd.is_empty() {
+                let effective = resolve_cwd(&cwd, &worktree);
+                let current_subagents = tmux::get_pane_option_value(pane, "@pane_subagents");
+                if should_update_cwd(&current_subagents) {
+                    tmux::set_pane_option(pane, "@pane_cwd", effective);
+                }
+            }
         }
     }
     0
@@ -312,6 +355,35 @@ mod tests {
     use serde_json::Value;
     use serde_json::json;
     use std::fs;
+
+    // ─── resolve_cwd tests ─────────────────────────────────────────
+
+    #[test]
+    fn resolve_cwd_prefers_worktree_original_repo_dir() {
+        let wt = crate::event::WorktreeInfo {
+            name: "feat".into(),
+            path: "/tmp/wt".into(),
+            branch: "feat".into(),
+            original_repo_dir: "/home/user/repo".into(),
+        };
+        assert_eq!(resolve_cwd("/tmp/wt/src", &Some(wt)), "/home/user/repo");
+    }
+
+    #[test]
+    fn resolve_cwd_falls_back_to_raw_cwd() {
+        assert_eq!(resolve_cwd("/tmp/project", &None), "/tmp/project");
+    }
+
+    #[test]
+    fn resolve_cwd_worktree_empty_original_falls_back() {
+        let wt = crate::event::WorktreeInfo {
+            name: "feat".into(),
+            path: "/tmp/wt".into(),
+            branch: "feat".into(),
+            original_repo_dir: "".into(),
+        };
+        assert_eq!(resolve_cwd("/tmp/wt/src", &Some(wt)), "/tmp/wt/src");
+    }
 
     // ─── append_subagent tests ──────────────────────────────────────
 
