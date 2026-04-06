@@ -9,6 +9,7 @@ pub struct PaneGitInfo {
     pub repo_root: Option<String>,
     pub branch: Option<String>,
     pub is_worktree: bool,
+    pub worktree_name: Option<String>,
 }
 
 /// A group of panes working in the same repository (or directory).
@@ -73,6 +74,7 @@ pub fn resolve_pane_git_info(path: &str) -> PaneGitInfo {
         repo_root,
         branch,
         is_worktree,
+        worktree_name: None,
     }
 }
 
@@ -86,10 +88,21 @@ pub fn group_panes_by_repo(sessions: &[crate::tmux::SessionInfo]) -> Vec<RepoGro
     for session in sessions {
         for window in &session.windows {
             for pane in &window.panes {
-                let git_info = git_cache
+                let mut git_info = git_cache
                     .entry(pane.path.clone())
                     .or_insert_with(|| resolve_pane_git_info(&pane.path))
                     .clone();
+
+                // Override with hook-provided worktree info (Claude Code provides this;
+                // Codex does not, so git-command detection remains as fallback)
+                if !pane.worktree_name.is_empty() {
+                    git_info.worktree_name = Some(pane.worktree_name.clone());
+                    git_info.is_worktree = true;
+                }
+                if !pane.worktree_branch.is_empty() {
+                    git_info.branch = Some(pane.worktree_branch.clone());
+                    git_info.is_worktree = true;
+                }
 
                 let group_key = git_info
                     .repo_root
@@ -202,6 +215,8 @@ mod tests {
             permission_mode: crate::tmux::PermissionMode::Default,
             subagents: vec![],
             pane_pid: None,
+            worktree_name: String::new(),
+            worktree_branch: String::new(),
         }
     }
 

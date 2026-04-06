@@ -585,6 +585,7 @@ fn test_branch_color_in_agent_panel() {
                 repo_root: Some("/home/user/project".into()),
                 branch: Some("feature/cool-feature".into()),
                 is_worktree: false,
+                worktree_name: None,
             },
         )],
     }];

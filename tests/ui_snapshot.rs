@@ -170,6 +170,8 @@ fn snapshot_two_agents_same_window_ui() {
         permission_mode: tmux_agent_sidebar::tmux::PermissionMode::Default,
         subagents: vec![],
         pane_pid: None,
+        worktree_name: String::new(),
+        worktree_branch: String::new(),
     };
     let pane2 = PaneInfo {
         pane_id: "%2".into(),
@@ -185,6 +187,8 @@ fn snapshot_two_agents_same_window_ui() {
         permission_mode: tmux_agent_sidebar::tmux::PermissionMode::Default,
         subagents: vec![],
         pane_pid: None,
+        worktree_name: String::new(),
+        worktree_branch: String::new(),
     };
 
     let mut state = make_state(vec![SessionInfo {
@@ -609,6 +613,7 @@ fn snapshot_worktree_branch_ui() {
         repo_root: Some("/home/user/project".into()),
         branch: Some("feature/sidebar".into()),
         is_worktree: true,
+        worktree_name: None,
     };
     let mut state = make_state_with_groups(vec![tmux_agent_sidebar::group::RepoGroup {
         name: "project".into(),
@@ -640,6 +645,7 @@ fn snapshot_worktree_long_branch_truncated_ui() {
         repo_root: Some("/home/user/project".into()),
         branch: Some("feature/very-long-branch-name-that-overflows".into()),
         is_worktree: true,
+        worktree_name: None,
     };
     let mut state = make_state_with_groups(vec![tmux_agent_sidebar::group::RepoGroup {
         name: "project".into(),
@@ -737,6 +743,7 @@ fn snapshot_all_elements_combined_ui() {
         repo_root: Some("/home/user/project".into()),
         branch: Some("main".into()),
         is_worktree: false,
+        worktree_name: None,
     };
 
     let mut state = make_state_with_groups(vec![tmux_agent_sidebar::group::RepoGroup {

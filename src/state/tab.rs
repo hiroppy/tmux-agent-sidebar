@@ -145,6 +145,8 @@ mod tests {
             permission_mode: PermissionMode::Default,
             subagents: vec![],
             pane_pid: None,
+            worktree_name: String::new(),
+            worktree_branch: String::new(),
         }
     }
 

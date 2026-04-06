@@ -844,6 +844,7 @@ fn snapshot_branch_truncated_ui() {
                 repo_root: Some("/home/user/dotfiles".into()),
                 branch: Some("feature/tmux-sidebar-dashboard-refactor".into()),
                 is_worktree: false,
+                worktree_name: None,
             },
         )],
     }];

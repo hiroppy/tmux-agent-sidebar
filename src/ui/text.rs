@@ -39,6 +39,7 @@ pub fn wait_reason_label(reason: &str) -> String {
         "auth_success" => "auth success".into(),
         "elicitation_dialog" => "waiting for selection".into(),
         "rate_limit" => "rate limit".into(),
+        "permission_denied" => "permission denied".into(),
         _ => {
             if reason.is_empty() {
                 String::new()
@@ -53,7 +54,10 @@ pub fn branch_label(git_info: &crate::group::PaneGitInfo) -> String {
     match &git_info.branch {
         Some(branch) => {
             if git_info.is_worktree {
-                format!("+ {}", branch)
+                match &git_info.worktree_name {
+                    Some(name) if name != branch => format!("+ {}: {}", name, branch),
+                    _ => format!("+ {}", branch),
+                }
             } else {
                 branch.clone()
             }
@@ -365,6 +369,13 @@ mod tests {
         assert_eq!(wait_reason_label(""), "");
     }
 
+    // ─── wait_reason_label: permission_denied ──────────────────────
+
+    #[test]
+    fn wait_reason_permission_denied() {
+        assert_eq!(wait_reason_label("permission_denied"), "permission denied");
+    }
+
     // ─── branch_label ──────────────────────────────────────────────
 
     #[test]
@@ -374,6 +385,7 @@ mod tests {
             repo_root: Some("/repo".into()),
             branch: Some("main".into()),
             is_worktree: false,
+            worktree_name: None,
         };
         assert_eq!(branch_label(&info), "main");
     }
@@ -385,6 +397,7 @@ mod tests {
             repo_root: Some("/repo".into()),
             branch: Some("fix/typo".into()),
             is_worktree: true,
+            worktree_name: None,
         };
         assert_eq!(branch_label(&info), "+ fix/typo");
     }
@@ -394,5 +407,38 @@ mod tests {
         use crate::group::PaneGitInfo;
         let info = PaneGitInfo::default();
         assert_eq!(branch_label(&info), "");
+    }
+
+    #[test]
+    fn branch_label_worktree_with_name() {
+        let info = crate::group::PaneGitInfo {
+            branch: Some("feat/auth".into()),
+            is_worktree: true,
+            worktree_name: Some("auth-wt".into()),
+            ..Default::default()
+        };
+        assert_eq!(branch_label(&info), "+ auth-wt: feat/auth");
+    }
+
+    #[test]
+    fn branch_label_worktree_name_same_as_branch() {
+        let info = crate::group::PaneGitInfo {
+            branch: Some("feat/auth".into()),
+            is_worktree: true,
+            worktree_name: Some("feat/auth".into()),
+            ..Default::default()
+        };
+        assert_eq!(branch_label(&info), "+ feat/auth");
+    }
+
+    #[test]
+    fn branch_label_worktree_no_name() {
+        let info = crate::group::PaneGitInfo {
+            branch: Some("main".into()),
+            is_worktree: true,
+            worktree_name: None,
+            ..Default::default()
+        };
+        assert_eq!(branch_label(&info), "+ main");
     }
 }

@@ -113,6 +113,8 @@ pub fn make_pane(agent: AgentType, status: PaneStatus) -> PaneInfo {
         permission_mode: tmux_agent_sidebar::tmux::PermissionMode::Default,
         subagents: vec![],
         pane_pid: None,
+        worktree_name: String::new(),
+        worktree_branch: String::new(),
     }
 }
 

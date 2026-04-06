@@ -43,6 +43,18 @@ fn set_agent_meta(
     if !permission_mode.is_empty() {
         tmux::set_pane_option(pane, "@pane_permission_mode", permission_mode);
     }
+    // Store hook-provided worktree metadata for TUI
+    if let Some(wt) = worktree {
+        if !wt.name.is_empty() {
+            tmux::set_pane_option(pane, "@pane_worktree_name", &wt.name);
+        }
+        if !wt.branch.is_empty() {
+            tmux::set_pane_option(pane, "@pane_worktree_branch", &wt.branch);
+        }
+    } else {
+        tmux::unset_pane_option(pane, "@pane_worktree_name");
+        tmux::unset_pane_option(pane, "@pane_worktree_branch");
+    }
 }
 
 fn clear_run_state(pane: &str) {
@@ -63,6 +75,8 @@ fn clear_all_meta(pane: &str) {
         "@pane_subagents",
         "@pane_cwd",
         "@pane_permission_mode",
+        "@pane_worktree_name",
+        "@pane_worktree_branch",
     ] {
         tmux::unset_pane_option(pane, key);
     }
@@ -291,11 +305,7 @@ fn handle_event(pane: &str, event: AgentEvent) -> i32 {
             set_attention(pane, "notification");
             tmux::set_pane_option(pane, "@pane_wait_reason", "permission_denied");
         }
-        AgentEvent::CwdChanged {
-            cwd,
-            worktree,
-            ..
-        } => {
+        AgentEvent::CwdChanged { cwd, worktree, .. } => {
             if !cwd.is_empty() {
                 let effective = resolve_cwd(&cwd, &worktree);
                 let current_subagents = tmux::get_pane_option_value(pane, "@pane_subagents");

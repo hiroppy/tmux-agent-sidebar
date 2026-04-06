@@ -110,6 +110,8 @@ fn test_line_to_row_two_agents() {
         permission_mode: tmux_agent_sidebar::tmux::PermissionMode::Default,
         subagents: vec![],
         pane_pid: None,
+        worktree_name: String::new(),
+        worktree_branch: String::new(),
     };
     let pane2 = PaneInfo {
         pane_id: "%2".into(),
@@ -125,6 +127,8 @@ fn test_line_to_row_two_agents() {
         permission_mode: tmux_agent_sidebar::tmux::PermissionMode::Default,
         subagents: vec![],
         pane_pid: None,
+        worktree_name: String::new(),
+        worktree_branch: String::new(),
     };
 
     let mut state = make_state(vec![SessionInfo {

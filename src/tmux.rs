@@ -15,6 +15,8 @@ pub struct PaneInfo {
     pub permission_mode: PermissionMode,
     pub subagents: Vec<String>,
     pub pane_pid: Option<u32>,
+    pub worktree_name: String,
+    pub worktree_branch: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -133,7 +135,7 @@ pub fn run_tmux(args: &[&str]) -> Option<String> {
 /// plus one `list-sessions` call, instead of N+1 subprocess invocations.
 pub fn query_sessions() -> Vec<SessionInfo> {
     // 1. Get all panes across all sessions in one call
-    let pane_format = "#{q:session_name}|#{q:window_id}|#{q:window_index}|#{q:window_name}|#{q:window_active}|#{q:automatic-rename}|#{q:pane_active}|#{q:@pane_status}|#{q:@pane_attention}|#{q:@pane_agent}|#{q:@pane_name}|#{q:pane_current_path}|#{q:pane_current_command}|#{q:@pane_role}|#{q:pane_id}|#{q:@pane_prompt}|#{q:@pane_prompt_source}|#{q:@pane_started_at}|#{q:@pane_wait_reason}|#{q:pane_pid}|#{q:@pane_subagents}|#{q:@pane_cwd}|#{q:@pane_permission_mode}";
+    let pane_format = "#{q:session_name}|#{q:window_id}|#{q:window_index}|#{q:window_name}|#{q:window_active}|#{q:automatic-rename}|#{q:pane_active}|#{q:@pane_status}|#{q:@pane_attention}|#{q:@pane_agent}|#{q:@pane_name}|#{q:pane_current_path}|#{q:pane_current_command}|#{q:@pane_role}|#{q:pane_id}|#{q:@pane_prompt}|#{q:@pane_prompt_source}|#{q:@pane_started_at}|#{q:@pane_wait_reason}|#{q:pane_pid}|#{q:@pane_subagents}|#{q:@pane_cwd}|#{q:@pane_permission_mode}|#{q:@pane_worktree_name}|#{q:@pane_worktree_branch}";
     let all_panes_output = match run_tmux(&["list-panes", "-a", "-F", pane_format]) {
         Some(s) => s,
         None => return vec![],
@@ -147,7 +149,7 @@ pub fn query_sessions() -> Vec<SessionInfo> {
 
     for line in all_panes_output.lines() {
         let parts = split_tmux_fields(line, '|');
-        if parts.len() < 23 {
+        if parts.len() < 25 {
             continue;
         }
 
@@ -214,10 +216,10 @@ pub fn query_sessions() -> Vec<SessionInfo> {
 }
 
 /// Parse a single pane line from `tmux list-panes -F`.
-/// Returns None if the line has fewer than 17 fields, is a sidebar, or has no agent.
+/// Returns None if the line has fewer than 19 fields, is a sidebar, or has no agent.
 pub(crate) fn parse_pane_line(line: &str) -> Option<PaneInfo> {
     let parts = split_tmux_fields(line, '|');
-    if parts.len() < 17 {
+    if parts.len() < 19 {
         return None;
     }
 
@@ -265,6 +267,8 @@ pub(crate) fn parse_pane_line(line: &str) -> Option<PaneInfo> {
         permission_mode,
         subagents: parse_subagents(&parts[14]),
         pane_pid,
+        worktree_name: parts[17].to_string(),
+        worktree_branch: parts[18].to_string(),
     })
 }
 
@@ -618,6 +622,8 @@ mod tests {
             permission_mode: PermissionMode::Default,
             subagents: vec![],
             pane_pid: None,
+            worktree_name: String::new(),
+            worktree_branch: String::new(),
         }];
         let pids = vec![(0, 101)];
         let ps_out = " 101 /bin/codex --full-auto\n";
@@ -710,6 +716,8 @@ mod tests {
             "Explore,Plan",       // 14: @pane_subagents
             "/custom/cwd",        // 15: @pane_cwd
             "auto",               // 16: @pane_permission_mode
+            "",                   // 17: @pane_worktree_name
+            "",                   // 18: @pane_worktree_branch
         ]
     }
 
@@ -740,7 +748,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_pane_line_rejects_fewer_than_17_fields() {
+    fn parse_pane_line_rejects_fewer_than_19_fields() {
         // Only 15 fields — should be rejected
         let fields_15 =
             "1|running||claude|name|/path|fish||%1|prompt|1700000000||12345|Explore|/cwd";
@@ -749,12 +757,11 @@ mod tests {
             "15 fields should be rejected"
         );
 
-        // 16 fields — still rejected
-        let fields_16 =
-            "1|running||claude|name|/path|fish||%1|prompt|user|1700000000||12345|Explore|/cwd";
+        // 18 fields — still rejected
+        let fields_18 = "1|running||claude|name|/path|fish||%1|prompt|user|1700000000||12345|Explore|/cwd|auto|";
         assert!(
-            parse_pane_line(fields_16).is_none(),
-            "16 fields should be rejected"
+            parse_pane_line(fields_18).is_none(),
+            "18 fields should be rejected"
         );
     }
 
