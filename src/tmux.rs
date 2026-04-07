@@ -509,7 +509,16 @@ pub fn display_message(target: &str, format: &str) -> String {
 }
 
 pub fn select_pane(pane_id: &str) {
-    // Find the window containing this pane and switch to it first
+    // Find the session containing this pane and switch to it first
+    if let Some(session_id) =
+        run_tmux(&["display-message", "-t", pane_id, "-p", "#{session_id}"])
+    {
+        let session_id = session_id.trim();
+        if !session_id.is_empty() {
+            let _ = run_tmux(&["switch-client", "-t", session_id]);
+        }
+    }
+    // Then switch to the correct window
     if let Some(window_id) = run_tmux(&["display-message", "-t", pane_id, "-p", "#{window_id}"]) {
         let window_id = window_id.trim();
         if !window_id.is_empty() {
