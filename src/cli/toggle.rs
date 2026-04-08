@@ -110,8 +110,7 @@ pub(crate) fn cmd_toggle(args: &[String]) -> i32 {
     // Create sidebar pane
     let sidebar_pane = tmux::run_tmux(&[
         "split-window",
-        "-h",
-        "-b",
+        "-hfb",
         "-l",
         &sidebar_width,
         "-t",
