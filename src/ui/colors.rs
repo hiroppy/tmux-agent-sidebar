@@ -34,6 +34,7 @@ pub struct ColorTheme {
     pub pr_link: Color,
     pub section_title: Color,
     pub activity_timestamp: Color,
+    pub response_arrow: Color,
 }
 
 impl Default for ColorTheme {
@@ -67,6 +68,7 @@ impl Default for ColorTheme {
             pr_link: Color::Indexed(117),
             section_title: Color::Indexed(109),
             activity_timestamp: Color::Indexed(109),
+            response_arrow: Color::Indexed(117),
         }
     }
 }

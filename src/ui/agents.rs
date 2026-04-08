@@ -605,7 +605,7 @@ fn render_pane_lines<'a>(
         };
         for (li, wl) in wrapped.iter().enumerate() {
             if is_response && li == 0 {
-                let arrow_color = theme.diff_added;
+                let arrow_color = theme.response_arrow;
                 let text_dw = 4 + display_width(wl); // "  ▶ " + text
                 out.push(bordered_line(
                     border_style,
