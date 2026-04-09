@@ -64,6 +64,8 @@ git clone https://github.com/hiroppy/tmux-agent-sidebar.git ~/.tmux/plugins/tmux
 run-shell ~/.tmux/plugins/tmux-agent-sidebar/tmux-agent-sidebar.tmux
 ```
 
+Set `@sidebar_auto_create` to `off` if you want to open the sidebar only with the toggle key and avoid installing the plugin's `after-new-window` auto-create hook.
+
 1. Install the binary using one of the following methods:
 
    <details>
@@ -318,6 +320,7 @@ All options can be set **before** loading the plugin in your `tmux.conf`:
 set -g @sidebar_key T                    # keybinding (default: e)
 set -g @sidebar_key_all Y                # keybinding for all windows (default: E)
 set -g @sidebar_width 32                 # width in columns or % (default: 15%)
+set -g @sidebar_auto_create off          # disable auto-create on new windows (default: on)
 
 # Colors (256-color palette numbers)
 set -g @sidebar_color_running 82         # running icon (default: green)
