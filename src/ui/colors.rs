@@ -18,6 +18,7 @@ pub struct ColorTheme {
     pub text_active: Color,
     pub text_muted: Color,
     pub session_header: Color,
+    pub port: Color,
     pub wait_reason: Color,
     pub activity_border: Color,
     pub selection_bg: Color,
@@ -52,6 +53,7 @@ impl Default for ColorTheme {
             text_active: Color::Indexed(255),
             text_muted: Color::Indexed(244),
             session_header: Color::Indexed(39),
+            port: Color::Indexed(246),
             wait_reason: Color::Indexed(221),
             activity_border: Color::Indexed(39),
             selection_bg: Color::Indexed(239),
@@ -100,6 +102,7 @@ impl ColorTheme {
         theme.text_active = read("@sidebar_color_text_active", theme.text_active);
         theme.text_muted = read("@sidebar_color_text_muted", theme.text_muted);
         theme.session_header = read("@sidebar_color_session", theme.session_header);
+        theme.port = read("@sidebar_color_port", theme.port);
         theme.wait_reason = read("@sidebar_color_wait_reason", theme.wait_reason);
         theme.selection_bg = read("@sidebar_color_selection", theme.selection_bg);
         theme.branch = read("@sidebar_color_branch", theme.branch);

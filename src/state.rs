@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Instant;
 
 use crate::activity::{ActivityEntry, TaskProgress};
 use crate::tmux::{self, SessionInfo};
@@ -251,6 +252,7 @@ pub struct AppState {
     pub bottom_tab: BottomTab,
     pub git: crate::git::GitData,
     pub git_scroll: ScrollState,
+    pub pane_ports: HashMap<String, Vec<u16>>,
     pub pane_task_progress: HashMap<String, TaskProgress>,
     pub pane_task_dismissed: HashMap<String, usize>,
     /// Tracks when each pane first became inactive (epoch seconds).
@@ -279,6 +281,8 @@ pub struct AppState {
     pub global: GlobalState,
     /// Hyperlink overlays to be written after frame render (OSC 8).
     pub hyperlink_overlays: Vec<HyperlinkOverlay>,
+    pub port_scan_initialized: bool,
+    pub last_port_refresh: Instant,
 }
 
 /// Screen-positioned hyperlink overlay for OSC 8 terminal hyperlinks.
@@ -311,6 +315,7 @@ impl AppState {
             bottom_tab: BottomTab::Activity,
             git: crate::git::GitData::default(),
             git_scroll: ScrollState::default(),
+            pane_ports: HashMap::new(),
             pane_task_progress: HashMap::new(),
             pane_task_dismissed: HashMap::new(),
             pane_inactive_since: HashMap::new(),
@@ -329,6 +334,8 @@ impl AppState {
             version_notice: None,
             global: GlobalState::new(),
             hyperlink_overlays: vec![],
+            port_scan_initialized: false,
+            last_port_refresh: Instant::now(),
         }
     }
 

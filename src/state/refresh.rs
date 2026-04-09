@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::activity::{self, TaskProgress};
 use crate::tmux::{self, PaneStatus, SessionInfo};
@@ -67,7 +67,18 @@ impl AppState {
         let (focused, window_active, _, _) = tmux::get_sidebar_pane_info(&self.tmux_pane);
         self.apply_session_snapshot(focused, tmux::query_sessions());
         self.refresh_activity_data();
+        self.refresh_port_data();
         window_active
+    }
+
+    pub(crate) fn refresh_port_data(&mut self) {
+        const PORT_REFRESH_INTERVAL: Duration = Duration::from_secs(10);
+
+        if !self.port_scan_initialized || self.last_port_refresh.elapsed() >= PORT_REFRESH_INTERVAL {
+            self.pane_ports = crate::port::scan_session_ports(&self.sessions);
+            self.port_scan_initialized = true;
+            self.last_port_refresh = std::time::Instant::now();
+        }
     }
 
     pub(crate) fn refresh_task_progress(&mut self) {

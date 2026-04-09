@@ -306,10 +306,12 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 .as_ref()
                 .map_or(false, |id| id == &pane.pane_id);
 
+            let ports = state.pane_ports.get(&pane.pane_id).map(|v| v.as_slice());
             let task_progress = state.pane_task_progress.get(&pane.pane_id);
-            let pane_lines = render_pane_lines(
+            let pane_lines = render_pane_lines_with_ports(
                 pane,
                 git_info,
+                ports,
                 task_progress,
                 is_selected,
                 is_active,
@@ -398,9 +400,59 @@ fn bordered_line<'a>(
     Line::from(spans)
 }
 
+fn bordered_split_line<'a>(
+    border_style: Style,
+    apply_bg: &dyn Fn(Style) -> Style,
+    inner_width: usize,
+    left_spans: Vec<Span<'a>>,
+    left_width: usize,
+    right_spans: Vec<Span<'a>>,
+    right_width: usize,
+) -> Line<'a> {
+    let padding = inner_width.saturating_sub(left_width + right_width);
+    let mut spans = vec![
+        Span::styled("│", border_style),
+        Span::styled(" ", apply_bg(Style::default())),
+    ];
+    spans.extend(left_spans);
+    spans.push(Span::styled(" ".repeat(padding), apply_bg(Style::default())));
+    spans.extend(right_spans);
+    spans.push(Span::styled("│", border_style));
+    Line::from(spans)
+}
+
+#[cfg(test)]
 fn render_pane_lines<'a>(
     pane: &crate::tmux::PaneInfo,
     git_info: &crate::group::PaneGitInfo,
+    task_progress: Option<&crate::activity::TaskProgress>,
+    selected: bool,
+    active: bool,
+    border_color: ratatui::style::Color,
+    width: usize,
+    theme: &ColorTheme,
+    spinner_frame: usize,
+    now: u64,
+) -> Vec<Line<'a>> {
+    render_pane_lines_with_ports(
+        pane,
+        git_info,
+        None,
+        task_progress,
+        selected,
+        active,
+        border_color,
+        width,
+        theme,
+        spinner_frame,
+        now,
+    )
+}
+
+fn render_pane_lines_with_ports<'a>(
+    pane: &crate::tmux::PaneInfo,
+    git_info: &crate::group::PaneGitInfo,
+    ports: Option<&[u16]>,
     task_progress: Option<&crate::activity::TaskProgress>,
     selected: bool,
     active: bool,
@@ -484,24 +536,66 @@ fn render_pane_lines<'a>(
     status_spans.push(Span::styled("│", border_style));
     out.push(Line::from(status_spans));
 
-    // Branch info line
+    // Branch + port line
     let branch = super::text::branch_label(git_info);
-    if !branch.is_empty() {
-        let branch_color = theme.branch;
-        let prefix = "  ";
-        let max_branch_width = inner_width.saturating_sub(display_width(prefix));
-        let truncated = truncate_to_width(&branch, max_branch_width);
-        let text = format!("{}{}", prefix, truncated);
-        let text_dw = display_width(&text);
-        out.push(bordered_line(
+    let branch_color = theme.branch;
+    let port_text = ports.and_then(|ports| {
+        if ports.is_empty() {
+            return None;
+        }
+        let mut port_list = String::new();
+        for (i, port) in ports.iter().enumerate() {
+            if i > 0 {
+                port_list.push_str(", ");
+            }
+            port_list.push_str(&port.to_string());
+        }
+        Some(format!(":{}", port_list))
+    });
+    if !branch.is_empty() || port_text.is_some() {
+        let left_prefix = "  ";
+        let right_prefix = "  ";
+        let right_text = port_text.unwrap_or_default();
+        let right_width = if right_text.is_empty() {
+            0
+        } else {
+            display_width(right_prefix) + display_width(&right_text)
+        };
+        let left_room = inner_width.saturating_sub(right_width);
+        let max_branch_width = left_room.saturating_sub(display_width(left_prefix));
+        let truncated_branch = truncate_to_width(&branch, max_branch_width);
+        let left_text = format!("{}{}", left_prefix, truncated_branch);
+        let left_width = display_width(&left_text);
+
+        let mut left_spans = vec![Span::styled(
+            left_text,
+            apply_bg(Style::default().fg(branch_color)),
+        )];
+        if branch.is_empty() {
+            left_spans.clear();
+        }
+        let right_spans = if right_text.is_empty() {
+            vec![]
+        } else {
+            vec![Span::styled(
+                format!("{}{}", right_prefix, right_text),
+                apply_bg(Style::default().fg(theme.port)),
+            )]
+        };
+        let right_width = if right_text.is_empty() {
+            0
+        } else {
+            display_width(right_prefix) + display_width(&right_text)
+        };
+        let left_width = if branch.is_empty() { 0 } else { left_width };
+        out.push(bordered_split_line(
             border_style,
             &apply_bg,
             inner_width,
-            vec![Span::styled(
-                text,
-                apply_bg(Style::default().fg(branch_color)),
-            )],
-            text_dw,
+            left_spans,
+            left_width,
+            right_spans,
+            right_width,
         ));
     }
 
@@ -757,6 +851,74 @@ mod tests {
 
         let status = line_text(&lines[0]);
         assert!(status.contains(" codex auto"));
+    }
+
+    #[test]
+    fn render_pane_lines_shows_branch_and_ports_on_same_row() {
+        let theme = ColorTheme::default();
+        let pane = pane(PermissionMode::Default, PaneStatus::Running, "");
+        let ports = vec![3000, 5173];
+        let lines = render_pane_lines_with_ports(
+            &pane,
+            &PaneGitInfo {
+                repo_root: Some("/tmp/project".into()),
+                branch: Some("feature/sidebar".into()),
+                is_worktree: false,
+                worktree_name: None,
+            },
+            Some(&ports),
+            None,
+            false,
+            false,
+            theme.border_active,
+            40,
+            &theme,
+            0,
+            0,
+        );
+
+        assert!(lines.len() >= 2);
+        let branch_port_line = line_text(&lines[1]);
+        assert!(branch_port_line.contains("feature/sidebar"));
+        assert!(branch_port_line.contains(":3000, 5173"));
+        assert!(branch_port_line.find("feature/sidebar") < branch_port_line.find(":3000, 5173"));
+    }
+
+    #[test]
+    fn render_pane_lines_truncates_long_branch_when_ports_present() {
+        let theme = ColorTheme::default();
+        let pane = pane(PermissionMode::Default, PaneStatus::Running, "");
+        let ports = vec![3000];
+        let lines = render_pane_lines_with_ports(
+            &pane,
+            &PaneGitInfo {
+                repo_root: Some("/tmp/project".into()),
+                branch: Some("feature/sidebar/really-long-branch-name-that-should-truncate".into()),
+                is_worktree: false,
+                worktree_name: None,
+            },
+            Some(&ports),
+            None,
+            false,
+            false,
+            theme.border_active,
+            40,
+            &theme,
+            0,
+            0,
+        );
+
+        assert!(lines.len() >= 2);
+        let branch_port_line = line_text(&lines[1]);
+        assert!(
+            branch_port_line.contains('…'),
+            "long branch should be truncated when ports share the row"
+        );
+        assert!(branch_port_line.contains(":3000"));
+        assert!(
+            branch_port_line.find('…') < branch_port_line.find(":3000"),
+            "branch truncation should remain left of the port text"
+        );
     }
 
     #[test]

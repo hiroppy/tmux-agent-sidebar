@@ -25,6 +25,7 @@ A tmux sidebar that monitors all AI coding agents (Claude Code, Codex) across ev
 - **Task progress** — Displays task completion (e.g. `3/7`) synced from agent task lists
 - **Activity log** — Streams each tool invocation (Read, Edit, Bash, etc.) per agent in real time
 - **Git integration** — Shows branch name, ahead/behind counts, PR number (`gh`), and per-file diff stats
+- **Port display** — Shows listening localhost ports for the focused pane, alongside branch info
 - **Permission mode** — Shows `auto` / `plan` / `!` badge so you know each agent's permission level
 
 ## Requirements

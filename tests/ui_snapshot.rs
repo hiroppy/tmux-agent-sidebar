@@ -664,6 +664,35 @@ fn snapshot_worktree_long_branch_truncated_ui() {
     );
 }
 
+#[test]
+fn snapshot_long_branch_with_ports_ui() {
+    let pane = make_pane(AgentType::Claude, PaneStatus::Running);
+    let git_info = PaneGitInfo {
+        repo_root: Some("/home/user/project".into()),
+        branch: Some("feature/sidebar/really-long-branch-name-that-should-truncate".into()),
+        is_worktree: false,
+        worktree_name: None,
+    };
+    let mut state = make_state_with_groups(vec![tmux_agent_sidebar::group::RepoGroup {
+        name: "project".into(),
+        has_focus: true,
+        panes: vec![(pane, git_info)],
+    }]);
+    state
+        .pane_ports
+        .insert("%1".into(), vec![3000, 5173]);
+
+    let output = render_to_string(&mut state, 40, 24);
+    let expected = indoc! {r#"
+ All  ●1  ◐0  ○0  ✕0                   ▼
+│   feature/sidebar/reall…  :3000, 5173│
+╰──────────────────────────────────────╯
+╭ Activity │ Git ──────────────────────╮
+│            No activity yet           │
+╰──────────────────────────────────────╯"#};
+    assert_eq!(output, expected);
+}
+
 // ─── Task Progress Variations ─────────────────────────────────────
 
 #[test]

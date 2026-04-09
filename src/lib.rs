@@ -4,6 +4,7 @@ pub mod cli;
 pub mod event;
 pub mod git;
 pub mod group;
+pub mod port;
 pub mod state;
 pub mod tmux;
 pub mod ui;
