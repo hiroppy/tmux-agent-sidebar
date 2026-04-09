@@ -1,7 +1,6 @@
 #[allow(dead_code, unused_imports)]
 mod test_helpers;
 
-use indoc::indoc;
 use test_helpers::*;
 use tmux_agent_sidebar::activity::ActivityEntry;
 use tmux_agent_sidebar::state::{BottomTab, Focus};
@@ -110,12 +109,20 @@ fn snapshot_git_status_tab_ui() {
     state.git.diff_stat = Some((42, 15));
 
     let output = render_to_string(&mut state, 28, 24);
-    // Verify key elements are present in the new layout
-    assert!(output.contains("+42"), "should show insertions");
-    assert!(output.contains("-15"), "should show deletions");
-    assert!(output.contains("feature/sidebar"), "should show branch");
-    assert!(output.contains("↑2"), "should show ahead count");
-    assert!(output.contains("↓1"), "should show behind count");
+    insta::assert_snapshot!(output, @r###"
+ All  ●1  ◐0  ○0  ✕0       ▼
+╭ project ─────────────────╮
+│ ● claude                 │
+╭ Activity │ Git ──────────╮
+│ feature/sidebar     ↑2↓1 │
+│ +42/-15          3 files │
+│──────────────────────────│
+│ Unstaged (2)             │
+│ M src/ui/panes…  +30/-10 │
+│ M src/state.rs    +12/-5 │
+│ Untracked (1)            │
+│ ? new_file.rs            │
+╰──────────────────────────╯"###);
 }
 
 #[test]
@@ -139,18 +146,14 @@ fn snapshot_git_clean_ui() {
     state.sidebar_focused = true;
     // No git changes
 
-    let plain = render_to_string(&mut state, 28, 14);
-    assert!(plain.contains("Working tree clean"));
-
     let output = render_to_string(&mut state, 28, 24);
-    let expected = indoc! {r#"
+    insta::assert_snapshot!(output, @r###"
  All  ●1  ◐0  ○0  ✕0       ▼
 ╭ project ─────────────────╮
 │ ● claude                 │
 ╭ Activity │ Git ──────────╮
 │    Working tree clean    │
-╰──────────────────────────╯"#};
-    assert_eq!(output, expected);
+╰──────────────────────────╯"###);
 }
 
 #[test]
@@ -179,15 +182,14 @@ fn snapshot_activity_tab_active_ui() {
     }];
 
     let output = render_to_string(&mut state, 28, 24);
-    let expected = indoc! {r#"
+    insta::assert_snapshot!(output, @r###"
  All  ●1  ◐0  ○0  ✕0       ▼
 ╭ project ─────────────────╮
 │ ● claude                 │
 ╭ Activity │ Git ──────────╮
 │10:32                 Edit│
 │  src/main.rs             │
-╰──────────────────────────╯"#};
-    assert_eq!(output, expected);
+╰──────────────────────────╯"###);
 }
 
 #[test]
@@ -213,11 +215,12 @@ fn snapshot_tab_bar_renders_both_labels() {
     }];
 
     let output = render_to_string(&mut state, 28, 14);
-    assert!(
-        output.contains("Activity"),
-        "Tab bar should contain 'Activity' label"
-    );
-    assert!(output.contains("Git"), "Tab bar should contain 'Git' label");
+    insta::assert_snapshot!(output, @r###"
+ All  ●0  ◐0  ○1  ✕0       ▼
+╭ Activity │ Git ──────────╮
+│10:32                 Edit│
+│  test                    │
+╰──────────────────────────╯"###);
 }
 
 // ─── Git Content Tests ──────────────────────────────────────────────
@@ -262,14 +265,20 @@ fn snapshot_git_full_info_ui() {
 
     // Use plain render since elapsed time varies
     let output = render_to_string(&mut state, 28, 24);
-    assert!(output.contains("+120"));
-    assert!(output.contains("-30"));
-    assert!(output.contains("main"));
-    assert!(output.contains("Unstaged"), "should show Unstaged section");
-    assert!(
-        output.contains("Untracked"),
-        "should show Untracked section"
-    );
+    insta::assert_snapshot!(output, @r###"
+ All  ●1  ◐0  ○0  ✕0       ▼
+╭ project ─────────────────╮
+│ ● claude                 │
+╭ Activity │ Git ──────────╮
+│ main                     │
+│ +120/-30         3 files │
+│──────────────────────────│
+│ Unstaged (2)             │
+│ M src/state.rs   +42/-10 │
+│ M src/ui/botto…  +85/-20 │
+│ Untracked (1)            │
+│ ? new_file.rs            │
+╰──────────────────────────╯"###);
 }
 
 #[test]
@@ -309,14 +318,18 @@ fn snapshot_git_long_filename_truncated_ui() {
 
     // Verify the long filename is truncated (contains ellipsis)
     let plain = render_to_string(&mut state, 28, 24);
-    assert!(
-        plain.contains("…"),
-        "Long filename should be truncated with ellipsis"
-    );
-    assert!(
-        plain.contains("short.rs"),
-        "Short filename should not be truncated"
-    );
+    insta::assert_snapshot!(plain, @r###"
+ All  ●1  ◐0  ○0  ✕0       ▼
+╭ project ─────────────────╮
+│ ● claude                 │
+╭ Activity │ Git ──────────╮
+│ main                     │
+│                  2 files │
+│──────────────────────────│
+│ Unstaged (2)             │
+│ M very-long-f…  +150/-50 │
+│ M short.rs         +8/-2 │
+╰──────────────────────────╯"###);
 }
 
 #[test]
@@ -386,18 +399,39 @@ fn snapshot_git_more_than_5_files() {
 
     // Verify file list rendering (scroll to see overflow)
     let plain = render_to_string(&mut state, 28, 40);
-    // First 5 files should be rendered (may need scroll to see all)
-    assert!(plain.contains("a.rs"), "1st file should be shown");
-    assert!(!plain.contains("f.rs"), "6th file should NOT be shown");
-    assert!(!plain.contains("g.rs"), "7th file should NOT be shown");
+    insta::assert_snapshot!(plain, @r###"
+ All  ●1  ◐0  ○0  ✕0       ▼
+╭ project ─────────────────╮
+│ ● claude                 │
+╰──────────────────────────╯
+╭ Activity │ Git ──────────╮
+│ main                     │
+│                  7 files │
+│──────────────────────────│
+│ Unstaged (7)             │
+│ M a.rs           +100/-0 │
+│ M b.rs            +80/-0 │
+│ M c.rs            +60/-0 │
+│ M d.rs            +40/-0 │
+│ M e.rs            +20/-0 │
+│                  +2 more │
+╰──────────────────────────╯"###);
 
     // Scroll to bottom to verify "+2 more" exists
     state.git_scroll.offset = 5;
     let scrolled = render_to_string(&mut state, 28, 40);
-    assert!(
-        scrolled.contains("+2 more"),
-        "Should show overflow count when scrolled"
-    );
+    insta::assert_snapshot!(scrolled, @r###"
+ All  ●1  ◐0  ○0  ✕0       ▼
+╭ project ─────────────────╮
+│ ● claude                 │
+╰──────────────────────────╯
+╭ Activity │ Git ──────────╮
+│ main                     │
+│                  7 files │
+│──────────────────────────│
+│ M e.rs            +20/-0 │
+│                  +2 more │
+╰──────────────────────────╯"###);
 }
 
 #[test]
@@ -423,8 +457,13 @@ fn snapshot_git_branch_only_no_changes() {
     state.git.ahead_behind = Some((5, 0));
 
     let plain = render_to_string(&mut state, 38, 20);
-    assert!(plain.contains("feature/long-branch-name"));
-    assert!(plain.contains("↑5"));
+    insta::assert_snapshot!(plain, @r###"
+ All  ●1  ◐0  ○0  ✕0                 ▼
+╭ Activity │ Git ────────────────────╮
+│ feature/long-branch-name        ↑5 │
+│────────────────────────────────────│
+│         Working tree clean         │
+╰────────────────────────────────────╯"###);
 }
 
 #[test]
@@ -454,11 +493,15 @@ fn snapshot_git_pr_number_ui() {
     let output = render_to_styled_string(&mut state, 28, 14);
     // PR number should be underlined and blue
     let plain = render_to_string(&mut state, 28, 14);
-    assert!(plain.contains("#42"), "PR number should be displayed");
-    assert!(
-        output.contains("underline"),
-        "PR number should be underlined"
-    );
+    insta::assert_snapshot!(plain, @r###"
+ All  ●1  ◐0  ○0  ✕0       ▼
+╭ Activity │ Git ──────────╮
+│ feature/fix          #42 │
+│ +10/-3           0 files │
+│──────────────────────────│
+│    Working tree clean    │
+╰──────────────────────────╯"###);
+    assert!(output.contains("underline"), "PR number should be underlined");
     assert!(output.contains("fg:117"));
 }
 
@@ -495,10 +538,14 @@ fn snapshot_git_pr_with_diff_ui() {
     state.git.diff_stat = Some((55, 20));
 
     let plain = render_to_string(&mut state, 28, 14);
-    // PR on left, diff stat on right
-    assert!(plain.contains("#123"), "PR number should show");
-    assert!(plain.contains("+55"), "Insertions should show");
-    assert!(plain.contains("-20"), "Deletions should show");
+    insta::assert_snapshot!(plain, @r###"
+ All  ●1  ◐0  ○0  ✕0       ▼
+╭ Activity │ Git ──────────╮
+│ main                #123 │
+│ +55/-20          0 files │
+│──────────────────────────│
+│    Working tree clean    │
+╰──────────────────────────╯"###);
 }
 
 #[test]
@@ -520,7 +567,7 @@ fn snapshot_subagents_tree_ui() {
     state.rebuild_row_targets();
 
     let output = render_to_string(&mut state, 40, 28);
-    let expected = indoc! {r#"
+    insta::assert_snapshot!(output, @r###"
  All  ●1  ◐0  ○0  ✕0                   ▼
 ╭ project ─────────────────────────────╮
 │ ● claude                             │
@@ -530,8 +577,7 @@ fn snapshot_subagents_tree_ui() {
 ╰──────────────────────────────────────╯
 ╭ Activity │ Git ──────────────────────╮
 │            No activity yet           │
-╰──────────────────────────────────────╯"#};
-    assert_eq!(output, expected);
+╰──────────────────────────────────────╯"###);
 }
 
 #[test]
@@ -557,7 +603,7 @@ fn snapshot_subagent_long_name_truncated_ui() {
 
     // Narrow width (28) to force truncation of long subagent names
     let output = render_to_string(&mut state, 28, 27);
-    let expected = indoc! {r#"
+    insta::assert_snapshot!(output, @r###"
  All  ●1  ◐0  ○0  ✕0       ▼
 ╭ project ─────────────────╮
 │ ● claude                 │
@@ -566,8 +612,7 @@ fn snapshot_subagent_long_name_truncated_ui() {
 ╰──────────────────────────╯
 ╭ Activity │ Git ──────────╮
 │      No activity yet     │
-╰──────────────────────────╯"#};
-    assert_eq!(output, expected);
+╰──────────────────────────╯"###);
 
     assert_right_border_intact(&output);
 }
@@ -593,9 +638,7 @@ fn snapshot_activity_empty_centered_ui() {
     // No activity entries — should show centered "No activity yet"
 
     let output = render_to_string(&mut state, 28, 26);
-    let plain = render_to_string(&mut state, 28, 26);
-    assert!(plain.contains("No activity yet"));
-    let expected = indoc! {r#"
+    insta::assert_snapshot!(output, @r###"
  All  ●0  ◐0  ○1  ✕0       ▼
 ╭ project ─────────────────╮
 │ ○ claude                 │
@@ -603,8 +646,7 @@ fn snapshot_activity_empty_centered_ui() {
 ╰──────────────────────────╯
 ╭ Activity │ Git ──────────╮
 │      No activity yet     │
-╰──────────────────────────╯"#};
-    assert_eq!(output, expected);
+╰──────────────────────────╯"###);
 }
 
 #[test]
@@ -626,9 +668,7 @@ fn snapshot_git_clean_centered_ui() {
     // No git info — should show centered "Working tree clean"
 
     let output = render_to_string(&mut state, 28, 26);
-    let plain = render_to_string(&mut state, 28, 26);
-    assert!(plain.contains("Working tree clean"));
-    let expected = indoc! {r#"
+    insta::assert_snapshot!(output, @r###"
  All  ●0  ◐0  ○1  ✕0       ▼
 ╭ project ─────────────────╮
 │ ○ claude                 │
@@ -636,8 +676,7 @@ fn snapshot_git_clean_centered_ui() {
 ╰──────────────────────────╯
 ╭ Activity │ Git ──────────╮
 │    Working tree clean    │
-╰──────────────────────────╯"#};
-    assert_eq!(output, expected);
+╰──────────────────────────╯"###);
 }
 
 // ─── Git: "Working tree clean" consistency ──────────────────────────
@@ -668,14 +707,15 @@ fn snapshot_git_branch_loaded_no_changes_shows_inline_clean() {
     state.git.branch = "main".into();
 
     let plain = render_to_string(&mut state, 28, 24);
-    assert!(
-        plain.contains("Working tree clean"),
-        "should show 'Working tree clean' even when branch is loaded but no changes"
-    );
-    assert!(
-        plain.contains("main"),
-        "should still display the branch name"
-    );
+    insta::assert_snapshot!(plain, @r###"
+ All  ●1  ◐0  ○0  ✕0       ▼
+╭ project ─────────────────╮
+│ ● claude                 │
+╭ Activity │ Git ──────────╮
+│ main                     │
+│──────────────────────────│
+│    Working tree clean    │
+╰──────────────────────────╯"###);
 }
 
 #[test]
@@ -701,14 +741,13 @@ fn snapshot_git_no_data_shows_centered_clean() {
     // No git data at all
 
     let output = render_to_string(&mut state, 28, 24);
-    let expected = indoc! {r#"
+    insta::assert_snapshot!(output, @r###"
  All  ●1  ◐0  ○0  ✕0       ▼
 ╭ project ─────────────────╮
 │ ● claude                 │
 ╭ Activity │ Git ──────────╮
 │    Working tree clean    │
-╰──────────────────────────╯"#};
-    assert_eq!(output, expected);
+╰──────────────────────────╯"###);
 }
 
 // ─── Git: ahead/behind rendering ────────────────────────────────────
@@ -736,8 +775,13 @@ fn test_git_behind_only() {
     state.git.ahead_behind = Some((0, 3));
 
     let plain = render_to_string(&mut state, 28, 14);
-    assert!(plain.contains("↓3"), "should show behind count");
-    assert!(!plain.contains("↑"), "should not show ahead when 0");
+    insta::assert_snapshot!(plain, @r###"
+ All  ●1  ◐0  ○0  ✕0       ▼
+╭ Activity │ Git ──────────╮
+│ main                  ↓3 │
+│──────────────────────────│
+│    Working tree clean    │
+╰──────────────────────────╯"###);
 }
 
 #[test]
@@ -763,8 +807,13 @@ fn test_git_ahead_and_behind() {
     state.git.ahead_behind = Some((2, 3));
 
     let plain = render_to_string(&mut state, 38, 14);
-    assert!(plain.contains("↑2"), "should show ahead count");
-    assert!(plain.contains("↓3"), "should show behind count");
+    insta::assert_snapshot!(plain, @r###"
+ All  ●1  ◐0  ○0  ✕0                 ▼
+╭ Activity │ Git ────────────────────╮
+│ main                          ↑2↓3 │
+│────────────────────────────────────│
+│         Working tree clean         │
+╰────────────────────────────────────╯"###);
 }
 
 // ─── Git: diff stat with only insertions or only deletions ──────────
@@ -792,7 +841,14 @@ fn test_git_diff_insertions_only() {
     state.git.diff_stat = Some((25, 0));
 
     let plain = render_to_string(&mut state, 28, 14);
-    assert!(plain.contains("+25"), "should show insertions");
+    insta::assert_snapshot!(plain, @r###"
+ All  ●1  ◐0  ○0  ✕0       ▼
+╭ Activity │ Git ──────────╮
+│ main                     │
+│ +25/-0           0 files │
+│──────────────────────────│
+│    Working tree clean    │
+╰──────────────────────────╯"###);
 }
 
 #[test]
@@ -818,7 +874,14 @@ fn test_git_diff_deletions_only() {
     state.git.diff_stat = Some((0, 15));
 
     let plain = render_to_string(&mut state, 28, 14);
-    assert!(plain.contains("-15"), "should show deletions");
+    insta::assert_snapshot!(plain, @r###"
+ All  ●1  ◐0  ○0  ✕0       ▼
+╭ Activity │ Git ──────────╮
+│ main                     │
+│ +0/-15           0 files │
+│──────────────────────────│
+│    Working tree clean    │
+╰──────────────────────────╯"###);
 }
 
 #[test]
@@ -851,7 +914,7 @@ fn snapshot_branch_truncated_ui() {
     state.rebuild_row_targets();
 
     let plain = render_to_string(&mut state, 28, 30);
-    let expected = indoc! {r#"
+    insta::assert_snapshot!(plain, @r###"
  All  ●1  ◐0  ○0  ✕0       ▼
 ╭ dotfiles ────────────────╮
 │ ● claude                 │
@@ -859,8 +922,7 @@ fn snapshot_branch_truncated_ui() {
 ╰──────────────────────────╯
 ╭ Activity │ Git ──────────╮
 │      No activity yet     │
-╰──────────────────────────╯"#};
-    assert_eq!(plain, expected);
+╰──────────────────────────╯"###);
 }
 
 #[test]
@@ -908,7 +970,7 @@ fn snapshot_git_staged_unstaged_untracked_ui() {
     state.git.untracked_files = vec!["debug.log".into()];
 
     let output = render_to_string(&mut state, 28, 30);
-    let expected = indoc! {r#"
+    insta::assert_snapshot!(output, @r###"
  All  ●1  ◐0  ○0  ✕0       ▼
 ╭ project ─────────────────╮
 │ ● claude                 │
@@ -924,8 +986,7 @@ fn snapshot_git_staged_unstaged_untracked_ui() {
 │ M config.toml      +0/-1 │
 │ Untracked (1)            │
 │ ? debug.log              │
-╰──────────────────────────╯"#};
-    assert_eq!(output, expected);
+╰──────────────────────────╯"###);
 }
 
 #[test]
@@ -958,9 +1019,17 @@ fn snapshot_git_long_branch_with_pr_ui() {
     }];
 
     let output = render_to_string(&mut state, 28, 24);
-    // Branch should be truncated, PR visible
-    assert!(output.contains("#123"));
-    assert!(output.contains('…'));
+    insta::assert_snapshot!(output, @r###"
+ All  ●1  ◐0  ○0  ✕0       ▼
+╭ project ─────────────────╮
+│ ● claude                 │
+╭ Activity │ Git ──────────╮
+│ feature/very-long-… #123 │
+│ +5/-2            1 files │
+│──────────────────────────│
+│ Unstaged (1)             │
+│ M main.rs          +5/-2 │
+╰──────────────────────────╯"###);
     assert_right_border_intact(&output);
 }
 
@@ -993,7 +1062,7 @@ fn snapshot_git_staged_only_ui() {
     }];
 
     let output = render_to_string(&mut state, 28, 24);
-    let expected = indoc! {r#"
+    insta::assert_snapshot!(output, @r###"
  All  ●1  ◐0  ○0  ✕0       ▼
 ╭ project ─────────────────╮
 │ ● claude                 │
@@ -1003,8 +1072,7 @@ fn snapshot_git_staged_only_ui() {
 │──────────────────────────│
 │ Staged (1)               │
 │ A new_feature.rs  +20/-0 │
-╰──────────────────────────╯"#};
-    assert_eq!(output, expected);
+╰──────────────────────────╯"###);
 }
 
 #[test]
@@ -1037,11 +1105,23 @@ fn snapshot_git_many_files_more_indicator_ui() {
         .collect();
 
     let output = render_to_string(&mut state, 28, 30);
-    // Should show 5 files + "+2 more" right-aligned
-    assert!(output.contains("f0.rs"));
-    assert!(output.contains("f4.rs"));
-    assert!(!output.contains("f5.rs"));
-    assert!(output.contains("+2 more"));
+    insta::assert_snapshot!(output, @r###"
+ All  ●1  ◐0  ○0  ✕0       ▼
+╭ project ─────────────────╮
+│ ● claude                 │
+╰──────────────────────────╯
+╭ Activity │ Git ──────────╮
+│ dev                      │
+│                  7 files │
+│──────────────────────────│
+│ Unstaged (7)             │
+│ M f0.rs            +1/-0 │
+│ M f1.rs            +1/-0 │
+│ M f2.rs            +1/-0 │
+│ M f3.rs            +1/-0 │
+│ M f4.rs            +1/-0 │
+│                  +2 more │
+╰──────────────────────────╯"###);
     assert_right_border_intact(&output);
 }
 
