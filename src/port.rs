@@ -1,7 +1,13 @@
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::process::Command;
 
-use crate::tmux::SessionInfo;
+use crate::tmux::{AgentType, SessionInfo};
+
+#[derive(Debug, Default, Clone)]
+pub struct PaneProcessSnapshot {
+    pub ports_by_pane: HashMap<String, Vec<u16>>,
+    pub live_agent_panes: HashSet<String>,
+}
 
 fn run_command(cmd: &str, args: &[&str]) -> Option<String> {
     let output = Command::new(cmd).args(args).output().ok()?;
@@ -26,8 +32,9 @@ fn parse_pane_pids(sessions: &[SessionInfo]) -> HashMap<String, u32> {
     out
 }
 
-fn parse_ps_children(ps_output: &str) -> HashMap<u32, Vec<u32>> {
+fn parse_ps_processes(ps_output: &str) -> (HashMap<u32, Vec<u32>>, HashMap<u32, String>) {
     let mut children_of: HashMap<u32, Vec<u32>> = HashMap::new();
+    let mut args_by_pid: HashMap<u32, String> = HashMap::new();
     for line in ps_output.lines() {
         let mut parts = line.split_whitespace();
         let Some(pid_str) = parts.next() else {
@@ -43,8 +50,9 @@ fn parse_ps_children(ps_output: &str) -> HashMap<u32, Vec<u32>> {
             continue;
         };
         children_of.entry(ppid).or_default().push(pid);
+        args_by_pid.insert(pid, parts.collect::<Vec<_>>().join(" "));
     }
-    children_of
+    (children_of, args_by_pid)
 }
 
 fn descendant_pids(seed_pids: &[u32], children_of: &HashMap<u32, Vec<u32>>) -> HashSet<u32> {
@@ -65,6 +73,31 @@ fn descendant_pids(seed_pids: &[u32], children_of: &HashMap<u32, Vec<u32>>) -> H
     }
 
     seen
+}
+
+fn process_tree_has_agent(
+    seed_pids: &[u32],
+    children_of: &HashMap<u32, Vec<u32>>,
+    args_by_pid: &HashMap<u32, String>,
+    agent: &AgentType,
+) -> bool {
+    let agent_name = agent.label();
+    let descendants = descendant_pids(seed_pids, children_of);
+    descendants.into_iter().any(|pid| {
+        args_by_pid
+            .get(&pid)
+            .map(|args| process_matches_agent(args, agent_name))
+            .unwrap_or(false)
+    })
+}
+
+fn process_matches_agent(args: &str, agent_name: &str) -> bool {
+    let Some(command) = args.split_whitespace().next() else {
+        return false;
+    };
+    let command = command.trim_matches('"');
+    let basename = command.rsplit('/').next().unwrap_or(command);
+    basename == agent_name
 }
 
 fn extract_port(name: &str) -> Option<u16> {
@@ -96,21 +129,23 @@ fn parse_lsof_listening_ports(lsof_output: &str) -> Vec<(u32, u16)> {
     out
 }
 
-/// Scan listening TCP ports for panes in the provided sessions.
+/// Scan per-pane process state for the provided sessions.
 /// The lookup starts from each pane's PID and walks the process tree, so it can
-/// pick up child dev servers spawned by an agent shell.
-pub fn scan_session_ports(sessions: &[SessionInfo]) -> HashMap<String, Vec<u16>> {
+/// pick up child dev servers spawned by an agent shell and detect when the
+/// agent process itself has exited.
+pub fn scan_session_process_snapshot(sessions: &[SessionInfo]) -> Option<PaneProcessSnapshot> {
     let pane_pids = parse_pane_pids(sessions);
     if pane_pids.is_empty() {
-        return HashMap::new();
+        return None;
     }
 
-    let Some(ps_output) = run_command("ps", &["-eo", "pid=,ppid="]) else {
-        return HashMap::new();
+    let Some(ps_output) = run_command("ps", &["-eo", "pid=,ppid=,args="]) else {
+        return None;
     };
-    let children_of = parse_ps_children(&ps_output);
+    let (children_of, args_by_pid) = parse_ps_processes(&ps_output);
 
     let mut pid_to_panes: HashMap<u32, Vec<String>> = HashMap::new();
+    let mut live_agent_panes: HashSet<String> = HashSet::new();
     for session in sessions {
         for window in &session.windows {
             for pane in &window.panes {
@@ -118,6 +153,9 @@ pub fn scan_session_ports(sessions: &[SessionInfo]) -> HashMap<String, Vec<u16>>
                     continue;
                 };
                 let descendant_set = descendant_pids(&[pane_pid], &children_of);
+                if process_tree_has_agent(&[pane_pid], &children_of, &args_by_pid, &pane.agent) {
+                    live_agent_panes.insert(pane.pane_id.clone());
+                }
                 for pid in descendant_set {
                     pid_to_panes
                         .entry(pid)
@@ -130,7 +168,7 @@ pub fn scan_session_ports(sessions: &[SessionInfo]) -> HashMap<String, Vec<u16>>
 
     let Some(lsof_output) = run_command("lsof", &["-iTCP", "-sTCP:LISTEN", "-nP", "-F", "pn"])
     else {
-        return HashMap::new();
+        return None;
     };
     let listening = parse_lsof_listening_ports(&lsof_output);
 
@@ -146,10 +184,22 @@ pub fn scan_session_ports(sessions: &[SessionInfo]) -> HashMap<String, Vec<u16>>
         }
     }
 
-    ports_by_pane
-        .into_iter()
-        .map(|(pane_id, ports)| (pane_id, ports.into_iter().collect()))
-        .collect()
+    Some(PaneProcessSnapshot {
+        ports_by_pane: ports_by_pane
+            .into_iter()
+            .map(|(pane_id, ports)| (pane_id, ports.into_iter().collect()))
+            .collect(),
+        live_agent_panes,
+    })
+}
+
+/// Scan listening TCP ports for panes in the provided sessions.
+/// The lookup starts from each pane's PID and walks the process tree, so it can
+/// pick up child dev servers spawned by an agent shell.
+pub fn scan_session_ports(sessions: &[SessionInfo]) -> HashMap<String, Vec<u16>> {
+    scan_session_process_snapshot(sessions)
+        .map(|snapshot| snapshot.ports_by_pane)
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -181,5 +231,39 @@ mod tests {
         assert!(seen.contains(&3));
         assert!(seen.contains(&4));
         assert!(seen.contains(&5));
+    }
+
+    #[test]
+    fn process_tree_has_agent_matches_descendant_process_name() {
+        let children = HashMap::from([(1, vec![2, 3]), (2, vec![4])]);
+        let args = HashMap::from([
+            (1, "bash".to_string()),
+            (2, "node".to_string()),
+            (3, "/opt/homebrew/bin/claude --flag".to_string()),
+            (4, "sleep 1".to_string()),
+        ]);
+        assert!(process_tree_has_agent(
+            &[1],
+            &children,
+            &args,
+            &AgentType::Claude
+        ));
+        assert!(!process_tree_has_agent(
+            &[1],
+            &children,
+            &args,
+            &AgentType::Codex
+        ));
+    }
+
+    #[test]
+    fn process_matches_agent_requires_command_name_match() {
+        assert!(process_matches_agent("/opt/bin/claude --flag", "claude"));
+        assert!(process_matches_agent(
+            "\"/usr/local/bin/codex\" run",
+            "codex"
+        ));
+        assert!(!process_matches_agent("bash -lc codex", "codex"));
+        assert!(!process_matches_agent("grep claude", "claude"));
     }
 }

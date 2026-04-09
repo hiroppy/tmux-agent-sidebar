@@ -1,6 +1,7 @@
 use serde_json::Value;
 
 use crate::adapter;
+use crate::tmux::{CLAUDE_AGENT, CODEX_AGENT};
 
 /// Worktree metadata from Claude Code hook payloads.
 /// Present only when the agent is running in a worktree; `None` otherwise.
@@ -109,8 +110,8 @@ pub trait EventAdapter {
 
 pub fn resolve_adapter(agent_name: &str) -> Option<Box<dyn EventAdapter>> {
     match agent_name {
-        "claude" => Some(Box::new(adapter::claude::ClaudeAdapter)),
-        "codex" => Some(Box::new(adapter::codex::CodexAdapter)),
+        CLAUDE_AGENT => Some(Box::new(adapter::claude::ClaudeAdapter)),
+        CODEX_AGENT => Some(Box::new(adapter::codex::CodexAdapter)),
         _ => None,
     }
 }

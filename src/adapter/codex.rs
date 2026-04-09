@@ -1,4 +1,5 @@
 use crate::event::{AgentEvent, EventAdapter};
+use crate::tmux::CODEX_AGENT;
 use serde_json::Value;
 
 use super::json_str;
@@ -9,7 +10,7 @@ impl EventAdapter for CodexAdapter {
     fn parse(&self, event_name: &str, input: &Value) -> Option<AgentEvent> {
         match event_name {
             "session-start" => Some(AgentEvent::SessionStart {
-                agent: "codex".into(),
+                agent: CODEX_AGENT.into(),
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: json_str(input, "permission_mode").into(),
                 worktree: None,
@@ -17,7 +18,7 @@ impl EventAdapter for CodexAdapter {
             }),
             "session-end" => Some(AgentEvent::SessionEnd),
             "user-prompt-submit" => Some(AgentEvent::UserPromptSubmit {
-                agent: "codex".into(),
+                agent: CODEX_AGENT.into(),
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: json_str(input, "permission_mode").into(),
                 prompt: json_str(input, "prompt").into(),
@@ -25,7 +26,7 @@ impl EventAdapter for CodexAdapter {
                 agent_id: None,
             }),
             "stop" => Some(AgentEvent::Stop {
-                agent: "codex".into(),
+                agent: CODEX_AGENT.into(),
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: json_str(input, "permission_mode").into(),
                 last_message: json_str(input, "last_assistant_message").into(),
@@ -51,7 +52,7 @@ mod tests {
         assert_eq!(
             event,
             AgentEvent::SessionStart {
-                agent: "codex".into(),
+                agent: CODEX_AGENT.into(),
                 cwd: "/home/user".into(),
                 permission_mode: "".into(),
                 worktree: None,
@@ -77,7 +78,7 @@ mod tests {
         assert_eq!(
             event,
             AgentEvent::UserPromptSubmit {
-                agent: "codex".into(),
+                agent: CODEX_AGENT.into(),
                 cwd: "/tmp".into(),
                 permission_mode: "".into(),
                 prompt: "hello".into(),
@@ -95,7 +96,7 @@ mod tests {
         assert_eq!(
             event,
             AgentEvent::Stop {
-                agent: "codex".into(),
+                agent: CODEX_AGENT.into(),
                 cwd: "/tmp".into(),
                 permission_mode: "".into(),
                 last_message: "done".into(),

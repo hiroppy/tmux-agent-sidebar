@@ -50,8 +50,53 @@ impl AppState {
         self.sidebar_focused = sidebar_focused;
         self.sessions = sessions;
         self.repo_groups = crate::group::group_panes_by_repo(&self.sessions);
+        self.prune_pane_states_to_current_panes();
         self.rebuild_row_targets();
         self.find_focused_pane();
+    }
+
+    fn clear_dead_agent_metadata(pane_id: &str) {
+        for key in &[
+            "@pane_agent",
+            "@pane_status",
+            "@pane_attention",
+            "@pane_prompt",
+            "@pane_prompt_source",
+            "@pane_subagents",
+            "@pane_cwd",
+            "@pane_permission_mode",
+            "@pane_worktree_name",
+            "@pane_worktree_branch",
+            "@pane_started_at",
+            "@pane_wait_reason",
+        ] {
+            tmux::unset_pane_option(pane_id, key);
+        }
+
+        let _ = std::fs::remove_file(activity::log_file_path(pane_id));
+    }
+
+    fn filter_sessions_to_live_agent_panes(
+        sessions: Vec<SessionInfo>,
+        live_agent_panes: &HashSet<String>,
+    ) -> Vec<SessionInfo> {
+        let mut out = Vec::new();
+        for mut session in sessions {
+            let mut windows = Vec::new();
+            for mut window in session.windows {
+                window
+                    .panes
+                    .retain(|pane| live_agent_panes.contains(&pane.pane_id));
+                if !window.panes.is_empty() {
+                    windows.push(window);
+                }
+            }
+            if !windows.is_empty() {
+                session.windows = windows;
+                out.push(session);
+            }
+        }
+        out
     }
 
     fn refresh_activity_data(&mut self) {
@@ -65,28 +110,74 @@ impl AppState {
     pub fn refresh(&mut self) -> bool {
         self.refresh_now();
         let (focused, window_active, _, _) = tmux::get_sidebar_pane_info(&self.tmux_pane);
-        self.apply_session_snapshot(focused, tmux::query_sessions());
+        let sessions = tmux::query_sessions();
+        if let Some(process_snapshot) = self.refresh_port_data(&sessions) {
+            let sessions = Self::filter_sessions_to_live_agent_panes(
+                sessions,
+                &process_snapshot.live_agent_panes,
+            );
+            self.apply_session_snapshot(focused, sessions);
+        } else {
+            self.apply_session_snapshot(focused, sessions);
+        }
         self.refresh_activity_data();
-        self.refresh_port_data();
         window_active
     }
 
-    pub(crate) fn refresh_port_data(&mut self) {
+    pub(crate) fn refresh_port_data(
+        &mut self,
+        sessions: &[SessionInfo],
+    ) -> Option<crate::port::PaneProcessSnapshot> {
         const PORT_REFRESH_INTERVAL: Duration = Duration::from_secs(10);
 
-        if !self.port_scan_initialized || self.last_port_refresh.elapsed() >= PORT_REFRESH_INTERVAL {
-            self.pane_ports = crate::port::scan_session_ports(&self.sessions);
+        if !self.port_scan_initialized || self.last_port_refresh.elapsed() >= PORT_REFRESH_INTERVAL
+        {
+            let scanned = crate::port::scan_session_process_snapshot(sessions)?;
+            let mut active_ids: HashSet<String> = HashSet::new();
+            let mut updates: Vec<(String, Vec<u16>)> = Vec::new();
+            let mut dead_panes: Vec<String> = Vec::new();
+            for session in sessions {
+                for window in &session.windows {
+                    for pane in &window.panes {
+                        active_ids.insert(pane.pane_id.clone());
+                        if !scanned.live_agent_panes.contains(&pane.pane_id) {
+                            dead_panes.push(pane.pane_id.clone());
+                        }
+                        updates.push((
+                            pane.pane_id.clone(),
+                            scanned
+                                .ports_by_pane
+                                .get(&pane.pane_id)
+                                .cloned()
+                                .unwrap_or_default(),
+                        ));
+                    }
+                }
+            }
+            for (pane_id, ports) in updates {
+                self.pane_state_mut(&pane_id).ports = ports;
+            }
+            for pane_id in dead_panes {
+                Self::clear_dead_agent_metadata(&pane_id);
+                self.clear_pane_state(&pane_id);
+            }
+            self.pane_states
+                .retain(|pane_id, _| active_ids.contains(pane_id));
             self.port_scan_initialized = true;
             self.last_port_refresh = std::time::Instant::now();
+            return Some(scanned);
         }
+
+        None
     }
 
     pub(crate) fn refresh_task_progress(&mut self) {
-        self.pane_task_progress.clear();
-        let mut active_pane_ids: HashSet<&str> = HashSet::new();
+        let mut active_pane_ids: HashSet<String> = HashSet::new();
+        let mut updates: Vec<(String, Option<TaskProgress>, Option<usize>, Option<u64>)> =
+            Vec::new();
         for group in &self.repo_groups {
             for (pane, _) in &group.panes {
-                active_pane_ids.insert(&pane.pane_id);
+                active_pane_ids.insert(pane.pane_id.clone());
                 // Read all entries for task progress (not limited to display max)
                 // so that TaskCreate entries aren't lost when subagents flood the log
                 let entries = activity::read_activity_log(&pane.pane_id, 0);
@@ -107,26 +198,15 @@ impl AppState {
                 let agent_inactive =
                     !matches!(pane.status, PaneStatus::Running | PaneStatus::Waiting);
 
-                // Update the per-pane inactive timer:
-                // - Agent active → clear the timer
-                // - Agent inactive and no timer yet → start the timer
-                // - Agent inactive and timer exists → leave it (accumulate elapsed time)
-                if agent_inactive {
-                    self.pane_inactive_since
-                        .entry(pane.pane_id.clone())
-                        .or_insert(self.now);
+                let prior_state = self.pane_state(&pane.pane_id).cloned().unwrap_or_default();
+                let next_inactive_since = if agent_inactive {
+                    Some(prior_state.inactive_since.unwrap_or(self.now))
                 } else {
-                    self.pane_inactive_since.remove(&pane.pane_id);
-                }
-
-                // Only treat the agent as truly inactive once the grace period
-                // has passed, so momentary status flickers are ignored.
-                let grace_expired = self
-                    .pane_inactive_since
-                    .get(&pane.pane_id)
-                    .map_or(false, |&since| {
-                        self.now.saturating_sub(since) >= INACTIVE_GRACE_SECS
-                    });
+                    None
+                };
+                let grace_expired = next_inactive_since.map_or(false, |since| {
+                    self.now.saturating_sub(since) >= INACTIVE_GRACE_SECS
+                });
 
                 let decision = if grace_expired && !progress.is_empty() && !progress.all_completed()
                 {
@@ -134,32 +214,35 @@ impl AppState {
                         total: progress.total(),
                     }
                 } else {
-                    classify_task_progress(
-                        &progress,
-                        self.pane_task_dismissed.get(&pane.pane_id).copied(),
-                    )
+                    classify_task_progress(&progress, prior_state.task_dismissed_total)
                 };
-                match decision {
-                    TaskProgressDecision::Clear => {
-                        self.pane_task_dismissed.remove(&pane.pane_id);
-                    }
-                    TaskProgressDecision::Show => {
-                        self.pane_task_dismissed.remove(&pane.pane_id);
-                        self.pane_task_progress
-                            .insert(pane.pane_id.clone(), progress);
-                    }
-                    TaskProgressDecision::Dismiss { total } => {
-                        self.pane_task_dismissed.insert(pane.pane_id.clone(), total);
-                    }
-                    TaskProgressDecision::Skip => {}
-                }
+                let next_progress = match decision {
+                    TaskProgressDecision::Clear => None,
+                    TaskProgressDecision::Show => Some(progress),
+                    TaskProgressDecision::Dismiss { .. } => None,
+                    TaskProgressDecision::Skip => prior_state.task_progress.clone(),
+                };
+                let next_dismissed_total = match decision {
+                    TaskProgressDecision::Clear | TaskProgressDecision::Show => None,
+                    TaskProgressDecision::Dismiss { total } => Some(total),
+                    TaskProgressDecision::Skip => prior_state.task_dismissed_total,
+                };
+                updates.push((
+                    pane.pane_id.clone(),
+                    next_progress,
+                    next_dismissed_total,
+                    next_inactive_since,
+                ));
             }
         }
-        self.pane_task_dismissed
-            .retain(|id, _| active_pane_ids.contains(id.as_str()));
-        // Clean up inactive timers for panes that no longer exist
-        self.pane_inactive_since
-            .retain(|id, _| active_pane_ids.contains(id.as_str()));
+        for (pane_id, progress, dismissed_total, inactive_since) in updates {
+            let pane_state = self.pane_state_mut(&pane_id);
+            pane_state.inactive_since = inactive_since;
+            pane_state.task_dismissed_total = dismissed_total;
+            pane_state.task_progress = progress;
+        }
+        self.pane_states
+            .retain(|id, _| active_pane_ids.contains(id));
     }
 
     pub(crate) fn refresh_activity_log(&mut self) {
@@ -168,5 +251,67 @@ impl AppState {
         } else {
             self.activity_entries.clear();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tmux::{AgentType, PaneInfo, PaneStatus, PermissionMode, SessionInfo, WindowInfo};
+
+    fn test_pane(id: &str) -> PaneInfo {
+        PaneInfo {
+            pane_id: id.into(),
+            pane_active: false,
+            status: PaneStatus::Running,
+            attention: false,
+            agent: AgentType::Claude,
+            path: "/tmp".into(),
+            prompt: String::new(),
+            prompt_is_response: false,
+            started_at: None,
+            wait_reason: String::new(),
+            permission_mode: PermissionMode::Default,
+            subagents: vec![],
+            pane_pid: None,
+            worktree_name: String::new(),
+            worktree_branch: String::new(),
+        }
+    }
+
+    fn test_session(panes: Vec<PaneInfo>) -> Vec<SessionInfo> {
+        vec![SessionInfo {
+            session_name: "main".into(),
+            windows: vec![WindowInfo {
+                window_id: "@0".into(),
+                window_name: "test".into(),
+                window_active: true,
+                auto_rename: false,
+                panes,
+            }],
+        }]
+    }
+
+    #[test]
+    fn filter_sessions_to_live_agent_panes_removes_dead_panes() {
+        let sessions = test_session(vec![test_pane("%1"), test_pane("%2")]);
+        let live = HashSet::from(["%2".to_string()]);
+
+        let filtered = AppState::filter_sessions_to_live_agent_panes(sessions, &live);
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].windows.len(), 1);
+        assert_eq!(filtered[0].windows[0].panes.len(), 1);
+        assert_eq!(filtered[0].windows[0].panes[0].pane_id, "%2");
+    }
+
+    #[test]
+    fn filter_sessions_to_live_agent_panes_drops_empty_sessions() {
+        let sessions = test_session(vec![test_pane("%1")]);
+        let live = HashSet::new();
+
+        let filtered = AppState::filter_sessions_to_live_agent_panes(sessions, &live);
+
+        assert!(filtered.is_empty());
     }
 }

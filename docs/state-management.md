@@ -16,9 +16,18 @@ Stored in `GlobalState`. Written to tmux on change, reloaded on SIGUSR1.
 
 Each field has a corresponding `last_saved_*` to prevent sync conflicts — only overwrites tmux if the local write succeeded.
 
-### Per-pane State (keyed by pane ID, stored in tmux pane options or /tmp files)
+### Per-pane State (keyed by pane ID)
 
 Written by `cli/hook.rs` on agent events, read by `query_sessions()` every **1 second**.
+
+Each pane's runtime data is split into two buckets:
+
+| Source | Update Trigger | Description |
+|--------|----------------|-------------|
+| tmux pane options | Event-driven + cleanup on agent exit | Agent type, status, cwd, permission mode, prompt, subagents, worktree, etc. |
+| `PaneRuntimeState` in `AppState` | Refresh cycle + cleanup on agent exit | `ports`, `task_progress`, `task_dismissed_total`, `inactive_since` |
+
+Pane options written to tmux:
 
 | Tmux Option | Update Trigger | Description |
 |-------------|----------------|-------------|
@@ -35,13 +44,14 @@ Written by `cli/hook.rs` on agent events, read by `query_sessions()` every **1 s
 | `@pane_worktree_name` | SessionStart | Worktree name (if applicable) |
 | `@pane_worktree_branch` | SessionStart | Worktree branch (if applicable) |
 
-Per-pane state also held in AppState (in-memory, keyed by pane ID):
+In-memory per-pane runtime state:
 
 | Field | Update Frequency | Description |
 |-------|-----------------|-------------|
-| `pane_task_progress` | Every 1s (refresh cycle) | Parsed from activity log — task list per pane |
-| `pane_task_dismissed` | On task completion | Tracks dismissed completed-task counts |
-| `pane_inactive_since` | On status change | Debounce timestamp (3s grace before hiding tasks) |
+| `pane_states[...].ports` | Every 10s (port scan) | Listening localhost ports detected from the pane process tree |
+| `pane_states[...].task_progress` | Every 1s (refresh cycle) | Parsed from activity log — task list per pane |
+| `pane_states[...].task_dismissed_total` | On task completion | Tracks dismissed completed-task counts |
+| `pane_states[...].inactive_since` | On status change | Debounce timestamp (3s grace before hiding tasks) |
 | `pane_tab_prefs` | On user tab switch | Remembered bottom tab choice per pane |
 
 Per-pane file-based state:
@@ -96,7 +106,10 @@ Per-pane file-based state:
 ├─────────────────────────────────────────────────────────────┤
 │  Every 1s (refresh cycle)                                   │
 │  sessions, repo_groups, focused_pane_id, agent_row_targets, │
-│  activity_entries, pane_task_progress                        │
+│  activity_entries, pane_states.task_progress                │
+├─────────────────────────────────────────────────────────────┤
+│  Every 10s (port scan)                                      │
+│  pane_states.ports, agent liveness cleanup                  │
 ├─────────────────────────────────────────────────────────────┤
 │  Every 2s (git background thread)                           │
 │  git (branch, diff, ahead/behind, PR)                       │
@@ -132,6 +145,9 @@ TUI main loop (main.rs)
     → group_panes_by_repo() (group.rs)
     → rebuild_row_targets()          ← applies GlobalState filters
     → refresh_activity_data()        ← reads /tmp activity logs
+    → refresh_task_progress()        ← updates PaneRuntimeState.task_progress
+    → refresh_port_data()            ← updates PaneRuntimeState.ports
+    → scan_session_process_snapshot() ← detects dead panes and clears stale tmux metadata
                         ↓
   → git_rx.try_recv()                ← receives GitData from background thread
                         ↓
@@ -164,6 +180,13 @@ struct HyperlinkOverlay {
     text: String,
     url: String,
 }
+
+struct PaneRuntimeState {
+    ports: Vec<u16>,
+    task_progress: Option<TaskProgress>,
+    task_dismissed_total: Option<usize>,
+    inactive_since: Option<u64>,
+}
 ```
 
 ---
@@ -178,3 +201,5 @@ struct HyperlinkOverlay {
 6. Global state syncs via tmux variables — enables coordination across sidebar instances
 7. Scroll positions are independent per panel — agents, activity, git each have their own `ScrollState`
 8. `line_to_row` is rebuilt every frame — ensures accurate click routing
+9. Pane runtime state is pruned when the pane disappears — prevents stale per-pane ports and task progress from surviving after the agent is gone
+10. Hook-based cleanup wins when available; pid-based cleanup is a slower fallback that removes panes when the agent process is gone but the hook did not fire

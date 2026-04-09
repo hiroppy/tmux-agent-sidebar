@@ -1,5 +1,8 @@
 use std::process::Command;
 
+pub const CLAUDE_AGENT: &str = "claude";
+pub const CODEX_AGENT: &str = "codex";
+
 #[derive(Debug, Clone)]
 pub struct PaneInfo {
     pub pane_id: String,
@@ -85,18 +88,22 @@ pub struct SessionInfo {
 impl AgentType {
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
-            "claude" => Some(Self::Claude),
-            "codex" => Some(Self::Codex),
+            CLAUDE_AGENT => Some(Self::Claude),
+            CODEX_AGENT => Some(Self::Codex),
             _ => None,
         }
     }
 
-    pub fn label(&self) -> &str {
+    pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Claude => "claude",
-            Self::Codex => "codex",
+            Self::Claude => CLAUDE_AGENT,
+            Self::Codex => CODEX_AGENT,
             Self::Unknown => "unknown",
         }
+    }
+
+    pub fn label(&self) -> &str {
+        self.as_str()
     }
 }
 

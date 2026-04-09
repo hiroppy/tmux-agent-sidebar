@@ -306,8 +306,9 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 .as_ref()
                 .map_or(false, |id| id == &pane.pane_id);
 
-            let ports = state.pane_ports.get(&pane.pane_id).map(|v| v.as_slice());
-            let task_progress = state.pane_task_progress.get(&pane.pane_id);
+            let pane_state = state.pane_state(&pane.pane_id);
+            let ports = pane_state.map(|s| s.ports.as_slice());
+            let task_progress = pane_state.and_then(|s| s.task_progress.as_ref());
             let pane_lines = render_pane_lines_with_ports(
                 pane,
                 git_info,
@@ -415,38 +416,13 @@ fn bordered_split_line<'a>(
         Span::styled(" ", apply_bg(Style::default())),
     ];
     spans.extend(left_spans);
-    spans.push(Span::styled(" ".repeat(padding), apply_bg(Style::default())));
+    spans.push(Span::styled(
+        " ".repeat(padding),
+        apply_bg(Style::default()),
+    ));
     spans.extend(right_spans);
     spans.push(Span::styled("│", border_style));
     Line::from(spans)
-}
-
-#[cfg(test)]
-fn render_pane_lines<'a>(
-    pane: &crate::tmux::PaneInfo,
-    git_info: &crate::group::PaneGitInfo,
-    task_progress: Option<&crate::activity::TaskProgress>,
-    selected: bool,
-    active: bool,
-    border_color: ratatui::style::Color,
-    width: usize,
-    theme: &ColorTheme,
-    spinner_frame: usize,
-    now: u64,
-) -> Vec<Line<'a>> {
-    render_pane_lines_with_ports(
-        pane,
-        git_info,
-        None,
-        task_progress,
-        selected,
-        active,
-        border_color,
-        width,
-        theme,
-        spinner_frame,
-        now,
-    )
 }
 
 fn render_pane_lines_with_ports<'a>(
@@ -836,9 +812,10 @@ mod tests {
     fn render_pane_lines_shows_permission_badge() {
         let theme = ColorTheme::default();
         let pane = pane(PermissionMode::Auto, PaneStatus::Running, "");
-        let lines = render_pane_lines(
+        let lines = render_pane_lines_with_ports(
             &pane,
             &PaneGitInfo::default(),
+            None,
             None,
             false,
             false,
@@ -926,9 +903,10 @@ mod tests {
         let theme = ColorTheme::default();
         let mut pane = pane(PermissionMode::Default, PaneStatus::Running, "");
         pane.started_at = Some(1_000_000 - 125);
-        let lines = render_pane_lines(
+        let lines = render_pane_lines_with_ports(
             &pane,
             &PaneGitInfo::default(),
+            None,
             None,
             false,
             false,
@@ -959,9 +937,10 @@ mod tests {
     fn render_pane_lines_shows_idle_prompt_hint() {
         let theme = ColorTheme::default();
         let pane = pane(PermissionMode::Default, PaneStatus::Idle, "");
-        let lines = render_pane_lines(
+        let lines = render_pane_lines_with_ports(
             &pane,
             &PaneGitInfo::default(),
+            None,
             None,
             false,
             false,
@@ -985,9 +964,10 @@ mod tests {
             PaneStatus::Idle,
             "hello world from codex",
         );
-        let lines = render_pane_lines(
+        let lines = render_pane_lines_with_ports(
             &pane,
             &PaneGitInfo::default(),
+            None,
             None,
             false,
             false,
@@ -1009,9 +989,10 @@ mod tests {
         let theme = ColorTheme::default();
         let mut p = pane(PermissionMode::Default, PaneStatus::Running, "test");
         p.subagents = vec!["Explore".into()];
-        let lines = render_pane_lines(
+        let lines = render_pane_lines_with_ports(
             &p,
             &PaneGitInfo::default(),
+            None,
             None,
             false,
             false,
@@ -1034,9 +1015,10 @@ mod tests {
         let theme = ColorTheme::default();
         let mut p = pane(PermissionMode::Default, PaneStatus::Running, "test");
         p.subagents = vec!["Explore #1".into(), "Plan".into(), "Explore #2".into()];
-        let lines = render_pane_lines(
+        let lines = render_pane_lines_with_ports(
             &p,
             &PaneGitInfo::default(),
+            None,
             None,
             false,
             false,
@@ -1063,9 +1045,10 @@ mod tests {
         let mut p = pane(PermissionMode::Default, PaneStatus::Waiting, "");
         p.subagents = vec!["Explore".into()];
         p.wait_reason = "permission_prompt".into();
-        let lines = render_pane_lines(
+        let lines = render_pane_lines_with_ports(
             &p,
             &PaneGitInfo::default(),
+            None,
             None,
             false,
             false,
@@ -1093,9 +1076,10 @@ mod tests {
             "Task completed successfully",
             true,
         );
-        let lines = render_pane_lines(
+        let lines = render_pane_lines_with_ports(
             &p,
             &PaneGitInfo::default(),
+            None,
             None,
             false,
             false,
@@ -1123,9 +1107,10 @@ mod tests {
             true,
         );
         // Width 20: inner_width=17, prefix=4, so wrap at 13 chars
-        let lines = render_pane_lines(
+        let lines = render_pane_lines_with_ports(
             &p,
             &PaneGitInfo::default(),
+            None,
             None,
             false,
             false,
@@ -1150,9 +1135,10 @@ mod tests {
     fn render_pane_lines_normal_prompt_not_detected_as_response() {
         let theme = ColorTheme::default();
         let p = pane(PermissionMode::Default, PaneStatus::Running, "fix the bug");
-        let lines = render_pane_lines(
+        let lines = render_pane_lines_with_ports(
             &p,
             &PaneGitInfo::default(),
+            None,
             None,
             false,
             false,
@@ -1181,9 +1167,10 @@ mod tests {
                 ("Task C".into(), TaskStatus::Pending),
             ],
         };
-        let lines = render_pane_lines(
+        let lines = render_pane_lines_with_ports(
             &p,
             &PaneGitInfo::default(),
+            None,
             Some(&progress),
             false,
             false,
@@ -1207,9 +1194,10 @@ mod tests {
         let theme = ColorTheme::default();
         let p = pane(PermissionMode::Default, PaneStatus::Idle, "");
         let progress = TaskProgress { tasks: vec![] };
-        let lines = render_pane_lines(
+        let lines = render_pane_lines_with_ports(
             &p,
             &PaneGitInfo::default(),
+            None,
             Some(&progress),
             false,
             false,

@@ -291,6 +291,7 @@ Create or edit `~/.codex/hooks.json`:
 
 - **Waiting status (Claude Code)** — After approving a permission prompt, the status stays `waiting` until the next hook event fires. This is a limitation of the Claude Code hook system.
 - **Codex hook coverage** — Codex does not support `Notification` or `PostToolUse` hooks, so waiting status, activity log, and task progress are unavailable.
+- **Dead pane cleanup** — If an agent exits without a hook, the periodic pid scan removes the stale pane on the next refresh cycle.
 
 ## Accessing Agent Status from Scripts
 

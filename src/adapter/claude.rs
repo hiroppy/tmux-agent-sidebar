@@ -1,4 +1,5 @@
 use crate::event::{AgentEvent, EventAdapter, WorktreeInfo};
+use crate::tmux::CLAUDE_AGENT;
 use serde_json::Value;
 
 use super::json_str;
@@ -52,7 +53,7 @@ impl EventAdapter for ClaudeAdapter {
     fn parse(&self, event_name: &str, input: &Value) -> Option<AgentEvent> {
         match event_name {
             "session-start" => Some(AgentEvent::SessionStart {
-                agent: "claude".into(),
+                agent: CLAUDE_AGENT.into(),
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: json_str(input, "permission_mode").into(),
                 worktree: parse_worktree(input),
@@ -60,7 +61,7 @@ impl EventAdapter for ClaudeAdapter {
             }),
             "session-end" => Some(AgentEvent::SessionEnd),
             "user-prompt-submit" => Some(AgentEvent::UserPromptSubmit {
-                agent: "claude".into(),
+                agent: CLAUDE_AGENT.into(),
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: json_str(input, "permission_mode").into(),
                 prompt: json_str(input, "prompt").into(),
@@ -71,7 +72,7 @@ impl EventAdapter for ClaudeAdapter {
                 let wait_reason = json_str(input, "notification_type");
                 let meta_only = wait_reason == "idle_prompt";
                 Some(AgentEvent::Notification {
-                    agent: "claude".into(),
+                    agent: CLAUDE_AGENT.into(),
                     cwd: json_str(input, "cwd").into(),
                     permission_mode: json_str(input, "permission_mode").into(),
                     wait_reason: wait_reason.into(),
@@ -81,7 +82,7 @@ impl EventAdapter for ClaudeAdapter {
                 })
             }
             "stop" => Some(AgentEvent::Stop {
-                agent: "claude".into(),
+                agent: CLAUDE_AGENT.into(),
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: json_str(input, "permission_mode").into(),
                 last_message: json_str(input, "last_assistant_message").into(),
@@ -106,7 +107,7 @@ impl EventAdapter for ClaudeAdapter {
                     error_details
                 };
                 Some(AgentEvent::StopFailure {
-                    agent: "claude".into(),
+                    agent: CLAUDE_AGENT.into(),
                     cwd: json_str(input, "cwd").into(),
                     permission_mode: json_str(input, "permission_mode").into(),
                     error: error.into(),
@@ -115,7 +116,7 @@ impl EventAdapter for ClaudeAdapter {
                 })
             }
             "permission-denied" => Some(AgentEvent::PermissionDenied {
-                agent: "claude".into(),
+                agent: CLAUDE_AGENT.into(),
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: json_str(input, "permission_mode").into(),
                 worktree: parse_worktree(input),

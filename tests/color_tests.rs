@@ -35,9 +35,9 @@ fn test_all_color_theme_defaults() {
     assert_eq!(theme.text_muted, Color::Indexed(244));
 
     // Header/UI element colors
-        assert_eq!(theme.session_header, Color::Indexed(39));
-        assert_eq!(theme.port, Color::Indexed(246));
-        assert_eq!(theme.wait_reason, Color::Indexed(221));
+    assert_eq!(theme.session_header, Color::Indexed(39));
+    assert_eq!(theme.port, Color::Indexed(246));
+    assert_eq!(theme.wait_reason, Color::Indexed(221));
     assert_eq!(theme.activity_border, Color::Indexed(39));
     assert_eq!(theme.branch, Color::Indexed(109));
 
@@ -302,7 +302,7 @@ fn test_task_progress_line_uses_task_progress_color() {
             ("Task C".into(), TaskStatus::Pending),
         ],
     };
-    state.pane_task_progress.insert("%1".into(), progress);
+    state.set_pane_task_progress("%1", Some(progress));
 
     let styled = render_to_styled_string(&mut state, 40, 25);
     // task_progress color is 223

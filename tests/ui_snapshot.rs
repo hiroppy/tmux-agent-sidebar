@@ -678,9 +678,7 @@ fn snapshot_long_branch_with_ports_ui() {
         has_focus: true,
         panes: vec![(pane, git_info)],
     }]);
-    state
-        .pane_ports
-        .insert("%1".into(), vec![3000, 5173]);
+    state.set_pane_ports("%1", vec![3000, 5173]);
 
     let output = render_to_string(&mut state, 40, 24);
     let expected = indoc! {r#"
@@ -700,15 +698,15 @@ fn snapshot_task_progress_partial_ui() {
     let mut pane = make_pane(AgentType::Claude, PaneStatus::Running);
     pane.prompt = "working".into();
     let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
-    state.pane_task_progress.insert(
-        "%1".into(),
-        TaskProgress {
+    state.set_pane_task_progress(
+        "%1",
+        Some(TaskProgress {
             tasks: vec![
                 ("Task A".into(), TaskStatus::Completed),
                 ("Task B".into(), TaskStatus::InProgress),
                 ("Task C".into(), TaskStatus::Pending),
             ],
-        },
+        }),
     );
 
     let output = render_to_string(&mut state, 28, 25);
@@ -723,14 +721,14 @@ fn snapshot_task_progress_partial_ui() {
 fn snapshot_task_progress_all_completed_ui() {
     let pane = make_pane(AgentType::Claude, PaneStatus::Running);
     let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
-    state.pane_task_progress.insert(
-        "%1".into(),
-        TaskProgress {
+    state.set_pane_task_progress(
+        "%1",
+        Some(TaskProgress {
             tasks: vec![
                 ("A".into(), TaskStatus::Completed),
                 ("B".into(), TaskStatus::Completed),
             ],
-        },
+        }),
     );
 
     let output = render_to_string(&mut state, 28, 25);
@@ -742,15 +740,15 @@ fn snapshot_task_progress_all_completed_ui() {
 fn snapshot_task_progress_all_pending_ui() {
     let pane = make_pane(AgentType::Claude, PaneStatus::Running);
     let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
-    state.pane_task_progress.insert(
-        "%1".into(),
-        TaskProgress {
+    state.set_pane_task_progress(
+        "%1",
+        Some(TaskProgress {
             tasks: vec![
                 ("A".into(), TaskStatus::Pending),
                 ("B".into(), TaskStatus::Pending),
                 ("C".into(), TaskStatus::Pending),
             ],
-        },
+        }),
     );
 
     let output = render_to_string(&mut state, 28, 25);
@@ -780,14 +778,14 @@ fn snapshot_all_elements_combined_ui() {
         has_focus: true,
         panes: vec![(pane, git_info)],
     }]);
-    state.pane_task_progress.insert(
-        "%1".into(),
-        TaskProgress {
+    state.set_pane_task_progress(
+        "%1",
+        Some(TaskProgress {
             tasks: vec![
                 ("A".into(), TaskStatus::Completed),
                 ("B".into(), TaskStatus::InProgress),
             ],
-        },
+        }),
     );
 
     let output = render_to_string(&mut state, 30, 32);

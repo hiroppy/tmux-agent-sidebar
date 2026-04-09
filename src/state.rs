@@ -117,6 +117,15 @@ pub enum BottomTab {
     GitStatus,
 }
 
+/// Per-pane runtime state that should vanish together with the pane.
+#[derive(Debug, Clone, Default)]
+pub struct PaneRuntimeState {
+    pub ports: Vec<u16>,
+    pub task_progress: Option<TaskProgress>,
+    pub task_dismissed_total: Option<usize>,
+    pub inactive_since: Option<u64>,
+}
+
 #[derive(Debug, Clone)]
 pub struct RowTarget {
     pub pane_id: String,
@@ -252,11 +261,7 @@ pub struct AppState {
     pub bottom_tab: BottomTab,
     pub git: crate::git::GitData,
     pub git_scroll: ScrollState,
-    pub pane_ports: HashMap<String, Vec<u16>>,
-    pub pane_task_progress: HashMap<String, TaskProgress>,
-    pub pane_task_dismissed: HashMap<String, usize>,
-    /// Tracks when each pane first became inactive (epoch seconds).
-    pub pane_inactive_since: HashMap<String, u64>,
+    pub pane_states: HashMap<String, PaneRuntimeState>,
     /// Agent pane IDs that have already been seen.
     pub seen_agent_panes: std::collections::HashSet<String>,
     /// Per-pane bottom tab preference.
@@ -315,10 +320,7 @@ impl AppState {
             bottom_tab: BottomTab::Activity,
             git: crate::git::GitData::default(),
             git_scroll: ScrollState::default(),
-            pane_ports: HashMap::new(),
-            pane_task_progress: HashMap::new(),
-            pane_task_dismissed: HashMap::new(),
-            pane_inactive_since: HashMap::new(),
+            pane_states: HashMap::new(),
             seen_agent_panes: std::collections::HashSet::new(),
             pane_tab_prefs: HashMap::new(),
             prev_focused_pane_id: None,
@@ -337,6 +339,63 @@ impl AppState {
             port_scan_initialized: false,
             last_port_refresh: Instant::now(),
         }
+    }
+
+    pub fn pane_state_mut(&mut self, pane_id: &str) -> &mut PaneRuntimeState {
+        self.pane_states.entry(pane_id.to_string()).or_default()
+    }
+
+    pub fn pane_state(&self, pane_id: &str) -> Option<&PaneRuntimeState> {
+        self.pane_states.get(pane_id)
+    }
+
+    pub fn set_pane_ports(&mut self, pane_id: &str, ports: Vec<u16>) {
+        self.pane_state_mut(pane_id).ports = ports;
+    }
+
+    pub fn pane_ports(&self, pane_id: &str) -> Option<&[u16]> {
+        self.pane_state(pane_id).map(|s| s.ports.as_slice())
+    }
+
+    pub fn set_pane_task_progress(&mut self, pane_id: &str, progress: Option<TaskProgress>) {
+        self.pane_state_mut(pane_id).task_progress = progress;
+    }
+
+    pub fn pane_task_progress(&self, pane_id: &str) -> Option<&TaskProgress> {
+        self.pane_state(pane_id)
+            .and_then(|s| s.task_progress.as_ref())
+    }
+
+    pub fn set_pane_task_dismissed_total(&mut self, pane_id: &str, total: Option<usize>) {
+        self.pane_state_mut(pane_id).task_dismissed_total = total;
+    }
+
+    pub fn pane_task_dismissed_total(&self, pane_id: &str) -> Option<usize> {
+        self.pane_state(pane_id)
+            .and_then(|s| s.task_dismissed_total)
+    }
+
+    pub fn set_pane_inactive_since(&mut self, pane_id: &str, since: Option<u64>) {
+        self.pane_state_mut(pane_id).inactive_since = since;
+    }
+
+    pub fn pane_inactive_since(&self, pane_id: &str) -> Option<u64> {
+        self.pane_state(pane_id).and_then(|s| s.inactive_since)
+    }
+
+    pub fn clear_pane_state(&mut self, pane_id: &str) {
+        self.pane_states.remove(pane_id);
+    }
+
+    pub fn prune_pane_states_to_current_panes(&mut self) {
+        let mut active_ids = std::collections::HashSet::new();
+        for group in &self.repo_groups {
+            for (pane, _) in &group.panes {
+                active_ids.insert(pane.pane_id.clone());
+            }
+        }
+        self.pane_states
+            .retain(|pane_id, _| active_ids.contains(pane_id));
     }
 
     pub fn rebuild_row_targets(&mut self) {
@@ -755,13 +814,13 @@ mod tests {
         state.refresh_task_progress();
 
         // All completed → hidden immediately
-        assert!(state.pane_task_progress.get(&pane_id).is_none());
+        assert!(state.pane_task_progress(&pane_id).is_none());
         // Dismissed count should be recorded
-        assert_eq!(state.pane_task_dismissed.get(&pane_id), Some(&2));
+        assert_eq!(state.pane_task_dismissed_total(&pane_id), Some(2));
 
         // Calling refresh again should still be hidden (no flicker)
         state.refresh_task_progress();
-        assert!(state.pane_task_progress.get(&pane_id).is_none());
+        assert!(state.pane_task_progress(&pane_id).is_none());
 
         fs::remove_file(&log_path).ok();
     }
@@ -785,7 +844,7 @@ mod tests {
         )
         .unwrap();
         state.refresh_task_progress();
-        assert!(state.pane_task_progress.get(&pane_id).is_none());
+        assert!(state.pane_task_progress(&pane_id).is_none());
 
         // Now add a new in-progress task → should re-show
         fs::write(
@@ -793,7 +852,7 @@ mod tests {
             "10:00|TaskCreate|#1 A\n10:01|TaskUpdate|completed #1\n10:02|TaskCreate|#2 B\n10:03|TaskUpdate|in_progress #2\n",
         ).unwrap();
         state.refresh_task_progress();
-        assert!(state.pane_task_progress.get(&pane_id).is_some());
+        assert!(state.pane_task_progress(&pane_id).is_some());
 
         fs::remove_file(&log_path).ok();
     }
@@ -903,18 +962,18 @@ mod tests {
             has_focus: true,
             panes: vec![(test_pane(&pane_id), PaneGitInfo::default())],
         }];
-        state.pane_task_progress.insert(
-            pane_id.clone(),
-            TaskProgress {
+        state.set_pane_task_progress(
+            &pane_id,
+            Some(TaskProgress {
                 tasks: vec![("stale".into(), TaskStatus::InProgress)],
-            },
+            }),
         );
-        state.pane_task_dismissed.insert(pane_id.clone(), 1);
+        state.set_pane_task_dismissed_total(&pane_id, Some(1));
 
         state.refresh_task_progress();
 
-        assert!(state.pane_task_progress.is_empty());
-        assert!(state.pane_task_dismissed.is_empty());
+        assert!(state.pane_task_progress(&pane_id).is_none());
+        assert_eq!(state.pane_task_dismissed_total(&pane_id), None);
     }
 
     #[test]
@@ -926,7 +985,7 @@ mod tests {
             has_focus: true,
             panes: vec![(test_pane(&pane_id), PaneGitInfo::default())],
         }];
-        state.pane_task_dismissed.insert(pane_id.clone(), 1);
+        state.set_pane_task_dismissed_total(&pane_id, Some(1));
         let log_path = write_activity_log(
             &pane_id,
             "10:00|TaskCreate|#1 A\n10:01|TaskUpdate|in_progress #1\n",
@@ -934,9 +993,9 @@ mod tests {
 
         state.refresh_task_progress();
 
-        assert_eq!(state.pane_task_dismissed.get(&pane_id), None);
+        assert_eq!(state.pane_task_dismissed_total(&pane_id), None);
         assert_eq!(
-            state.pane_task_progress.get(&pane_id).map(|p| p.total()),
+            state.pane_task_progress(&pane_id).map(|p| p.total()),
             Some(1)
         );
         fs::remove_file(&log_path).ok();
@@ -958,8 +1017,8 @@ mod tests {
 
         state.refresh_task_progress();
 
-        assert!(state.pane_task_progress.get(&pane_id).is_none());
-        assert_eq!(state.pane_task_dismissed.get(&pane_id), Some(&1));
+        assert!(state.pane_task_progress(&pane_id).is_none());
+        assert_eq!(state.pane_task_dismissed_total(&pane_id), Some(1));
         fs::remove_file(&log_path).ok();
     }
 
@@ -978,12 +1037,12 @@ mod tests {
         );
 
         state.refresh_task_progress();
-        assert_eq!(state.pane_task_dismissed.get(&pane_id), Some(&1));
-        assert!(state.pane_task_progress.get(&pane_id).is_none());
+        assert_eq!(state.pane_task_dismissed_total(&pane_id), Some(1));
+        assert!(state.pane_task_progress(&pane_id).is_none());
 
         state.refresh_task_progress();
-        assert_eq!(state.pane_task_dismissed.get(&pane_id), Some(&1));
-        assert!(state.pane_task_progress.get(&pane_id).is_none());
+        assert_eq!(state.pane_task_dismissed_total(&pane_id), Some(1));
+        assert!(state.pane_task_progress(&pane_id).is_none());
         fs::remove_file(&log_path).ok();
     }
 
@@ -1001,16 +1060,60 @@ mod tests {
             "10:00|TaskCreate|#1 A\n10:01|TaskUpdate|completed #1\n",
         );
         state.refresh_task_progress();
-        assert_eq!(state.pane_task_dismissed.get(&pane_id), Some(&1));
+        assert_eq!(state.pane_task_dismissed_total(&pane_id), Some(1));
 
         // Pane removed — both dismissed and inactive_since should be cleaned up
         state.repo_groups.clear();
-        state.pane_inactive_since.insert(pane_id.clone(), 100);
+        state.set_pane_inactive_since(&pane_id, Some(100));
         state.refresh_task_progress();
 
-        assert!(state.pane_task_dismissed.is_empty());
-        assert!(state.pane_inactive_since.is_empty());
+        assert!(state.pane_state(&pane_id).is_none());
         fs::remove_file(&log_path).ok();
+    }
+
+    #[test]
+    fn pane_runtime_state_accessors_round_trip() {
+        let mut state = AppState::new("%99".into());
+        let pane_id = "%213";
+
+        state.set_pane_ports(pane_id, vec![3000, 5173]);
+        state.set_pane_task_progress(
+            pane_id,
+            Some(TaskProgress {
+                tasks: vec![("A".into(), TaskStatus::InProgress)],
+            }),
+        );
+        state.set_pane_task_dismissed_total(pane_id, Some(4));
+        state.set_pane_inactive_since(pane_id, Some(123));
+
+        assert_eq!(state.pane_ports(pane_id), Some(&[3000, 5173][..]));
+        assert_eq!(
+            state.pane_task_progress(pane_id).map(|p| p.total()),
+            Some(1)
+        );
+        assert_eq!(state.pane_task_dismissed_total(pane_id), Some(4));
+        assert_eq!(state.pane_inactive_since(pane_id), Some(123));
+
+        state.clear_pane_state(pane_id);
+        assert!(state.pane_state(pane_id).is_none());
+    }
+
+    #[test]
+    fn prune_pane_states_to_current_panes_drops_stale_entries() {
+        let mut state = AppState::new("%99".into());
+        state.repo_groups = vec![RepoGroup {
+            name: "test".into(),
+            has_focus: true,
+            panes: vec![(test_pane("%1"), PaneGitInfo::default())],
+        }];
+        state.set_pane_ports("%1", vec![3000]);
+        state.set_pane_ports("%2", vec![5173]);
+        state.set_pane_task_dismissed_total("%2", Some(2));
+
+        state.prune_pane_states_to_current_panes();
+
+        assert_eq!(state.pane_ports("%1"), Some(&[3000][..]));
+        assert!(state.pane_state("%2").is_none());
     }
 
     #[test]
@@ -1033,14 +1136,14 @@ mod tests {
         // First refresh: grace period starts, tasks still shown (not dismissed yet)
         state.now = 100;
         state.refresh_task_progress();
-        assert!(state.pane_task_progress.get(&pane_id).is_some());
-        assert!(state.pane_inactive_since.contains_key(&pane_id));
+        assert!(state.pane_task_progress(&pane_id).is_some());
+        assert!(state.pane_inactive_since(&pane_id).is_some());
 
         // After grace period (3s): should be dismissed
         state.now = 104;
         state.refresh_task_progress();
-        assert!(state.pane_task_progress.get(&pane_id).is_none());
-        assert_eq!(state.pane_task_dismissed.get(&pane_id), Some(&6));
+        assert!(state.pane_task_progress(&pane_id).is_none());
+        assert_eq!(state.pane_task_dismissed_total(&pane_id), Some(6));
         fs::remove_file(&log_path).ok();
     }
 
@@ -1062,9 +1165,9 @@ mod tests {
         state.refresh_task_progress();
 
         // Agent is running, so incomplete tasks should still be shown
-        assert!(state.pane_task_progress.get(&pane_id).is_some());
+        assert!(state.pane_task_progress(&pane_id).is_some());
         assert_eq!(
-            state.pane_task_progress.get(&pane_id).map(|p| p.total()),
+            state.pane_task_progress(&pane_id).map(|p| p.total()),
             Some(2)
         );
         fs::remove_file(&log_path).ok();
@@ -1089,13 +1192,13 @@ mod tests {
         // First refresh: grace period starts, tasks still shown
         state.now = 100;
         state.refresh_task_progress();
-        assert!(state.pane_task_progress.get(&pane_id).is_some());
+        assert!(state.pane_task_progress(&pane_id).is_some());
 
         // After grace period: agent errored out — dismiss incomplete tasks
         state.now = 104;
         state.refresh_task_progress();
-        assert!(state.pane_task_progress.get(&pane_id).is_none());
-        assert_eq!(state.pane_task_dismissed.get(&pane_id), Some(&1));
+        assert!(state.pane_task_progress(&pane_id).is_none());
+        assert_eq!(state.pane_task_dismissed_total(&pane_id), Some(1));
         fs::remove_file(&log_path).ok();
     }
 
@@ -1120,8 +1223,8 @@ mod tests {
         // Agent is idle — grace timer starts, tasks still shown
         state.now = 100;
         state.refresh_task_progress();
-        assert!(state.pane_task_progress.get(&pane_id).is_some());
-        assert!(state.pane_inactive_since.contains_key(&pane_id));
+        assert!(state.pane_task_progress(&pane_id).is_some());
+        assert!(state.pane_inactive_since(&pane_id).is_some());
 
         // Agent returns to running before grace expires — timer resets
         let mut pane = test_pane(&pane_id);
@@ -1133,8 +1236,8 @@ mod tests {
         }];
         state.now = 102;
         state.refresh_task_progress();
-        assert!(state.pane_task_progress.get(&pane_id).is_some());
-        assert!(!state.pane_inactive_since.contains_key(&pane_id));
+        assert!(state.pane_task_progress(&pane_id).is_some());
+        assert!(state.pane_inactive_since(&pane_id).is_none());
 
         fs::remove_file(&log_path).ok();
     }
@@ -1160,18 +1263,18 @@ mod tests {
         // t=100: grace timer starts
         state.now = 100;
         state.refresh_task_progress();
-        assert!(state.pane_task_progress.get(&pane_id).is_some());
+        assert!(state.pane_task_progress(&pane_id).is_some());
 
         // t=102 (2s elapsed): still within grace period — tasks shown
         state.now = 102;
         state.refresh_task_progress();
-        assert!(state.pane_task_progress.get(&pane_id).is_some());
+        assert!(state.pane_task_progress(&pane_id).is_some());
 
         // t=103 (exactly 3s): grace expired (>= 3) — dismissed
         state.now = 103;
         state.refresh_task_progress();
-        assert!(state.pane_task_progress.get(&pane_id).is_none());
-        assert_eq!(state.pane_task_dismissed.get(&pane_id), Some(&1));
+        assert!(state.pane_task_progress(&pane_id).is_none());
+        assert_eq!(state.pane_task_dismissed_total(&pane_id), Some(1));
 
         fs::remove_file(&log_path).ok();
     }
@@ -1197,8 +1300,8 @@ mod tests {
         state.refresh_task_progress();
 
         // Tasks shown and no inactive timer started
-        assert!(state.pane_task_progress.get(&pane_id).is_some());
-        assert!(!state.pane_inactive_since.contains_key(&pane_id));
+        assert!(state.pane_task_progress(&pane_id).is_some());
+        assert!(state.pane_inactive_since(&pane_id).is_none());
 
         fs::remove_file(&log_path).ok();
     }
