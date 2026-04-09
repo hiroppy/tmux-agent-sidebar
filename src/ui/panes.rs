@@ -9,6 +9,7 @@ use ratatui::{
 use crate::state::{StatusFilter, AppState, Focus, RepoFilter};
 use crate::tmux::PaneStatus;
 use crate::ui::colors::ColorTheme;
+use crate::ui::icons::StatusIcons;
 
 use super::text::{
     display_width, elapsed_label, pad_to, truncate_to_width, wait_reason_label, wrap_text,
@@ -18,28 +19,29 @@ use super::text::{
 /// Render the filter bar. Returns (Line, repo_button_col).
 fn render_filter_bar<'a>(state: &AppState, bar_width: u16) -> (Line<'a>, u16) {
     let theme = &state.theme;
+    let icons = &state.icons;
     let (all, running, waiting, idle, error) = state.status_counts();
 
     let items: Vec<(StatusFilter, Option<(&str, ratatui::style::Color)>, usize)> = vec![
         (StatusFilter::All, None, all),
         (
             StatusFilter::Running,
-            Some((PaneStatus::Running.icon(), theme.status_running)),
+            Some((icons.status_icon(&PaneStatus::Running), theme.status_running)),
             running,
         ),
         (
             StatusFilter::Waiting,
-            Some((PaneStatus::Waiting.icon(), theme.status_waiting)),
+            Some((icons.status_icon(&PaneStatus::Waiting), theme.status_waiting)),
             waiting,
         ),
         (
             StatusFilter::Idle,
-            Some((PaneStatus::Idle.icon(), theme.status_idle)),
+            Some((icons.status_icon(&PaneStatus::Idle), theme.status_idle)),
             idle,
         ),
         (
             StatusFilter::Error,
-            Some((PaneStatus::Error.icon(), theme.status_error)),
+            Some((icons.status_icon(&PaneStatus::Error), theme.status_error)),
             error,
         ),
     ];
@@ -320,6 +322,7 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 is_active,
                 border_color,
                 width,
+                &state.icons,
                 theme,
                 state.spinner_frame,
                 state.now,
@@ -437,6 +440,7 @@ fn render_pane_lines_with_ports<'a>(
     active: bool,
     border_color: ratatui::style::Color,
     width: usize,
+    icons: &StatusIcons,
     theme: &ColorTheme,
     spinner_frame: usize,
     now: u64,
@@ -446,7 +450,7 @@ fn render_pane_lines_with_ports<'a>(
     let border_style = Style::default().fg(border_color);
     let inner_width = width.saturating_sub(3);
 
-    let (icon, pulse_color) = running_icon_for(&pane.status, spinner_frame);
+    let (icon, pulse_color) = running_icon_for(&pane.status, spinner_frame, icons);
     let icon_color =
         pulse_color.unwrap_or_else(|| theme.status_color(&pane.status, pane.attention));
     use crate::tmux::PermissionMode;
@@ -736,21 +740,22 @@ fn render_pane_lines_with_ports<'a>(
     out
 }
 
-pub(crate) fn running_icon_for(
+pub(crate) fn running_icon_for<'a>(
     status: &PaneStatus,
     spinner_frame: usize,
-) -> (&'static str, Option<ratatui::style::Color>) {
-    use crate::{SPINNER_ICON, SPINNER_PULSE};
+    icons: &'a StatusIcons,
+) -> (&'a str, Option<ratatui::style::Color>) {
+    use crate::SPINNER_PULSE;
 
     match status {
         PaneStatus::Running => {
             let color_idx = SPINNER_PULSE[spinner_frame % SPINNER_PULSE.len()];
             (
-                SPINNER_ICON,
+                icons.status_icon(status),
                 Some(ratatui::style::Color::Indexed(color_idx)),
             )
         }
-        _ => (status.icon(), None),
+        _ => (icons.status_icon(status), None),
     }
 }
 
@@ -759,6 +764,7 @@ mod tests {
     use super::*;
     use crate::group::PaneGitInfo;
     use crate::tmux::{AgentType, PaneInfo, PermissionMode};
+    use crate::ui::icons::StatusIcons;
 
     fn pane(permission_mode: PermissionMode, status: PaneStatus, prompt: &str) -> PaneInfo {
         pane_with_response(permission_mode, status, prompt, false)
@@ -826,6 +832,7 @@ mod tests {
             false,
             theme.border_active,
             40,
+            &StatusIcons::default(),
             &theme,
             0,
             0,
@@ -855,6 +862,7 @@ mod tests {
             false,
             theme.border_active,
             40,
+            &StatusIcons::default(),
             &theme,
             0,
             0,
@@ -882,6 +890,7 @@ mod tests {
             false,
             theme.border_active,
             40,
+            &StatusIcons::default(),
             &theme,
             0,
             0,
@@ -911,6 +920,7 @@ mod tests {
             false,
             theme.border_active,
             40,
+            &StatusIcons::default(),
             &theme,
             0,
             0,
@@ -944,6 +954,7 @@ mod tests {
             false,
             theme.border_active,
             40,
+            &StatusIcons::default(),
             &theme,
             0,
             1_000_000,
@@ -955,12 +966,13 @@ mod tests {
 
     #[test]
     fn running_icon_for_all_statuses() {
-        assert_eq!(running_icon_for(&PaneStatus::Idle, 0), ("○", None));
-        assert_eq!(running_icon_for(&PaneStatus::Waiting, 0), ("◐", None));
-        assert_eq!(running_icon_for(&PaneStatus::Error, 0), ("✕", None));
-        assert_eq!(running_icon_for(&PaneStatus::Unknown, 0), ("·", None));
+        let icons = StatusIcons::default();
+        assert_eq!(running_icon_for(&PaneStatus::Idle, 0, &icons), ("○", None));
+        assert_eq!(running_icon_for(&PaneStatus::Waiting, 0, &icons), ("◐", None));
+        assert_eq!(running_icon_for(&PaneStatus::Error, 0, &icons), ("✕", None));
+        assert_eq!(running_icon_for(&PaneStatus::Unknown, 0, &icons), ("·", None));
 
-        let (icon, color) = running_icon_for(&PaneStatus::Running, 0);
+        let (icon, color) = running_icon_for(&PaneStatus::Running, 0, &icons);
         assert_eq!(icon, "●");
         assert_eq!(color, Some(ratatui::style::Color::Indexed(82)));
     }
@@ -979,6 +991,7 @@ mod tests {
             false,
             theme.border_active,
             40,
+            &StatusIcons::default(),
             &theme,
             0,
             0,
@@ -1007,6 +1020,7 @@ mod tests {
             false,
             theme.border_active,
             18,
+            &StatusIcons::default(),
             &theme,
             0,
             0,
@@ -1033,6 +1047,7 @@ mod tests {
             false,
             theme.border_active,
             40,
+            &StatusIcons::default(),
             &theme,
             0,
             0,
@@ -1060,6 +1075,7 @@ mod tests {
             false,
             theme.border_active,
             40,
+            &StatusIcons::default(),
             &theme,
             0,
             0,
@@ -1091,6 +1107,7 @@ mod tests {
             false,
             theme.border_active,
             40,
+            &StatusIcons::default(),
             &theme,
             0,
             0,
@@ -1123,6 +1140,7 @@ mod tests {
             false,
             theme.border_active,
             40,
+            &StatusIcons::default(),
             &theme,
             0,
             0,
@@ -1155,6 +1173,7 @@ mod tests {
             false,
             theme.border_active,
             20,
+            &StatusIcons::default(),
             &theme,
             0,
             0,
@@ -1184,6 +1203,7 @@ mod tests {
             false,
             theme.border_active,
             40,
+            &StatusIcons::default(),
             &theme,
             0,
             0,
@@ -1217,6 +1237,7 @@ mod tests {
             false,
             theme.border_active,
             40,
+            &StatusIcons::default(),
             &theme,
             0,
             0,
@@ -1245,6 +1266,7 @@ mod tests {
             false,
             theme.border_active,
             40,
+            &StatusIcons::default(),
             &theme,
             0,
             0,

@@ -93,6 +93,7 @@ fn run_app(
 ) -> io::Result<()> {
     let mut state = AppState::new(tmux_pane);
     state.theme = tmux_agent_sidebar::ui::colors::ColorTheme::from_tmux();
+    state.icons = tmux_agent_sidebar::ui::icons::StatusIcons::from_tmux();
     state.global.load_from_tmux();
     state.refresh();
     let mut window_inactive_count: u32 = 0;

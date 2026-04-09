@@ -335,6 +335,14 @@ set -g @sidebar_color_wait_reason 221    # wait reason text (default: yellow)
 set -g @sidebar_color_path 255           # directory path (default: white)
 set -g @sidebar_color_selection 239      # selected row background (default: dark gray)
 set -g @sidebar_color_branch 109        # git branch name (default: teal)
+
+# Icons (Unicode glyphs; defaults keep the current look)
+set -g @sidebar_icon_running ●           # running status icon
+set -g @sidebar_icon_waiting ◐           # waiting status icon
+set -g @sidebar_icon_idle ○              # idle status icon
+set -g @sidebar_icon_error ✕             # error status icon
+set -g @sidebar_icon_unknown ·           # unknown status icon
+
 set -g @sidebar_prompt_lines 3           # max prompt display lines (default: 3)
 set -g @sidebar_activity_lines 8         # max activity log entries (default: 8)
 
