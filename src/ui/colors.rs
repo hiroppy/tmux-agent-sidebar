@@ -18,6 +18,7 @@ pub struct ColorTheme {
     pub status_idle: Color,
     pub status_error: Color,
     pub status_unknown: Color,
+    pub filter_inactive: Color,
     pub agent_claude: Color,
     pub agent_codex: Color,
     pub text_active: Color,
@@ -53,6 +54,7 @@ impl Default for ColorTheme {
             status_idle: Color::Indexed(110),
             status_error: Color::Indexed(203),
             status_unknown: Color::Indexed(244),
+            filter_inactive: Color::Indexed(245),
             agent_claude: Color::Indexed(174),
             agent_codex: Color::Indexed(141),
             text_active: Color::Indexed(255),
@@ -102,6 +104,7 @@ impl ColorTheme {
         theme.status_waiting = read("@sidebar_color_waiting", theme.status_waiting);
         theme.status_idle = read("@sidebar_color_idle", theme.status_idle);
         theme.status_error = read("@sidebar_color_error", theme.status_error);
+        theme.filter_inactive = read("@sidebar_color_filter_inactive", theme.filter_inactive);
         theme.agent_claude = read("@sidebar_color_agent_claude", theme.agent_claude);
         theme.agent_codex = read("@sidebar_color_agent_codex", theme.agent_codex);
         theme.text_active = read("@sidebar_color_text_active", theme.text_active);

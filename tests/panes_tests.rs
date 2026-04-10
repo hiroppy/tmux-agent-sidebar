@@ -346,9 +346,9 @@ fn repo_popup_highlights_selected_entry_with_background() {
     let selected_line = styled
         .lines()
         .find(|l| {
-            l.contains(&format!("b[fg:255,{bg_marker},bold]"))
-                && l.contains(&format!("d[fg:255,{bg_marker},bold]"))
+            l.contains(&format!("b[fg:255,{bg_marker}]"))
+                && l.contains(&format!("d[fg:255,{bg_marker}]"))
         })
-        .expect("popup should render 'backend' with selection_bg and bold");
-    assert!(selected_line.contains("bold"));
+        .expect("popup should render 'backend' with selection_bg");
+    assert!(selected_line.contains(&bg_marker));
 }

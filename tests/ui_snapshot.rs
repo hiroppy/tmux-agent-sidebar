@@ -1476,9 +1476,7 @@ fn snapshot_filter_bar_icons_use_selected_and_inactive_colors() {
 
     let styled = render_to_styled_string(&mut state, 30, 25);
     let line = styled.lines().next().unwrap();
-    insta::assert_snapshot!(line, @"
- ≡[fg:111]2[fg:255]  ●[fg:240]1[fg:255]  ◐[fg:240]0[fg:240]  ○[fg:240]1[fg:255]  ✕[fg:240]0[fg:240]
-    ");
+    insta::assert_snapshot!(line, @" ≡[fg:111]2[fg:255]  ●[fg:245]1[fg:255]  ◐[fg:245]0[fg:245]  ○[fg:245]1[fg:255]  ✕[fg:245]0[fg:245]");
 }
 
 #[test]
@@ -1524,9 +1522,7 @@ fn snapshot_filter_selected_icon_has_color_without_underline() {
     );
 
     let line = styled.lines().next().unwrap();
-    insta::assert_snapshot!(line, @"
- ≡[fg:240]2[fg:255]  ●[fg:114]1[fg:255]  ◐[fg:240]0[fg:240]  ○[fg:240]1[fg:255]  ✕[fg:240]0[fg:240]
-    ");
+    insta::assert_snapshot!(line, @" ≡[fg:245]2[fg:255]  ●[fg:114]1[fg:255]  ◐[fg:245]0[fg:245]  ○[fg:245]1[fg:255]  ✕[fg:245]0[fg:245]");
 }
 
 #[test]

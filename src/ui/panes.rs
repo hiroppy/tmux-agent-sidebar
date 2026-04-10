@@ -3,7 +3,7 @@ mod row;
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Modifier, Style},
+    style::Style,
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
 };
@@ -61,13 +61,13 @@ fn render_filter_bar<'a>(state: &AppState, bar_width: u16) -> Line<'a> {
         let icon_style = if is_selected {
             Style::default().fg(icon_color)
         } else {
-            Style::default().fg(theme.border_inactive)
+            Style::default().fg(theme.filter_inactive)
         };
         spans.push(Span::styled(icon.to_string(), icon_style));
 
         let count_str = format!("{count}");
         let count_style = if count == 0 {
-            Style::default().fg(theme.border_inactive)
+            Style::default().fg(theme.filter_inactive)
         } else {
             Style::default().fg(theme.text_active)
         };
@@ -110,11 +110,7 @@ fn render_secondary_header<'a>(state: &AppState, width: u16) -> (Line<'a>, Optio
     let repo_button_col = Some(gap as u16);
 
     let repo_has_filter = !matches!(state.global.repo_filter, RepoFilter::All);
-    let repo_style = if state.repo_popup_open {
-        Style::default()
-            .fg(theme.text_active)
-            .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
-    } else if repo_has_filter {
+    let repo_style = if state.repo_popup_open || repo_has_filter {
         Style::default().fg(theme.text_active)
     } else {
         Style::default().fg(theme.text_muted)
@@ -137,8 +133,8 @@ fn render_repo_popup(frame: &mut Frame, state: &mut AppState, area: Rect) {
     }
 
     let max_name_len = repos.iter().map(|r| display_width(r)).max().unwrap_or(3);
-    // Width: marker(2) + name + padding(1) + borders(2)
-    let popup_width = (max_name_len + 5).min(area.width as usize).max(10) as u16;
+    // Width: padding(1 left + 1 right) + name + borders(2)
+    let popup_width = (max_name_len + 4).min(area.width as usize).max(10) as u16;
     let popup_height = (repos.len() as u16 + 2).min(area.height.saturating_sub(2)); // +2 for borders
 
     // Right-aligned, below the 2-row header
@@ -168,9 +164,8 @@ fn render_repo_popup(frame: &mut Frame, state: &mut AppState, area: Rect) {
             RepoFilter::Repo(n) => *n == *name,
         };
 
-        let marker = if is_current { "● " } else { "  " };
-        let truncated = truncate_to_width(name, inner_width.saturating_sub(2));
-        let text = format!("{}{}", marker, truncated);
+        let truncated = truncate_to_width(name, inner_width.saturating_sub(1));
+        let text = format!(" {}", truncated);
         let text_dw = display_width(&text);
         let padding = " ".repeat(inner_width.saturating_sub(text_dw));
 
@@ -178,11 +173,8 @@ fn render_repo_popup(frame: &mut Frame, state: &mut AppState, area: Rect) {
             Style::default()
                 .fg(theme.text_active)
                 .bg(theme.selection_bg)
-                .add_modifier(Modifier::BOLD)
         } else if is_current {
-            Style::default()
-                .fg(theme.text_active)
-                .add_modifier(Modifier::BOLD)
+            Style::default().fg(theme.text_active)
         } else {
             Style::default().fg(theme.text_muted)
         };
@@ -353,6 +345,7 @@ use crate::group::PaneGitInfo;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::style::Modifier;
 
     fn line_text(line: &Line<'_>) -> String {
         line.spans
@@ -459,7 +452,7 @@ mod tests {
         assert_eq!(cells.len(), 10);
 
         assert_eq!(cells[0].content.as_ref(), "≡");
-        assert_eq!(cells[0].style.fg, Some(theme.border_inactive));
+        assert_eq!(cells[0].style.fg, Some(theme.filter_inactive));
         assert!(!cells[0].style.add_modifier.contains(Modifier::UNDERLINED));
 
         assert_eq!(cells[1].content.as_ref(), "2");
@@ -473,22 +466,22 @@ mod tests {
         assert_eq!(cells[3].style.fg, Some(theme.text_active));
 
         assert_eq!(cells[4].content.as_ref(), "◐");
-        assert_eq!(cells[4].style.fg, Some(theme.border_inactive));
+        assert_eq!(cells[4].style.fg, Some(theme.filter_inactive));
 
         assert_eq!(cells[5].content.as_ref(), "0");
-        assert_eq!(cells[5].style.fg, Some(theme.border_inactive));
+        assert_eq!(cells[5].style.fg, Some(theme.filter_inactive));
 
         assert_eq!(cells[6].content.as_ref(), "○");
-        assert_eq!(cells[6].style.fg, Some(theme.border_inactive));
+        assert_eq!(cells[6].style.fg, Some(theme.filter_inactive));
 
         assert_eq!(cells[7].content.as_ref(), "1");
         assert_eq!(cells[7].style.fg, Some(theme.text_active));
 
         assert_eq!(cells[8].content.as_ref(), "✕");
-        assert_eq!(cells[8].style.fg, Some(theme.border_inactive));
+        assert_eq!(cells[8].style.fg, Some(theme.filter_inactive));
 
         assert_eq!(cells[9].content.as_ref(), "0");
-        assert_eq!(cells[9].style.fg, Some(theme.border_inactive));
+        assert_eq!(cells[9].style.fg, Some(theme.filter_inactive));
     }
 
     #[test]
@@ -557,11 +550,14 @@ mod tests {
         let mut state = make_state_with_groups(vec![]);
         state.repo_popup_open = true;
         let (line, _) = render_secondary_header(&state, 28);
-        // Find the repo button span and check it has UNDERLINED modifier
         let last_span = line.spans.last().unwrap();
         assert!(
-            last_span.style.add_modifier.contains(Modifier::UNDERLINED),
-            "repo button should be underlined when popup is open"
+            !last_span.style.add_modifier.contains(Modifier::UNDERLINED),
+            "repo button should not be underlined when popup is open"
+        );
+        assert!(
+            !last_span.style.add_modifier.contains(Modifier::BOLD),
+            "repo button should not be bold when popup is open"
         );
     }
 }
