@@ -3,7 +3,7 @@ mod test_helpers;
 
 use test_helpers::*;
 use tmux_agent_sidebar::activity::ActivityEntry;
-use tmux_agent_sidebar::state::Focus;
+use tmux_agent_sidebar::state::{BottomTab, Focus};
 use tmux_agent_sidebar::tmux::{AgentType, PaneStatus, SessionInfo, WindowInfo};
 
 // ─── Styled Snapshot Tests for Selection and Focus ─────────────────
@@ -94,6 +94,76 @@ fn snapshot_activity_unfocused_styled() {
     assert!(
         output.contains("fg:240"),
         "activity unfocused border should use BORDER_INACTIVE (fg:240)"
+    );
+}
+
+#[test]
+fn bottom_tab_activity_uses_accent_when_selected() {
+    let pane = make_pane(AgentType::Claude, PaneStatus::Running);
+    let mut state = make_state(vec![SessionInfo {
+        session_name: "main".into(),
+        windows: vec![WindowInfo {
+            window_id: "@1".into(),
+            window_name: "project".into(),
+            window_active: true,
+            auto_rename: false,
+            panes: vec![pane.clone()],
+        }],
+    }]);
+    state.repo_groups = vec![make_repo_group("project", vec![pane])];
+    state.rebuild_row_targets();
+    state.focus = Focus::ActivityLog;
+    state.sidebar_focused = true;
+    state.bottom_tab = BottomTab::Activity;
+
+    let output = render_to_styled_string(&mut state, 28, 14);
+    let title_line = output
+        .lines()
+        .find(|line| line.contains('╭'))
+        .expect("bottom title line should be present");
+
+    assert!(
+        title_line.contains("A[fg:153]"),
+        "selected Activity tab should use accent color"
+    );
+    assert!(
+        title_line.contains("G[fg:252]"),
+        "unselected Git tab should remain muted"
+    );
+}
+
+#[test]
+fn bottom_tab_git_uses_accent_when_selected() {
+    let pane = make_pane(AgentType::Claude, PaneStatus::Running);
+    let mut state = make_state(vec![SessionInfo {
+        session_name: "main".into(),
+        windows: vec![WindowInfo {
+            window_id: "@1".into(),
+            window_name: "project".into(),
+            window_active: true,
+            auto_rename: false,
+            panes: vec![pane.clone()],
+        }],
+    }]);
+    state.repo_groups = vec![make_repo_group("project", vec![pane])];
+    state.rebuild_row_targets();
+    state.focus = Focus::ActivityLog;
+    state.sidebar_focused = true;
+    state.bottom_tab = BottomTab::GitStatus;
+
+    let output = render_to_styled_string(&mut state, 28, 14);
+    let title_line = output
+        .lines()
+        .find(|line| line.contains('╭'))
+        .expect("bottom title line should be present");
+
+    assert!(
+        title_line.contains("G[fg:153]"),
+        "selected Git tab should use accent color"
+    );
+    assert!(
+        title_line.contains("A[fg:252]"),
+        "unselected Activity tab should remain muted"
     );
 }
 

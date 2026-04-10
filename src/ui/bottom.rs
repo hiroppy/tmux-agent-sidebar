@@ -79,13 +79,13 @@ pub fn draw_bottom(frame: &mut Frame, state: &mut AppState, area: Rect) {
 fn build_tab_title(state: &AppState) -> Line<'static> {
     let theme = &state.theme;
     let activity_style = if state.bottom_tab == BottomTab::Activity {
-        Style::default().fg(theme.text_active)
+        Style::default().fg(theme.accent)
     } else {
         Style::default().fg(theme.text_muted)
     };
 
     let git_style = if state.bottom_tab == BottomTab::GitStatus {
-        Style::default().fg(theme.text_active)
+        Style::default().fg(theme.accent)
     } else {
         Style::default().fg(theme.text_muted)
     };
