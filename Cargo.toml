@@ -7,11 +7,11 @@ description = "A tmux sidebar that monitors AI coding agents across all windows 
 repository = "https://github.com/hiroppy/tmux-agent-sidebar"
 
 [dependencies]
-ratatui = "=0.29.0"
+ratatui = "=0.30.0"
 crossterm = "=0.29.0"
 unicode-width = "=0.2.0"
 libc = "=0.2.184"
-indexmap = "=2.13.1"
+indexmap = "=2.14.0"
 serde_json = "=1.0.149"
 
 [dev-dependencies]
