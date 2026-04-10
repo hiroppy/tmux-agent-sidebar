@@ -101,10 +101,10 @@ fn render_secondary_header<'a>(state: &AppState, width: u16) -> (Line<'a>, Optio
     let repo_icon = "▾";
 
     let repo_label = match &state.global.repo_filter {
-        RepoFilter::All => "All".to_string(),
-        RepoFilter::Repo(name) => truncate_to_width(name, width.saturating_sub(2) as usize),
+        RepoFilter::All => "—".to_string(),
+        RepoFilter::Repo(name) => truncate_to_width(name, width.saturating_sub(3) as usize),
     };
-    let repo_btn_width = display_width(&repo_label) + 1; // label + arrow
+    let repo_btn_width = display_width(&repo_label) + 2; // label + space + arrow
 
     let gap = (width as usize).saturating_sub(repo_btn_width);
     let repo_button_col = Some(gap as u16);
@@ -123,6 +123,7 @@ fn render_secondary_header<'a>(state: &AppState, width: u16) -> (Line<'a>, Optio
     let mut spans: Vec<Span<'a>> = Vec::new();
     spans.push(Span::raw(" ".repeat(gap)));
     spans.push(Span::styled(repo_label, repo_style));
+    spans.push(Span::raw(" "));
     spans.push(Span::styled(repo_icon, repo_style));
 
     (Line::from(spans), repo_button_col)
@@ -494,7 +495,7 @@ mod tests {
     fn render_secondary_header_repo_button_col_returned() {
         let state = make_state_with_groups(vec![]);
         let (_, col) = render_secondary_header(&state, 28);
-        assert_eq!(col, Some(24), "repo button should be right-aligned");
+        assert_eq!(col, Some(25), "repo button should be right-aligned");
     }
 
     #[test]
