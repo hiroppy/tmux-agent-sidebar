@@ -553,7 +553,10 @@ impl AppState {
     /// Handle mouse click on the secondary header row (row 1).
     /// The repo filter button lives on the far right of this row.
     pub fn handle_secondary_header_click(&mut self, col: u16) {
-        if self.repo_button_col.is_some_and(|repo_button_col| col >= repo_button_col) {
+        if self
+            .repo_button_col
+            .is_some_and(|repo_button_col| col >= repo_button_col)
+        {
             self.toggle_repo_popup();
         }
     }

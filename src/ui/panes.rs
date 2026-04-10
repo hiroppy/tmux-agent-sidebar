@@ -392,7 +392,10 @@ mod tests {
     fn render_filter_bar_is_status_only() {
         let state = make_state_with_groups(vec![]);
         let text = filter_bar_text(&state, 28);
-        assert!(!text.contains("▾"), "status filter bar should not contain repo button");
+        assert!(
+            !text.contains("▾"),
+            "status filter bar should not contain repo button"
+        );
     }
 
     #[test]
@@ -436,7 +439,10 @@ mod tests {
         let mut state = make_state_with_groups(vec![crate::group::RepoGroup {
             name: "project".into(),
             has_focus: true,
-            panes: vec![(pane1, PaneGitInfo::default()), (pane2, PaneGitInfo::default())],
+            panes: vec![
+                (pane1, PaneGitInfo::default()),
+                (pane2, PaneGitInfo::default()),
+            ],
         }]);
         state.global.status_filter = StatusFilter::Running;
         let theme = &state.theme;
@@ -508,7 +514,11 @@ mod tests {
             "repo name should come before the arrow"
         );
         let (line, _) = render_secondary_header(&state, 40);
-        let repo_span = line.spans.iter().find(|span| span.content.contains("my-app")).unwrap();
+        let repo_span = line
+            .spans
+            .iter()
+            .find(|span| span.content.contains("my-app"))
+            .unwrap();
         assert!(
             !repo_span.style.add_modifier.contains(Modifier::BOLD),
             "filtered repo label should not be bold"
@@ -522,7 +532,8 @@ mod tests {
             has_focus: true,
             panes: vec![],
         }]);
-        state.global.repo_filter = RepoFilter::Repo("very-long-repository-name-that-exceeds-width".into());
+        state.global.repo_filter =
+            RepoFilter::Repo("very-long-repository-name-that-exceeds-width".into());
         let text = line_text(&render_secondary_header(&state, 28).0);
         assert!(
             text.contains('…'),

@@ -119,8 +119,10 @@ impl ColorTheme {
         theme.file_change = read("@sidebar_color_file_change", theme.file_change);
         theme.pr_link = read("@sidebar_color_pr_link", theme.pr_link);
         theme.section_title = read("@sidebar_color_section_title", theme.section_title);
-        theme.activity_timestamp =
-            read("@sidebar_color_activity_timestamp", theme.activity_timestamp);
+        theme.activity_timestamp = read(
+            "@sidebar_color_activity_timestamp",
+            theme.activity_timestamp,
+        );
         theme.response_arrow = read("@sidebar_color_response_arrow", theme.response_arrow);
 
         theme
