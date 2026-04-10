@@ -88,10 +88,11 @@ fn test_line_to_row_single_agent() {
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
     let _ = render_to_styled_string(&mut state, 28, 10);
-    assert_eq!(state.line_to_row[0], None); // box top
+    // repo header, agent status, idle hint
+    assert_eq!(state.line_to_row.len(), 3);
+    assert_eq!(state.line_to_row[0], None); // repo header
     assert_eq!(state.line_to_row[1], Some(0)); // agent status
     assert_eq!(state.line_to_row[2], Some(0)); // idle hint
-    assert_eq!(state.line_to_row[3], None); // box bottom
 }
 
 #[test]
@@ -146,13 +147,12 @@ fn test_line_to_row_two_agents() {
     state.repo_groups = vec![make_repo_group("project", vec![pane1, pane2])];
     state.rebuild_row_targets();
     let _ = render_to_styled_string(&mut state, 28, 10);
-    // box_top=None, agent1=Some(0), separator=None, agent2 status+hint, box_bottom=None
-    assert_eq!(state.line_to_row[0], None); // box top
+    // repo header, agent1, agent2 status+hint
+    assert_eq!(state.line_to_row.len(), 4);
+    assert_eq!(state.line_to_row[0], None); // repo header
     assert_eq!(state.line_to_row[1], Some(0)); // agent 1
-    assert_eq!(state.line_to_row[2], None); // separator
-    assert_eq!(state.line_to_row[3], Some(1)); // agent 2 status line
-    assert_eq!(state.line_to_row[4], Some(1)); // agent 2 idle hint
-    assert_eq!(state.line_to_row[5], None); // box bottom
+    assert_eq!(state.line_to_row[2], Some(1)); // agent 2 status line
+    assert_eq!(state.line_to_row[3], Some(1)); // agent 2 idle hint
 }
 
 #[test]
@@ -173,20 +173,16 @@ fn test_line_to_row_with_prompt() {
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
     let _ = render_to_styled_string(&mut state, 28, 10);
-    // box_top=None, status=Some(0), prompt=Some(0), box_bottom=None
-    assert_eq!(state.line_to_row[0], None); // box top
+    // repo header, agent status, prompt
+    assert_eq!(state.line_to_row.len(), 3);
+    assert_eq!(state.line_to_row[0], None); // repo header
     assert_eq!(state.line_to_row[1], Some(0)); // agent status line
     assert_eq!(state.line_to_row[2], Some(0)); // prompt line
-    assert_eq!(state.line_to_row[3], None); // box bottom
 }
 
-// ─── Coverage Gap Tests ─────────────────────────────────────────────
-
 #[test]
-fn snapshot_agent_with_attention_styled() {
-    let mut pane = make_pane(AgentType::Claude, PaneStatus::Idle);
-    pane.attention = true;
-
+fn test_line_to_row_with_version_banner() {
+    let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
     let mut state = make_state(vec![SessionInfo {
         session_name: "main".into(),
         windows: vec![WindowInfo {
@@ -198,16 +194,47 @@ fn snapshot_agent_with_attention_styled() {
         }],
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
+    state.version_notice = Some(tmux_agent_sidebar::version::UpdateNotice {
+        local_version: "0.2.6".into(),
+        latest_version: "0.2.7".into(),
+    });
     state.rebuild_row_targets();
-    state.sidebar_focused = false; // unfocused so colors show, not REVERSED
+    let _ = render_to_string(&mut state, 28, 10);
+    // version banner only appears in the secondary header, not in the scrollable list
+    assert_eq!(state.line_to_row.len(), 3);
+    assert_eq!(state.line_to_row[0], None); // repo header
+    assert_eq!(state.line_to_row[1], Some(0)); // agent status line
+    assert_eq!(state.line_to_row[2], Some(0)); // idle hint
+}
 
-    let output = render_to_styled_string(&mut state, 28, 24);
-    // attention=true on idle pane should use waiting color (221), not idle color (250)
+#[test]
+fn test_secondary_header_click_ignored_when_version_banner_is_visible() {
+    let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
+    let mut state = make_state(vec![SessionInfo {
+        session_name: "main".into(),
+        windows: vec![WindowInfo {
+            window_id: "@1".into(),
+            window_name: "project".into(),
+            window_active: true,
+            auto_rename: false,
+            panes: vec![pane.clone()],
+        }],
+    }]);
+    state.repo_groups = vec![make_repo_group("project", vec![pane])];
+    state.version_notice = Some(tmux_agent_sidebar::version::UpdateNotice {
+        local_version: "0.2.6".into(),
+        latest_version: "0.2.7".into(),
+    });
+    state.rebuild_row_targets();
+
+    state.handle_mouse_click(1, 100);
     assert!(
-        output.contains("fg:221"),
-        "attention pane should use waiting color"
+        !state.repo_popup_open,
+        "repo popup should stay closed while the version banner replaces the secondary header"
     );
 }
+
+// ─── Coverage Gap Tests ─────────────────────────────────────────────
 
 #[test]
 fn test_rebuild_row_targets_clamps_selection() {

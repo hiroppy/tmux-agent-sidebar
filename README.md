@@ -20,6 +20,8 @@ A tmux sidebar that monitors all AI coding agents (Claude Code, Codex) across ev
 - **Cross-session monitoring** — Shows all agents across every tmux session and window in one sidebar
 - **Pane jump** — Select an agent and press Enter to jump to its pane, even across different windows
 - **Repository grouping** — Groups agents by the same repo, including worktrees, so related panes stay together
+- **Repo filter** — Switch between `All` and a specific repo from the secondary header row
+- **Version notice** — Shows a release banner in the secondary header row when a newer version is available
 - **Status filter** — Filters by Running / Waiting / Idle / Error with live counts per status
 - **Subagent tree** — Shows spawned subagents as a parent-child tree
 - **Task progress** — Displays task completion (e.g. `3/7`) synced from agent task lists
@@ -262,7 +264,9 @@ Create or edit `~/.codex/hooks.json`:
 | `Tab` | Cycle status filter (All → Running → Waiting → Idle → Error) |
 | `Shift+Tab` | Switch bottom panel tab (Activity / Git) |
 | `Esc` | Return focus to agents panel |
-| Mouse click | Click agent to jump to its pane, click filter to select |
+| Mouse click | Click agent to jump to its pane, click status tabs to filter, click the repo area to open the repo popup |
+
+If a newer release is available, the version notice banner replaces the repo filter on the second header row.
 
 ### Status Icons
 
@@ -313,7 +317,7 @@ This is useful for integrating agent status into your tmux status bar, custom sc
 
 ## Customization
 
-All options can be set **before** loading the plugin in your `tmux.conf`:
+Most options can be set **before** loading the plugin in your `tmux.conf`:
 
 ```tmux
 # Sidebar
@@ -323,35 +327,50 @@ set -g @sidebar_width 32                 # width in columns or % (default: 15%)
 set -g @sidebar_bottom_height 20         # bottom panel height in lines (default: 20, 0 to hide)
 set -g @sidebar_auto_create off          # disable auto-create on new windows (default: on)
 
-# Colors (256-color palette numbers)
-set -g @sidebar_color_running 82         # running icon (default: green)
-set -g @sidebar_color_waiting 221        # waiting icon (default: yellow)
-set -g @sidebar_color_idle 250           # idle icon (default: light gray)
-set -g @sidebar_color_error 203         # error icon (default: red)
-set -g @sidebar_color_border 240         # box border (default: dark gray)
-set -g @sidebar_color_border_active 117  # active group border (default: cyan)
-set -g @sidebar_color_session 39         # session name (default: blue)
-set -g @sidebar_color_agent_claude 174   # Claude brand color (default: terracotta)
-set -g @sidebar_color_agent_codex 141    # Codex brand color (default: purple)
-set -g @sidebar_color_text_active 255    # text for running/waiting (default: white)
-set -g @sidebar_color_text_muted 250     # text for idle (default: light gray)
-set -g @sidebar_color_wait_reason 221    # wait reason text (default: yellow)
-set -g @sidebar_color_path 255           # directory path (default: white)
-set -g @sidebar_color_selection 239      # selected row background (default: dark gray)
-set -g @sidebar_color_branch 109        # git branch name (default: teal)
+# Colors (256-color palette numbers) — all defaults live in src/ui/colors.rs
+set -g @sidebar_color_all 111            # "all" filter icon and count color (default: 111 sky blue)
+set -g @sidebar_color_running 114        # running icon (default: 114 green)
+set -g @sidebar_color_waiting 221        # waiting icon (default: 221 yellow)
+set -g @sidebar_color_idle 110           # idle icon (default: 110 soft blue)
+set -g @sidebar_color_error 203          # error icon (default: 203 red)
+set -g @sidebar_color_border 240         # inactive group border (default: 240 dark gray)
+set -g @sidebar_color_accent 153         # active pane marker, focused repo header, focused bottom panel border, repo popup border (default: 153 pale sky blue)
+set -g @sidebar_color_session 39         # session name (default: 39 blue)
+set -g @sidebar_color_agent_claude 174   # Claude brand color (default: 174 terracotta)
+set -g @sidebar_color_agent_codex 141    # Codex brand color (default: 141 purple)
+set -g @sidebar_color_text_active 255    # text for running/waiting (default: 255 white)
+set -g @sidebar_color_text_muted 252     # text for idle / muted rows (default: 252 light gray)
+set -g @sidebar_color_port 246           # port numbers (default: 246 light gray)
+set -g @sidebar_color_wait_reason 221    # wait reason text (default: 221 yellow)
+set -g @sidebar_color_selection 237      # selected row background (default: 237 dark gray)
+set -g @sidebar_color_branch 109         # git branch name (default: 109 teal)
+set -g @sidebar_color_task_progress 223   # task progress summary (default: 223 pale yellow)
+set -g @sidebar_color_subagent 73         # subagent tree (default: 73 green)
+set -g @sidebar_color_commit_hash 221     # commit hash (default: 221 yellow)
+set -g @sidebar_color_diff_added 114      # added diff lines (default: 114 green)
+set -g @sidebar_color_diff_deleted 174    # deleted diff lines (default: 174 terracotta)
+set -g @sidebar_color_file_change 221     # file change stats (default: 221 yellow)
+set -g @sidebar_color_pr_link 117         # PR link / number (default: 117 blue)
+set -g @sidebar_color_section_title 109   # section titles (default: 109 teal)
+set -g @sidebar_color_activity_timestamp 109 # activity timestamps (default: 109 teal)
+set -g @sidebar_color_response_arrow 74   # response arrow (default: 74 cyan)
 
 # Icons (Unicode glyphs; defaults keep the current look)
+set -g @sidebar_icon_all ≡               # status filter bar "all" icon
 set -g @sidebar_icon_running ●           # running status icon
 set -g @sidebar_icon_waiting ◐           # waiting status icon
 set -g @sidebar_icon_idle ○              # idle status icon
 set -g @sidebar_icon_error ✕             # error status icon
 set -g @sidebar_icon_unknown ·           # unknown status icon
 
-set -g @sidebar_prompt_lines 3           # max prompt display lines (default: 3)
-set -g @sidebar_activity_lines 8         # max activity log entries (default: 8)
-
 run-shell ~/.tmux/plugins/tmux-agent-sidebar/tmux-agent-sidebar.tmux
 ```
+
+Internal tmux options are managed by the plugin itself and are not meant to
+be set manually:
+
+- `@agent_sidebar_dir`
+- `@sidebar_pid`
 
 ## Uninstalling
 

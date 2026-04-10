@@ -13,109 +13,100 @@ use crate::tmux::PaneStatus;
 
 use super::text::{display_width, pad_to, truncate_to_width};
 
-/// Render the filter bar. Returns (Line, repo_button_col).
-fn render_filter_bar<'a>(state: &AppState, bar_width: u16) -> (Line<'a>, u16) {
+/// Render the status filter bar.
+fn render_filter_bar<'a>(state: &AppState, bar_width: u16) -> Line<'a> {
     let theme = &state.theme;
     let icons = &state.icons;
     let (all, running, waiting, idle, error) = state.status_counts();
 
-    let items: Vec<(StatusFilter, Option<(&str, ratatui::style::Color)>, usize)> = vec![
-        (StatusFilter::All, None, all),
+    let items: Vec<(StatusFilter, (&str, ratatui::style::Color), usize)> = vec![
+        (StatusFilter::All, (icons.all_icon(), theme.status_all), all),
         (
             StatusFilter::Running,
-            Some((
+            (
                 icons.status_icon(&PaneStatus::Running),
                 theme.status_running,
-            )),
+            ),
             running,
         ),
         (
             StatusFilter::Waiting,
-            Some((
+            (
                 icons.status_icon(&PaneStatus::Waiting),
                 theme.status_waiting,
-            )),
+            ),
             waiting,
         ),
         (
             StatusFilter::Idle,
-            Some((icons.status_icon(&PaneStatus::Idle), theme.status_idle)),
+            (icons.status_icon(&PaneStatus::Idle), theme.status_idle),
             idle,
         ),
         (
             StatusFilter::Error,
-            Some((icons.status_icon(&PaneStatus::Error), theme.status_error)),
+            (icons.status_icon(&PaneStatus::Error), theme.status_error),
             error,
         ),
     ];
 
     let mut spans: Vec<Span<'a>> = Vec::new();
     spans.push(Span::raw(" "));
-    let mut current_width: usize = 1;
 
-    let selected_style = |style: Style| {
-        style
-            .underline_color(theme.text_active)
-            .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
-    };
-
-    for (i, (filter, icon_info, count)) in items.into_iter().enumerate() {
+    for (i, (filter, (icon, icon_color), count)) in items.into_iter().enumerate() {
         if i > 0 {
             spans.push(Span::raw("  "));
-            current_width += 2;
         }
 
         let is_selected = state.global.status_filter == filter;
-
-        if let Some((icon, icon_color)) = icon_info {
-            let icon_style = Style::default().fg(icon_color);
-            let icon_style = if is_selected {
-                selected_style(icon_style)
-            } else {
-                icon_style
-            };
-            spans.push(Span::styled(icon.to_string(), icon_style));
-            current_width += display_width(icon);
-
-            let count_str = format!("{count}");
-            let count_style = if count == 0 {
-                Style::default().fg(theme.border_inactive)
-            } else {
-                Style::default().fg(theme.text_active)
-            };
-            let count_style = if is_selected {
-                selected_style(count_style)
-            } else {
-                count_style
-            };
-            current_width += count_str.len();
-            spans.push(Span::styled(count_str, count_style));
+        let icon_style = if is_selected {
+            Style::default().fg(icon_color)
         } else {
-            let style = if is_selected {
-                selected_style(Style::default().fg(theme.text_active))
-            } else {
-                Style::default().fg(theme.text_muted)
-            };
-            spans.push(Span::styled("All", style));
-            current_width += 3;
-        }
+            Style::default().fg(theme.border_inactive)
+        };
+        spans.push(Span::styled(icon.to_string(), icon_style));
+
+        let count_str = format!("{count}");
+        let count_style = if count == 0 {
+            Style::default().fg(theme.border_inactive)
+        } else {
+            Style::default().fg(theme.text_active)
+        };
+        spans.push(Span::styled(count_str, count_style));
     }
 
-    // Repo filter button — right-aligned
-    let repo_icon = "▼";
-    let repo_label = match &state.global.repo_filter {
-        RepoFilter::All => repo_icon.to_string(),
-        RepoFilter::Repo(name) => {
-            let max_w = 8;
-            let truncated = truncate_to_width(name, max_w);
-            format!("{} {}", repo_icon, truncated)
-        }
-    };
-    let repo_btn_width = display_width(&repo_label) + 1; // 1 for leading space
-    let gap = (bar_width as usize).saturating_sub(current_width + repo_btn_width);
-    let repo_button_col = (current_width + gap) as u16;
+    let _ = bar_width;
 
-    spans.push(Span::raw(" ".repeat(gap)));
+    Line::from(spans)
+}
+
+fn render_secondary_header<'a>(state: &AppState, width: u16) -> (Line<'a>, Option<u16>) {
+    let theme = &state.theme;
+    let banner_text = state
+        .version_notice
+        .as_ref()
+        .map(|notice| format!("new release v{}!", notice.latest_version));
+
+    if let Some(text) = banner_text {
+        let gap = pad_to(display_width(&text), width as usize);
+        return (
+            Line::from(vec![
+                Span::raw(gap),
+                Span::styled(text, Style::default().fg(theme.status_waiting)),
+            ]),
+            None,
+        );
+    }
+
+    let repo_icon = "▾";
+
+    let repo_label = match &state.global.repo_filter {
+        RepoFilter::All => "All".to_string(),
+        RepoFilter::Repo(name) => truncate_to_width(name, width.saturating_sub(2) as usize),
+    };
+    let repo_btn_width = display_width(&repo_label) + 1; // label + arrow
+
+    let gap = (width as usize).saturating_sub(repo_btn_width);
+    let repo_button_col = Some(gap as u16);
 
     let repo_has_filter = !matches!(state.global.repo_filter, RepoFilter::All);
     let repo_style = if state.repo_popup_open {
@@ -123,27 +114,17 @@ fn render_filter_bar<'a>(state: &AppState, bar_width: u16) -> (Line<'a>, u16) {
             .fg(theme.text_active)
             .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
     } else if repo_has_filter {
-        Style::default()
-            .fg(theme.text_active)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(theme.text_active)
     } else {
         Style::default().fg(theme.text_muted)
     };
-    spans.push(Span::styled(format!(" {}", repo_label), repo_style));
+
+    let mut spans: Vec<Span<'a>> = Vec::new();
+    spans.push(Span::raw(" ".repeat(gap)));
+    spans.push(Span::styled(repo_label, repo_style));
+    spans.push(Span::styled(repo_icon, repo_style));
 
     (Line::from(spans), repo_button_col)
-}
-
-fn render_version_banner<'a>(state: &AppState, width: usize) -> Option<Line<'a>> {
-    let theme = &state.theme;
-    let notice = state.version_notice.as_ref()?;
-    let text = format!("new release v{}!", notice.latest_version);
-    let gap = pad_to(display_width(&text), width);
-
-    Some(Line::from(vec![
-        Span::raw(gap),
-        Span::styled(text, Style::default().fg(theme.status_waiting)),
-    ]))
 }
 
 fn render_repo_popup(frame: &mut Frame, state: &mut AppState, area: Rect) {
@@ -156,11 +137,11 @@ fn render_repo_popup(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let max_name_len = repos.iter().map(|r| display_width(r)).max().unwrap_or(3);
     // Width: marker(2) + name + padding(1) + borders(2)
     let popup_width = (max_name_len + 5).min(area.width as usize).max(10) as u16;
-    let popup_height = (repos.len() as u16 + 2).min(area.height.saturating_sub(1)); // +2 for borders
+    let popup_height = (repos.len() as u16 + 2).min(area.height.saturating_sub(2)); // +2 for borders
 
-    // Right-aligned, below filter bar
+    // Right-aligned, below the 2-row header
     let popup_x = area.x + area.width.saturating_sub(popup_width);
-    let popup_y = area.y + 1;
+    let popup_y = area.y + 2;
 
     let popup_rect = Rect::new(popup_x, popup_y, popup_width, popup_height);
     state.repo_popup_area = Some(popup_rect);
@@ -169,7 +150,7 @@ fn render_repo_popup(frame: &mut Frame, state: &mut AppState, area: Rect) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme.border_active));
+        .border_style(Style::default().fg(theme.accent));
     let inner = block.inner(popup_rect);
     frame.render_widget(block, popup_rect);
 
@@ -226,29 +207,34 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
         width: area.width,
         height: 1.min(area.height),
     };
-    let (filter_line, repo_btn_col) = render_filter_bar(state, area.width);
-    state.repo_button_col = repo_btn_col;
+    let filter_line = render_filter_bar(state, area.width);
     frame.render_widget(Paragraph::new(vec![filter_line]), filter_area);
+
+    let secondary_area = Rect {
+        x: area.x,
+        y: area.y + 1,
+        width: area.width,
+        height: 1.min(area.height.saturating_sub(1)),
+    };
+    let (secondary_line, repo_btn_col) = render_secondary_header(state, area.width);
+    state.repo_button_col = repo_btn_col;
+    frame.render_widget(Paragraph::new(vec![secondary_line]), secondary_area);
 
     // Scrollable agent list below
     let list_area = Rect {
         x: area.x,
-        y: area.y + 1,
+        y: area.y + 2,
         width: area.width,
-        height: area.height.saturating_sub(1),
+        height: area.height.saturating_sub(2),
     };
 
     let mut lines: Vec<Line<'_>> = Vec::new();
     let mut line_to_row: Vec<Option<usize>> = Vec::new();
     let mut row_index: usize = 0;
 
-    if let Some(version_banner) = render_version_banner(state, width) {
-        lines.push(version_banner);
-        line_to_row.push(None);
-    }
-
     let filter = state.global.status_filter;
 
+    let mut first_group = true;
     for group in &state.repo_groups {
         if !state.global.repo_filter.matches_group(&group.name) {
             continue;
@@ -262,46 +248,32 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
             continue;
         }
 
+        if !first_group {
+            // Separate repo groups, but do not add a leading blank before
+            // the first repo so the list starts immediately below the header.
+            lines.push(Line::from(""));
+            line_to_row.push(None);
+        }
+        first_group = false;
+
         let group_has_focused_pane = state.focused_pane_id.as_ref().map_or(false, |fid| {
             group.panes.iter().any(|(p, _)| p.pane_id == *fid)
         });
 
-        let border_color = if group_has_focused_pane {
-            theme.border_active
-        } else {
-            theme.border_inactive
-        };
+        // Plain repo header at column 0 (no frame).
         let title = &group.name;
-
-        let title_dw = display_width(title);
-        let fill_len = width.saturating_sub(3 + title_dw + 1);
         let title_color = if group_has_focused_pane {
-            theme.border_active
+            theme.accent
         } else {
-            theme.text_muted
+            theme.text_active
         };
-        lines.push(Line::from(vec![
-            Span::styled("╭ ", Style::default().fg(border_color)),
-            Span::styled(title.clone(), Style::default().fg(title_color)),
-            Span::styled(
-                format!(" {}╮", "─".repeat(fill_len)),
-                Style::default().fg(border_color),
-            ),
-        ]));
+        lines.push(Line::from(Span::styled(
+            title.clone(),
+            Style::default().fg(title_color),
+        )));
         line_to_row.push(None);
 
-        for (pi, (pane, git_info)) in filtered_panes.iter().enumerate() {
-            if pi > 0 {
-                let gray = Style::default().fg(theme.border_inactive);
-                let dashes = "─".repeat(width.saturating_sub(4));
-                lines.push(Line::from(vec![
-                    Span::styled("│", Style::default().fg(border_color)),
-                    Span::styled(format!(" {} ", dashes), gray),
-                    Span::styled("│", Style::default().fg(border_color)),
-                ]));
-                line_to_row.push(None);
-            }
-
+        for (pane, git_info) in filtered_panes.iter() {
             let is_selected = state.sidebar_focused
                 && state.focus == Focus::Panes
                 && row_index == state.global.selected_pane_row;
@@ -321,7 +293,6 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 task_progress,
                 is_selected,
                 is_active,
-                border_color,
                 width,
                 &state.icons,
                 theme,
@@ -336,13 +307,6 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
 
             row_index += 1;
         }
-
-        let bottom_line = format!("╰{}╯", "─".repeat(width.saturating_sub(2)));
-        lines.push(Line::from(Span::styled(
-            bottom_line,
-            Style::default().fg(border_color),
-        )));
-        line_to_row.push(None);
     }
 
     state.line_to_row = line_to_row;
@@ -362,20 +326,12 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
             }
         }
         if let (Some(first), Some(last)) = (first_line, last_line) {
-            let mut effective_last = last;
-            for i in (last + 1)..state.line_to_row.len() {
-                if state.line_to_row[i].is_none() {
-                    effective_last = i;
-                } else {
-                    break;
-                }
-            }
             let visible_h = list_area.height as usize;
             let offset = state.panes_scroll.offset;
             if first < offset {
                 state.panes_scroll.offset = first.saturating_sub(1);
-            } else if effective_last >= offset + visible_h {
-                state.panes_scroll.offset = (effective_last + 1).saturating_sub(visible_h);
+            } else if last >= offset + visible_h {
+                state.panes_scroll.offset = (last + 1).saturating_sub(visible_h);
             }
         }
     }
@@ -390,6 +346,9 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
 }
 
 #[cfg(test)]
+use crate::group::PaneGitInfo;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -401,14 +360,14 @@ mod tests {
     }
 
     #[test]
-    fn render_version_banner_right_aligns() {
+    fn render_secondary_header_version_banner_right_aligns() {
         let mut state = crate::state::AppState::new(String::new());
         state.version_notice = Some(crate::version::UpdateNotice {
             local_version: "0.2.6".into(),
             latest_version: "0.2.7".into(),
         });
 
-        let line = render_version_banner(&state, 30).expect("banner should render");
+        let line = render_secondary_header(&state, 30).0;
         let text = line_text(&line);
 
         assert!(text.ends_with("new release v0.2.7!"));
@@ -425,72 +384,166 @@ mod tests {
     }
 
     fn filter_bar_text(state: &AppState, width: u16) -> String {
-        let (line, _) = render_filter_bar(state, width);
+        let line = render_filter_bar(state, width);
         line.spans.iter().map(|s| s.content.as_ref()).collect()
     }
 
     #[test]
-    fn render_filter_bar_includes_repo_button() {
+    fn render_filter_bar_is_status_only() {
         let state = make_state_with_groups(vec![]);
         let text = filter_bar_text(&state, 28);
-        assert!(
-            text.contains("▼"),
-            "filter bar should contain repo button ▼"
-        );
+        assert!(!text.contains("▾"), "status filter bar should not contain repo button");
     }
 
     #[test]
-    fn render_filter_bar_repo_button_col_returned() {
+    fn render_filter_bar_uses_selected_and_inactive_icon_colors() {
+        let pane1 = crate::tmux::PaneInfo {
+            pane_id: "%2".into(),
+            pane_active: true,
+            status: PaneStatus::Running,
+            attention: false,
+            agent: crate::tmux::AgentType::Claude,
+            path: String::new(),
+            current_command: String::new(),
+            prompt: String::new(),
+            prompt_is_response: false,
+            started_at: None,
+            wait_reason: String::new(),
+            permission_mode: crate::tmux::PermissionMode::Default,
+            subagents: vec![],
+            pane_pid: None,
+            worktree_name: String::new(),
+            worktree_branch: String::new(),
+        };
+        let pane2 = crate::tmux::PaneInfo {
+            pane_id: "%3".into(),
+            pane_active: false,
+            status: PaneStatus::Idle,
+            attention: false,
+            agent: crate::tmux::AgentType::Codex,
+            path: String::new(),
+            current_command: String::new(),
+            prompt: String::new(),
+            prompt_is_response: false,
+            started_at: None,
+            wait_reason: String::new(),
+            permission_mode: crate::tmux::PermissionMode::Default,
+            subagents: vec![],
+            pane_pid: None,
+            worktree_name: String::new(),
+            worktree_branch: String::new(),
+        };
+        let mut state = make_state_with_groups(vec![crate::group::RepoGroup {
+            name: "project".into(),
+            has_focus: true,
+            panes: vec![(pane1, PaneGitInfo::default()), (pane2, PaneGitInfo::default())],
+        }]);
+        state.global.status_filter = StatusFilter::Running;
+        let theme = &state.theme;
+
+        let line = render_filter_bar(&state, 30);
+        let cells: Vec<_> = line
+            .spans
+            .iter()
+            .filter(|span| !span.content.as_ref().trim().is_empty())
+            .collect();
+
+        assert_eq!(cells.len(), 10);
+
+        assert_eq!(cells[0].content.as_ref(), "≡");
+        assert_eq!(cells[0].style.fg, Some(theme.border_inactive));
+        assert!(!cells[0].style.add_modifier.contains(Modifier::UNDERLINED));
+
+        assert_eq!(cells[1].content.as_ref(), "2");
+        assert_eq!(cells[1].style.fg, Some(theme.text_active));
+
+        assert_eq!(cells[2].content.as_ref(), "●");
+        assert_eq!(cells[2].style.fg, Some(theme.status_running));
+        assert!(!cells[2].style.add_modifier.contains(Modifier::UNDERLINED));
+
+        assert_eq!(cells[3].content.as_ref(), "1");
+        assert_eq!(cells[3].style.fg, Some(theme.text_active));
+
+        assert_eq!(cells[4].content.as_ref(), "◐");
+        assert_eq!(cells[4].style.fg, Some(theme.border_inactive));
+
+        assert_eq!(cells[5].content.as_ref(), "0");
+        assert_eq!(cells[5].style.fg, Some(theme.border_inactive));
+
+        assert_eq!(cells[6].content.as_ref(), "○");
+        assert_eq!(cells[6].style.fg, Some(theme.border_inactive));
+
+        assert_eq!(cells[7].content.as_ref(), "1");
+        assert_eq!(cells[7].style.fg, Some(theme.text_active));
+
+        assert_eq!(cells[8].content.as_ref(), "✕");
+        assert_eq!(cells[8].style.fg, Some(theme.border_inactive));
+
+        assert_eq!(cells[9].content.as_ref(), "0");
+        assert_eq!(cells[9].style.fg, Some(theme.border_inactive));
+    }
+
+    #[test]
+    fn render_secondary_header_repo_button_col_returned() {
         let state = make_state_with_groups(vec![]);
-        let (_, col) = render_filter_bar(&state, 28);
-        // repo button should be near the right edge
-        assert!(
-            col > 15,
-            "repo button col should be right-aligned, got {col}"
-        );
-        assert!(
-            col < 28,
-            "repo button col should be within width, got {col}"
-        );
+        let (_, col) = render_secondary_header(&state, 28);
+        assert_eq!(col, Some(24), "repo button should be right-aligned");
     }
 
     #[test]
-    fn render_filter_bar_shows_repo_name_when_filtered() {
+    fn render_secondary_header_shows_repo_name_when_filtered() {
         let mut state = make_state_with_groups(vec![crate::group::RepoGroup {
             name: "my-app".into(),
             has_focus: true,
             panes: vec![],
         }]);
         state.global.repo_filter = RepoFilter::Repo("my-app".into());
-        let text = filter_bar_text(&state, 40);
+        let text = line_text(&render_secondary_header(&state, 40).0);
         assert!(
             text.contains("my-app"),
-            "filter bar should show filtered repo name, got: {text}"
+            "secondary header should show filtered repo name, got: {text}"
+        );
+        assert!(
+            text.find("my-app").unwrap() < text.find("▾").unwrap(),
+            "repo name should come before the arrow"
+        );
+        let (line, _) = render_secondary_header(&state, 40);
+        let repo_span = line.spans.iter().find(|span| span.content.contains("my-app")).unwrap();
+        assert!(
+            !repo_span.style.add_modifier.contains(Modifier::BOLD),
+            "filtered repo label should not be bold"
         );
     }
 
     #[test]
-    fn render_filter_bar_truncates_long_repo_name() {
+    fn render_secondary_header_truncates_long_repo_name() {
         let mut state = make_state_with_groups(vec![crate::group::RepoGroup {
-            name: "very-long-repository-name".into(),
+            name: "very-long-repository-name-that-exceeds-width".into(),
             has_focus: true,
             panes: vec![],
         }]);
-        state.global.repo_filter = RepoFilter::Repo("very-long-repository-name".into());
-        let text = filter_bar_text(&state, 28);
-        // Should be truncated, not the full name
+        state.global.repo_filter = RepoFilter::Repo("very-long-repository-name-that-exceeds-width".into());
+        let text = line_text(&render_secondary_header(&state, 28).0);
         assert!(
-            !text.contains("very-long-repository-name"),
-            "long repo name should be truncated, got: {text}"
+            text.contains('…'),
+            "repo name should be truncated with an ellipsis"
         );
-        assert!(text.contains("▼"));
+        assert!(text.contains("▾"));
+        assert!(
+            !text.contains("very-long-repository-name-that-exceeds-width"),
+            "repo name should not fit in full at this width"
+        );
+        assert!(
+            text.find('…').unwrap() < text.find("▾").unwrap(),
+            "repo name should come before the arrow"
+        );
     }
 
     #[test]
-    fn render_filter_bar_popup_open_styling() {
+    fn render_secondary_header_popup_open_styling() {
         let mut state = make_state_with_groups(vec![]);
         state.repo_popup_open = true;
-        let (line, _) = render_filter_bar(&state, 28);
+        let (line, _) = render_secondary_header(&state, 28);
         // Find the repo button span and check it has UNDERLINED modifier
         let last_span = line.spans.last().unwrap();
         assert!(

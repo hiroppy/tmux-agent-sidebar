@@ -278,7 +278,7 @@ pub struct AppState {
     pub repo_popup_open: bool,
     pub repo_popup_selected: usize,
     pub repo_popup_area: Option<ratatui::layout::Rect>,
-    pub repo_button_col: u16,
+    pub repo_button_col: Option<u16>,
     /// Update notice shown when a newer GitHub release is available.
     pub version_notice: Option<crate::version::UpdateNotice>,
     /// Shared state across sidebar instances, persisted to tmux global variables.
@@ -331,7 +331,7 @@ impl AppState {
             repo_popup_open: false,
             repo_popup_selected: 0,
             repo_popup_area: None,
-            repo_button_col: u16::MAX,
+            repo_button_col: None,
             version_notice: None,
             global: GlobalState::new(),
             hyperlink_overlays: vec![],
@@ -523,23 +523,19 @@ impl AppState {
         }
         self.last_filter_click = now;
 
-        let (_, running, waiting, idle, error) = self.status_counts();
-        // Layout: " All  ●N  ◐N  ○N  ✕N"
-        // Calculate x ranges for each filter item
+        let (all, running, waiting, idle, error) = self.status_counts();
+        // Layout: " ∑N  ●N  ◐N  ○N  ✕N"
+        // Each filter item renders as `icon(1) + count`, so the clickable
+        // width is `1 + digits(count)`.
         let mut x = 1usize; // leading space
         let items: Vec<(StatusFilter, usize)> = vec![
-            (StatusFilter::All, 3),                                  // "All"
-            (StatusFilter::Running, 1 + format!("{running}").len()), // icon + count
+            (StatusFilter::All, 1 + format!("{all}").len()),
+            (StatusFilter::Running, 1 + format!("{running}").len()),
             (StatusFilter::Waiting, 1 + format!("{waiting}").len()),
             (StatusFilter::Idle, 1 + format!("{idle}").len()),
             (StatusFilter::Error, 1 + format!("{error}").len()),
         ];
         let col = col as usize;
-        // Check if click is on repo button (right side)
-        if col >= self.repo_button_col as usize {
-            self.toggle_repo_popup();
-            return;
-        }
         for (i, (filter, width)) in items.iter().enumerate() {
             if i > 0 {
                 x += 2; // "  " separator
@@ -551,6 +547,14 @@ impl AppState {
                 return;
             }
             x += width;
+        }
+    }
+
+    /// Handle mouse click on the secondary header row (row 1).
+    /// The repo filter button lives on the far right of this row.
+    pub fn handle_secondary_header_click(&mut self, col: u16) {
+        if self.repo_button_col.is_some_and(|repo_button_col| col >= repo_button_col) {
+            self.toggle_repo_popup();
         }
     }
 
@@ -585,7 +589,11 @@ impl AppState {
             self.handle_filter_click(col);
             return;
         }
-        let line_index = (row as usize - 1) + self.panes_scroll.offset;
+        if row == 1 {
+            self.handle_secondary_header_click(col);
+            return;
+        }
+        let line_index = (row as usize - 2) + self.panes_scroll.offset;
         if let Some(Some(agent_row)) = self.line_to_row.get(line_index) {
             self.global.selected_pane_row = *agent_row;
             self.global.save_cursor();
@@ -1694,11 +1702,11 @@ mod tests {
         state.line_to_row = vec![None, Some(0), Some(1)];
         state.panes_scroll.offset = 0;
 
-        // row 0 = filter bar (skipped), row 1 = first agent list row
-        state.handle_mouse_click(2, 5); // row 2 → line_index = (2-1) = 1 → agent row 0
+        // row 0 = filter bar, row 1 = secondary header, row 2+ = agent list rows
+        state.handle_mouse_click(3, 5); // row 3 → line_index = (3-2) = 1 → agent row 0
         assert_eq!(state.global.selected_pane_row, 0);
 
-        state.handle_mouse_click(3, 5); // row 3 → line_index = (3-1) = 2 → agent row 1
+        state.handle_mouse_click(4, 5); // row 4 → line_index = (4-2) = 2 → agent row 1
         assert_eq!(state.global.selected_pane_row, 1);
     }
 
@@ -1727,6 +1735,30 @@ mod tests {
     }
 
     #[test]
+    fn mouse_click_on_secondary_header_toggles_repo_popup() {
+        let mut state = AppState::new("%99".into());
+        state.repo_groups = vec![
+            RepoGroup {
+                name: "alpha".into(),
+                has_focus: true,
+                panes: vec![(test_pane("%1"), PaneGitInfo::default())],
+            },
+            RepoGroup {
+                name: "beta".into(),
+                has_focus: false,
+                panes: vec![(test_pane("%2"), PaneGitInfo::default())],
+            },
+        ];
+        state.repo_button_col = Some(20);
+
+        state.handle_mouse_click(1, 19);
+        assert!(!state.repo_popup_open);
+
+        state.handle_mouse_click(1, 20);
+        assert!(state.repo_popup_open);
+    }
+
+    #[test]
     fn mouse_click_with_scroll_offset() {
         let mut state = AppState::new("%99".into());
         state.pane_row_targets = vec![
@@ -1741,8 +1773,8 @@ mod tests {
         state.line_to_row = vec![None, Some(0), Some(0), None, Some(1)];
         state.panes_scroll.offset = 2;
 
-        // row 3 → line_index = (3-1) + 2 = 4 → agent row 1
-        state.handle_mouse_click(3, 5);
+        // row 4 → line_index = (4-2) + 2 = 4 → agent row 1
+        state.handle_mouse_click(4, 5);
         assert_eq!(state.global.selected_pane_row, 1);
     }
 

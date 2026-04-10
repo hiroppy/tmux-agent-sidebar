@@ -25,11 +25,12 @@ fn snapshot_selected_focused_styled() {
     state.rebuild_row_targets();
     state.sidebar_focused = true;
     state.global.selected_pane_row = 0;
+    state.bottom_panel_height = 0;
 
-    let output = render_to_styled_string(&mut state, 28, 24);
-    // Verify output contains selection background style with selection_bg color (236)
+    let output = render_to_styled_string(&mut state, 28, 10);
+    // Verify the selected agent row gets the selection background style.
     assert!(
-        output.contains("bg:237"),
+        output.lines().any(|l| l.starts_with("┃[fg:153,bg:237]")),
         "selected focused row should have selection background color"
     );
 }
@@ -58,10 +59,10 @@ fn snapshot_activity_focused_styled() {
     }];
 
     let output = render_to_styled_string(&mut state, 28, 14);
-    // Activity border should contain "fg:117" (BORDER_ACTIVE)
+    // Focused group header should use accent (fg:153)
     assert!(
-        output.contains("fg:117"),
-        "activity focused border should use BORDER_ACTIVE (fg:117)"
+        output.contains("fg:153"),
+        "focused group header should use accent (fg:153)"
     );
 }
 
@@ -99,7 +100,7 @@ fn snapshot_activity_unfocused_styled() {
 // ─── Selection Background Border Tests ───────────────────────────────
 
 #[test]
-fn selection_bg_does_not_bleed_into_border() {
+fn selection_marker_uses_accent_color_with_selection_bg() {
     let pane = make_pane(AgentType::Claude, PaneStatus::Running);
     let mut state = make_state(vec![SessionInfo {
         session_name: "main".into(),
@@ -119,8 +120,13 @@ fn selection_bg_does_not_bleed_into_border() {
 
     let output = render_to_styled_string(&mut state, 28, 24);
 
-    // Find content lines with selection bg (bg:237)
-    let selected_lines: Vec<&str> = output.lines().filter(|l| l.contains("bg:237")).collect();
+    // Selected pane rows start with the ┃ marker styled with the
+    // accent fg (117) and the selection bg (237), and NEVER contain
+    // the old group frame │.
+    let selected_lines: Vec<&str> = output
+        .lines()
+        .filter(|l| l.starts_with("┃") && l.contains("bg:237"))
+        .collect();
 
     assert!(
         !selected_lines.is_empty(),
@@ -128,22 +134,14 @@ fn selection_bg_does_not_bleed_into_border() {
     );
 
     for line in &selected_lines {
-        // Left border: "│" should NOT have bg:237
-        // The line starts with │[fg:...] (border style, no bg),
-        // followed by a space with bg:237
         assert!(
-            !line.starts_with("│[fg:117,bg:237]"),
-            "left border │ should not have selection bg: {}",
+            line.starts_with("┃[fg:153,bg:237]"),
+            "selected row must start with the ┃ marker in accent+selection styles: {}",
             line
         );
-
-        // Right border: last │ should NOT have bg:237
-        // Find the last │ in the line and check it doesn't have bg
-        let last_border = line.rfind('│').expect("should have right border");
-        let after_border = &line[last_border..];
         assert!(
-            !after_border.contains("bg:237"),
-            "right border │ should not have selection bg: {}",
+            !line.contains('│'),
+            "selected row should no longer carry the old frame │: {}",
             line
         );
     }
@@ -170,11 +168,14 @@ fn selection_bg_covers_inner_padding() {
 
     let output = render_to_styled_string(&mut state, 28, 24);
 
-    let selected_lines: Vec<&str> = output.lines().filter(|l| l.contains("bg:237")).collect();
+    let selected_lines: Vec<&str> = output
+        .lines()
+        .filter(|l| l.starts_with("┃") && l.contains("bg:237"))
+        .collect();
 
     for line in &selected_lines {
         // The space right after the left │ should have bg:237
-        // Pattern: │[fg:117] [bg:237]
+        // Pattern: │[fg:153] [bg:237]
         assert!(
             line.contains(" [bg:237]"),
             "inner space should have selection bg: {}",
@@ -203,8 +204,10 @@ fn no_selection_bg_when_not_selected() {
     let output = render_to_styled_string(&mut state, 28, 24);
 
     assert!(
-        !output.contains("bg:237"),
-        "should not have selection bg when sidebar is not focused"
+        !output
+            .lines()
+            .any(|l| l.starts_with("┃") && l.contains("bg:237")),
+        "should not have selection bg on agent rows when sidebar is not focused"
     );
 }
 
@@ -231,21 +234,22 @@ fn snapshot_custom_theme_colors() {
 
     // Override theme with custom colors
     state.theme = ColorTheme {
-        border_active: Color::Indexed(196), // red border
-        agent_claude: Color::Indexed(226),  // yellow agent
-        status_idle: Color::Indexed(46),    // green idle
-        port: Color::Indexed(39),           // cyan port
+        accent: Color::Indexed(196),       // red accent
+        agent_claude: Color::Indexed(226), // yellow agent
+        status_idle: Color::Indexed(46),   // green idle
+        port: Color::Indexed(39),          // cyan port
         ..ColorTheme::default()
     };
     // Unfocus sidebar so selected row doesn't use REVERSED (which hides colors)
     state.sidebar_focused = false;
+    state.bottom_panel_height = 0;
 
-    let output = render_to_styled_string(&mut state, 28, 24);
+    let output = render_to_styled_string(&mut state, 28, 10);
 
     // Verify custom colors are applied
     assert!(
         output.contains("fg:196"),
-        "custom border_active (196) should be used"
+        "custom accent (196) should be used"
     );
     assert!(
         output.contains("fg:226"),
@@ -265,17 +269,16 @@ fn test_theme_default_matches_shell_colors() {
     let theme = ColorTheme::default();
 
     // Verify defaults match shell版's agent-sidebar.conf
-    assert_eq!(theme.border_active, Color::Indexed(117));
+    assert_eq!(theme.accent, Color::Indexed(153));
     assert_eq!(theme.border_inactive, Color::Indexed(240));
     assert_eq!(theme.status_running, Color::Indexed(114));
     assert_eq!(theme.status_waiting, Color::Indexed(221));
-    assert_eq!(theme.status_idle, Color::Indexed(109));
+    assert_eq!(theme.status_idle, Color::Indexed(110));
     assert_eq!(theme.status_error, Color::Indexed(203));
     assert_eq!(theme.agent_claude, Color::Indexed(174));
     assert_eq!(theme.agent_codex, Color::Indexed(141));
     assert_eq!(theme.text_active, Color::Indexed(255));
-    assert_eq!(theme.text_muted, Color::Indexed(244));
+    assert_eq!(theme.text_muted, Color::Indexed(252));
     assert_eq!(theme.session_header, Color::Indexed(39));
     assert_eq!(theme.wait_reason, Color::Indexed(221));
-    assert_eq!(theme.activity_border, Color::Indexed(39));
 }

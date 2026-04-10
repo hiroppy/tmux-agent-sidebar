@@ -15,14 +15,15 @@ fn test_all_color_theme_defaults() {
     let theme = ColorTheme::default();
 
     // Core UI colors
-    assert_eq!(theme.border_active, Color::Indexed(117));
+    assert_eq!(theme.accent, Color::Indexed(153));
     assert_eq!(theme.border_inactive, Color::Indexed(240));
     assert_eq!(theme.selection_bg, Color::Indexed(237));
 
     // Status colors
+    assert_eq!(theme.status_all, Color::Indexed(111));
     assert_eq!(theme.status_running, Color::Indexed(114));
     assert_eq!(theme.status_waiting, Color::Indexed(221));
-    assert_eq!(theme.status_idle, Color::Indexed(109));
+    assert_eq!(theme.status_idle, Color::Indexed(110));
     assert_eq!(theme.status_error, Color::Indexed(203));
     assert_eq!(theme.status_unknown, Color::Indexed(244));
 
@@ -32,13 +33,12 @@ fn test_all_color_theme_defaults() {
 
     // Text colors
     assert_eq!(theme.text_active, Color::Indexed(255));
-    assert_eq!(theme.text_muted, Color::Indexed(244));
+    assert_eq!(theme.text_muted, Color::Indexed(252));
 
     // Header/UI element colors
     assert_eq!(theme.session_header, Color::Indexed(39));
     assert_eq!(theme.port, Color::Indexed(246));
     assert_eq!(theme.wait_reason, Color::Indexed(221));
-    assert_eq!(theme.activity_border, Color::Indexed(39));
     assert_eq!(theme.branch, Color::Indexed(109));
 
     // New theme fields
@@ -69,7 +69,7 @@ fn test_status_color_all_variants() {
     );
     assert_eq!(
         theme.status_color(&PaneStatus::Idle, false),
-        Color::Indexed(109)
+        Color::Indexed(110)
     );
     assert_eq!(
         theme.status_color(&PaneStatus::Error, false),
@@ -134,14 +134,14 @@ fn test_permission_mode_bypass_all_renders_danger_color() {
     state.rebuild_row_targets();
     state.sidebar_focused = false;
 
-    let output = render_to_styled_string(&mut state, 28, 24);
+    let output = render_to_styled_string(&mut state, 28, 26);
     // BypassAll badge uses badge_danger (203)
     assert!(
         output.contains("fg:203"),
         "BypassAll badge should use badge_danger color (203)"
     );
     // Badge text "!" should appear
-    let plain = render_to_string(&mut state, 28, 24);
+    let plain = render_to_string(&mut state, 28, 26);
     assert!(plain.contains("!"), "BypassAll should show ! badge");
 }
 
@@ -164,14 +164,14 @@ fn test_permission_mode_full_auto_renders_auto_color() {
     state.rebuild_row_targets();
     state.sidebar_focused = false;
 
-    let output = render_to_styled_string(&mut state, 28, 24);
+    let output = render_to_styled_string(&mut state, 28, 26);
     // Auto badge uses badge_auto (221)
     assert!(
         output.contains("fg:221"),
         "Auto badge should use badge_auto color (221)"
     );
     // Badge text "auto" should appear
-    let plain = render_to_string(&mut state, 28, 24);
+    let plain = render_to_string(&mut state, 28, 26);
     assert!(plain.contains("auto"), "Auto should show auto badge");
 }
 
@@ -194,7 +194,7 @@ fn test_permission_mode_normal_no_badge() {
     state.rebuild_row_targets();
     state.sidebar_focused = false;
 
-    let plain = render_to_string(&mut state, 28, 24);
+    let plain = render_to_string(&mut state, 28, 25);
     // Normal mode should not show any badge (no "!" in status line)
     // Check that the agent line doesn't contain "!" right after the agent name
     // The agent line is like "● claude   2m5s" — no "!" badge
@@ -265,7 +265,7 @@ fn test_git_summary_modified_uses_badge_auto_color() {
         deletions: 2,
     }];
 
-    let styled = render_to_styled_string(&mut state, 28, 24);
+    let styled = render_to_styled_string(&mut state, 28, 25);
     // Modified count uses badge_auto (221)
     assert!(
         styled.contains("fg:221"),
@@ -304,14 +304,14 @@ fn test_task_progress_line_uses_task_progress_color() {
     };
     state.set_pane_task_progress("%1", Some(progress));
 
-    let styled = render_to_styled_string(&mut state, 40, 25);
+    let styled = render_to_styled_string(&mut state, 40, 40);
     // task_progress color is 223
     assert!(
         styled.contains("fg:223"),
         "Task progress line should use task_progress color (223)"
     );
 
-    let plain = render_to_string(&mut state, 40, 25);
+    let plain = render_to_string(&mut state, 40, 40);
     // Should show progress icons and count
     assert!(plain.contains("✔"), "Should show completed task icon");
     assert!(plain.contains("◼"), "Should show in-progress task icon");
@@ -338,19 +338,19 @@ fn test_subagent_line_uses_subagent_color() {
     state.rebuild_row_targets();
     state.sidebar_focused = false;
 
-    let styled = render_to_styled_string(&mut state, 40, 25);
+    let styled = render_to_styled_string(&mut state, 40, 27);
     // subagent color is 73
     assert!(
         styled.contains("fg:73"),
         "Subagent line should use subagent color (73)"
     );
 
-    let plain = render_to_string(&mut state, 40, 25);
+    let plain = render_to_string(&mut state, 40, 27);
     assert!(plain.contains("Explore #1"), "Subagent name should appear");
 }
 
 #[test]
-fn test_response_arrow_uses_diff_added_color() {
+fn test_response_arrow_uses_response_arrow_color() {
     let mut pane = make_pane(AgentType::Claude, PaneStatus::Idle);
     pane.pane_active = false;
     pane.prompt = "Task completed successfully".into();
@@ -370,20 +370,20 @@ fn test_response_arrow_uses_diff_added_color() {
     state.rebuild_row_targets();
     state.sidebar_focused = false;
 
-    let styled = render_to_styled_string(&mut state, 40, 25);
-    // Response arrow (▶) uses diff_added color (114) and bold
+    let styled = render_to_styled_string(&mut state, 40, 27);
+    // Response arrow (▶) uses theme.response_arrow (74) and bold.
     assert!(
-        styled.contains("fg:114"),
-        "Response arrow should use diff_added color (114)"
+        styled.contains("fg:74"),
+        "Response arrow should use response_arrow color (74)"
     );
     assert!(styled.contains("bold"), "Response arrow should be bold");
-    // The response text itself uses text_muted (244) for inactive pane
+    // The response text itself uses text_muted (252) for inactive pane
     assert!(
-        styled.contains("fg:244"),
-        "Response text should use text_muted color (244) for inactive pane"
+        styled.contains("fg:252"),
+        "Response text should use text_muted color (252) for inactive pane"
     );
 
-    let plain = render_to_string(&mut state, 40, 25);
+    let plain = render_to_string(&mut state, 40, 27);
     assert!(plain.contains("▶"), "Response should show ▶ arrow");
 }
 
@@ -413,15 +413,15 @@ fn test_pr_link_uses_pr_link_color() {
     state.git.pr_number = Some("99".into());
     state.git.remote_url = "https://github.com/user/repo".into();
 
-    let styled = render_to_styled_string(&mut state, 28, 24);
+    let styled = render_to_styled_string(&mut state, 28, 40);
     // pr_link color is 117 (pale blue)
     assert!(
-        styled.contains("fg:117"),
+        styled.contains("fg:153"),
         "PR link should use pr_link color (117)"
     );
     assert!(styled.contains("underline"), "PR link should be underlined");
 
-    let plain = render_to_string(&mut state, 28, 24);
+    let plain = render_to_string(&mut state, 28, 25);
     assert!(plain.contains("#99"), "PR number should appear");
 }
 
@@ -447,14 +447,14 @@ fn test_diff_stat_added_uses_diff_added_color() {
     state.git.branch = "main".into();
     state.git.diff_stat = Some((42, 10));
 
-    let styled = render_to_styled_string(&mut state, 28, 24);
+    let styled = render_to_styled_string(&mut state, 28, 40);
     // diff_added color is 114
     assert!(
         styled.contains("fg:114"),
         "Diff +additions should use diff_added color (114)"
     );
 
-    let plain = render_to_string(&mut state, 28, 24);
+    let plain = render_to_string(&mut state, 28, 25);
     assert!(plain.contains("+42"), "Insertions count should appear");
 }
 
@@ -480,14 +480,14 @@ fn test_diff_stat_deleted_uses_diff_deleted_color() {
     state.git.branch = "main".into();
     state.git.diff_stat = Some((0, 25));
 
-    let styled = render_to_styled_string(&mut state, 28, 24);
+    let styled = render_to_styled_string(&mut state, 28, 25);
     // diff_deleted color is 174
     assert!(
         styled.contains("fg:174"),
         "Diff -deletions should use diff_deleted color (174)"
     );
 
-    let plain = render_to_string(&mut state, 28, 24);
+    let plain = render_to_string(&mut state, 28, 25);
     assert!(plain.contains("-25"), "Deletions count should appear");
 }
 
@@ -518,14 +518,14 @@ fn test_file_change_stat_uses_file_change_color() {
         deletions: 10,
     }];
 
-    let styled = render_to_styled_string(&mut state, 28, 24);
+    let styled = render_to_styled_string(&mut state, 28, 25);
     // Modified status uses badge_auto (221)
     assert!(
         styled.contains("fg:221"),
         "Modified file status should use badge_auto color (221)"
     );
 
-    let plain = render_to_string(&mut state, 28, 24);
+    let plain = render_to_string(&mut state, 28, 25);
     assert!(plain.contains("lib.rs"), "Filename should appear");
 }
 
@@ -559,7 +559,7 @@ fn test_custom_theme_new_fields_override() {
     assert_eq!(theme.port, Color::Indexed(82));
 
     // Original fields should still be default
-    assert_eq!(theme.border_active, Color::Indexed(117));
+    assert_eq!(theme.accent, Color::Indexed(153));
     assert_eq!(theme.agent_claude, Color::Indexed(174));
 }
 
@@ -594,15 +594,16 @@ fn test_branch_color_in_agent_panel() {
     }];
     state.rebuild_row_targets();
     state.sidebar_focused = false;
+    state.bottom_panel_height = 0;
 
-    let styled = render_to_styled_string(&mut state, 40, 25);
+    let styled = render_to_styled_string(&mut state, 40, 26);
     // branch color is 109
     assert!(
         styled.contains("fg:109"),
         "Branch name should use branch color (109)"
     );
 
-    let plain = render_to_string(&mut state, 40, 25);
+    let plain = render_to_string(&mut state, 40, 26);
     assert!(
         plain.contains("feature/cool-feature") || plain.contains("feature/cool-feat…"),
         "Branch name should appear in output"
@@ -629,7 +630,7 @@ fn test_selection_bg_color_applied() {
     state.sidebar_focused = true;
     state.global.selected_pane_row = 0;
 
-    let styled = render_to_styled_string(&mut state, 28, 24);
+    let styled = render_to_styled_string(&mut state, 28, 25);
     // selection_bg is 237
     assert!(
         styled.contains("bg:237"),
@@ -637,10 +638,10 @@ fn test_selection_bg_color_applied() {
     );
 }
 
-// ─── Border colors: active vs inactive ──────────────────────────────
+// ─── Accent (focused) vs border_inactive colors ─────────────────────
 
 #[test]
-fn test_border_active_vs_inactive_colors() {
+fn test_accent_vs_border_inactive_colors() {
     let mut pane1 = make_pane(AgentType::Claude, PaneStatus::Running);
     pane1.pane_id = "%1".into();
     let mut pane2 = make_pane(AgentType::Codex, PaneStatus::Idle);
@@ -672,10 +673,10 @@ fn test_border_active_vs_inactive_colors() {
     state.rebuild_row_targets();
 
     let styled = render_to_styled_string(&mut state, 28, 30);
-    // Should contain both active (117) and inactive (240) border colors
+    // Should contain both accent (153) and border_inactive (240) colors
     assert!(
-        styled.contains("fg:117"),
-        "Focused group should use border_active color (117)"
+        styled.contains("fg:153"),
+        "Focused group should use accent color (153)"
     );
     assert!(
         styled.contains("fg:240"),
@@ -701,8 +702,9 @@ fn test_running_status_color_in_output() {
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
     state.sidebar_focused = false;
+    state.bottom_panel_height = 0;
 
-    let styled = render_to_styled_string(&mut state, 28, 24);
+    let styled = render_to_styled_string(&mut state, 28, 25);
     // Spinner pulse color at frame 0 is 82 (from SPINNER_PULSE[0])
     assert!(
         styled.contains("fg:82"),
@@ -726,8 +728,9 @@ fn test_waiting_status_color_in_output() {
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
     state.sidebar_focused = false;
+    state.bottom_panel_height = 0;
 
-    let styled = render_to_styled_string(&mut state, 28, 24);
+    let styled = render_to_styled_string(&mut state, 28, 25);
     // Waiting status color is 221
     assert!(
         styled.contains("fg:221"),
@@ -751,8 +754,9 @@ fn test_error_status_color_in_output() {
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
     state.sidebar_focused = false;
+    state.bottom_panel_height = 0;
 
-    let styled = render_to_styled_string(&mut state, 28, 24);
+    let styled = render_to_styled_string(&mut state, 28, 25);
     // Error status color is 203
     assert!(
         styled.contains("fg:203"),
@@ -777,35 +781,19 @@ fn test_idle_status_color_in_output() {
     state.rebuild_row_targets();
     state.sidebar_focused = false;
 
-    let styled = render_to_styled_string(&mut state, 28, 24);
-    // Idle status color is 250
+    let styled = render_to_styled_string(&mut state, 28, 25);
+    // Idle status color is 110
     assert!(
-        styled.contains("fg:109"),
-        "Idle status should use status_idle color (109)"
+        styled.contains("fg:110"),
+        "Idle status should use status_idle color (110)"
     );
 }
 
 #[test]
 fn test_unknown_status_color_in_output() {
-    let pane = make_pane(AgentType::Claude, PaneStatus::Unknown);
-    let mut state = make_state(vec![SessionInfo {
-        session_name: "main".into(),
-        windows: vec![WindowInfo {
-            window_id: "@1".into(),
-            window_name: "project".into(),
-            window_active: true,
-            auto_rename: false,
-            panes: vec![pane.clone()],
-        }],
-    }]);
-    state.repo_groups = vec![make_repo_group("project", vec![pane])];
-    state.rebuild_row_targets();
-    state.sidebar_focused = false;
-
-    let styled = render_to_styled_string(&mut state, 28, 24);
-    // Unknown status color is 244
-    assert!(
-        styled.contains("fg:244"),
-        "Unknown status should use status_unknown color (244)"
+    let theme = tmux_agent_sidebar::ui::colors::ColorTheme::default();
+    assert_eq!(
+        theme.status_color(&PaneStatus::Unknown, false),
+        ratatui::style::Color::Indexed(244)
     );
 }

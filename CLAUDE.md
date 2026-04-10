@@ -20,7 +20,7 @@ cargo fmt --check              # Check formatting (used in CI)
 
 CI runs `cargo test`, `cargo clippy`, and `cargo fmt --check` on every push/PR.
 
-After implementation is complete, run `cargo build --release`. When working in a worktree, also copy the build artifact to the tmux plugin directory (see "Debugging" section below).
+After implementation is complete, run `cargo build --release`. The plugin directory is usually a symlink to this repo, so the binary is picked up automatically; only a worktree build needs a manual copy (see "Debugging" section below).
 
 ## Architecture
 
@@ -48,12 +48,12 @@ TUI event loop (main.rs) → AppState::sync_global_state() → reads tmux panes 
 - **`git.rs`** — Git operations (branch, ahead/behind, PR numbers via `gh` CLI, diff stats). Runs in a background polling thread.
 - **`activity.rs`** — Parses `/tmp/tmux-agent-activity*.log` files, maps tool types to colors.
 - **`group.rs`** — Groups panes by repository path.
-- **`ui/`** — Rendering layer: `agents.rs` (agent list), `bottom.rs` (activity/git tabs), `colors.rs` (256-color theme), `text.rs` (text formatting/truncation).
+- **`ui/`** — Rendering layer: `panes.rs` (agent list + repo filter), `bottom.rs` (activity/git tabs), `colors.rs` (256-color theme), `text.rs` (text formatting/truncation).
 
 ### State Management
 
-- `Focus` enum: Filter, Agents, ActivityLog — controls keyboard input routing
-- `AgentFilter`: All, Running, Waiting, Idle, Error
+- `Focus` enum: Filter, Panes, ActivityLog — controls keyboard input routing
+- `StatusFilter`: All, Running, Waiting, Idle, Error
 - `BottomTab`: Activity, GitStatus
 - SIGUSR1 signal triggers instant refresh on tmux pane focus change
 
@@ -63,15 +63,14 @@ Tests are in `/tests/` using Ratatui's `TestBackend` for UI rendering assertions
 
 ## Debugging (Local tmux Plugin)
 
-To debug locally, copy the release build artifact to the tmux plugin directory and restart the sidebar.
+`~/.tmux/plugins/tmux-agent-sidebar` is typically a symlink to this repository, so `cargo build --release` alone updates the binary tmux loads. Just restart the sidebar (toggle off → on via the tmux keybinding) to pick up the new build.
 
 ```bash
 cargo build --release
-cp target/release/tmux-agent-sidebar ~/.tmux/plugins/tmux-agent-sidebar/target/release/tmux-agent-sidebar
 # Restart sidebar (toggle off → on via tmux keybinding)
 ```
 
-**When working in a worktree**: Building inside a worktree outputs the artifact to the worktree's `target/release/`. The copy destination is the same.
+**When working in a worktree**: Worktrees build into their own `target/release/`, which is not what the plugin directory points at, so the artifact must be copied manually.
 
 ```bash
 cp <worktree-path>/target/release/tmux-agent-sidebar ~/.tmux/plugins/tmux-agent-sidebar/target/release/tmux-agent-sidebar

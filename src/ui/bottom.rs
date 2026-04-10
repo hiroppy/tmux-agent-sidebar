@@ -4,7 +4,7 @@ mod git;
 use ratatui::{
     Frame,
     layout::{Alignment, Rect},
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
@@ -28,7 +28,7 @@ fn render_centered(frame: &mut Frame, area: Rect, text: &str, color: Color) {
 pub fn draw_bottom(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let theme = &state.theme;
     let border_color = if state.focus == Focus::ActivityLog {
-        theme.border_active
+        theme.accent
     } else {
         theme.border_inactive
     };
@@ -79,17 +79,13 @@ pub fn draw_bottom(frame: &mut Frame, state: &mut AppState, area: Rect) {
 fn build_tab_title(state: &AppState) -> Line<'static> {
     let theme = &state.theme;
     let activity_style = if state.bottom_tab == BottomTab::Activity {
-        Style::default()
-            .fg(theme.text_active)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(theme.text_active)
     } else {
         Style::default().fg(theme.text_muted)
     };
 
     let git_style = if state.bottom_tab == BottomTab::GitStatus {
-        Style::default()
-            .fg(theme.text_active)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(theme.text_active)
     } else {
         Style::default().fg(theme.text_muted)
     };

@@ -11,8 +11,15 @@ use crate::ui::text::{
     wrap_text_char,
 };
 
+/// Left-edge marker character used for the currently selected pane.
+const SELECTION_MARKER: &str = "┃";
+
 struct RowCtx<'a> {
-    border_style: Style,
+    /// 1-column left marker: `┃` when the pane is selected, otherwise a space.
+    marker_char: &'static str,
+    /// Style for the left marker (fg + optional bg already applied).
+    marker_style: Style,
+    /// Usable inner width for content after the marker and its trailing space.
     inner_width: usize,
     theme: &'a ColorTheme,
     bg: Option<Color>,
@@ -28,19 +35,18 @@ impl RowCtx<'_> {
         }
     }
 
-    fn bordered(&self, content_spans: Vec<Span<'static>>, content_width: usize) -> Line<'static> {
+    fn row_line(&self, content_spans: Vec<Span<'static>>, content_width: usize) -> Line<'static> {
         let padding = pad_to(content_width, self.inner_width);
         let bg_default = self.apply_bg(Style::default());
-        let mut spans = Vec::with_capacity(content_spans.len() + 4);
-        spans.push(Span::styled("│", self.border_style));
+        let mut spans = Vec::with_capacity(content_spans.len() + 3);
+        spans.push(Span::styled(self.marker_char, self.marker_style));
         spans.push(Span::styled(" ", bg_default));
         spans.extend(content_spans);
         spans.push(Span::styled(padding, bg_default));
-        spans.push(Span::styled("│", self.border_style));
         Line::from(spans)
     }
 
-    fn bordered_split(
+    fn row_line_split(
         &self,
         left_spans: Vec<Span<'static>>,
         left_width: usize,
@@ -49,13 +55,12 @@ impl RowCtx<'_> {
     ) -> Line<'static> {
         let padding = self.inner_width.saturating_sub(left_width + right_width);
         let bg_default = self.apply_bg(Style::default());
-        let mut spans = Vec::with_capacity(left_spans.len() + right_spans.len() + 4);
-        spans.push(Span::styled("│", self.border_style));
+        let mut spans = Vec::with_capacity(left_spans.len() + right_spans.len() + 3);
+        spans.push(Span::styled(self.marker_char, self.marker_style));
         spans.push(Span::styled(" ", bg_default));
         spans.extend(left_spans);
         spans.push(Span::styled(" ".repeat(padding), bg_default));
         spans.extend(right_spans);
-        spans.push(Span::styled("│", self.border_style));
         Line::from(spans)
     }
 }
@@ -84,31 +89,22 @@ fn status_row(
     } else {
         theme.text_muted
     };
-    let active_mod = if ctx.active {
-        Modifier::BOLD
-    } else {
-        Modifier::empty()
-    };
 
     let badge_extra = if badge.is_empty() { 0 } else { 1 };
-    let left_dw =
+    let left_width =
         display_width(icon) + 1 + display_width(title) + badge_extra + display_width(badge);
-    let available_for_elapsed = ctx.inner_width.saturating_sub(left_dw);
+    let available_for_elapsed = ctx.inner_width.saturating_sub(left_width);
     let elapsed = truncate_to_width(&elapsed, available_for_elapsed);
-    let elapsed_dw = display_width(&elapsed);
-    let padding = pad_to(left_dw + elapsed_dw, ctx.inner_width);
+    let elapsed_width = display_width(&elapsed);
 
-    let bg_default = ctx.apply_bg(Style::default());
-    let mut spans: Vec<Span<'static>> = Vec::with_capacity(8);
-    spans.push(Span::styled("│", ctx.border_style));
-    spans.push(Span::styled(" ", bg_default));
-    spans.push(Span::styled(
+    let mut left_spans: Vec<Span<'static>> = Vec::with_capacity(3);
+    left_spans.push(Span::styled(
         icon.to_string(),
         ctx.apply_bg(Style::default().fg(icon_color)),
     ));
-    spans.push(Span::styled(
+    left_spans.push(Span::styled(
         format!(" {}", title),
-        ctx.apply_bg(Style::default().fg(title_fg).add_modifier(active_mod)),
+        ctx.apply_bg(Style::default().fg(title_fg)),
     ));
     if !badge.is_empty() {
         let badge_color = match pane.permission_mode {
@@ -118,18 +114,18 @@ fn status_row(
             PermissionMode::AcceptEdits => theme.badge_auto,
             PermissionMode::Default => theme.text_muted,
         };
-        spans.push(Span::styled(
+        left_spans.push(Span::styled(
             format!(" {}", badge),
             ctx.apply_bg(Style::default().fg(badge_color)),
         ));
     }
-    spans.push(Span::styled(padding, bg_default));
-    spans.push(Span::styled(
+
+    let right_spans = vec![Span::styled(
         elapsed,
         ctx.apply_bg(Style::default().fg(elapsed_fg)),
-    ));
-    spans.push(Span::styled("│", ctx.border_style));
-    Line::from(spans)
+    )];
+
+    ctx.row_line_split(left_spans, left_width, right_spans, elapsed_width)
 }
 
 fn branch_ports_row(
@@ -190,7 +186,7 @@ fn branch_ports_row(
         )
     };
 
-    Some(ctx.bordered_split(left_spans, left_width, right_spans, right_width))
+    Some(ctx.row_line_split(left_spans, left_width, right_spans, right_width))
 }
 
 fn task_progress_row(
@@ -220,7 +216,7 @@ fn task_progress_row(
     );
     let summary_dw = display_width(&summary);
     let task_color = ctx.theme.task_progress;
-    Some(ctx.bordered(
+    Some(ctx.row_line(
         vec![Span::styled(
             summary,
             ctx.apply_bg(Style::default().fg(task_color)),
@@ -250,7 +246,7 @@ fn subagent_rows(subagents: &[String], ctx: &RowCtx) -> Vec<Line<'static>> {
         let max_sa_w = ctx.inner_width.saturating_sub(prefix_dw);
         let truncated_sa = truncate_to_width(&numbered, max_sa_w);
         let text_dw = prefix_dw + display_width(&truncated_sa);
-        out.push(ctx.bordered(
+        out.push(ctx.row_line(
             vec![
                 Span::styled(prefix, ctx.apply_bg(Style::default().fg(tree_color))),
                 Span::styled(
@@ -276,7 +272,7 @@ fn wait_reason_row(wait_reason: &str, status: &PaneStatus, ctx: &RowCtx) -> Opti
     } else {
         ctx.theme.wait_reason
     };
-    Some(ctx.bordered(
+    Some(ctx.row_line(
         vec![Span::styled(
             text,
             ctx.apply_bg(Style::default().fg(reason_color)),
@@ -307,7 +303,7 @@ fn prompt_rows(pane: &crate::tmux::PaneInfo, ctx: &RowCtx) -> Vec<Line<'static>>
         if is_response && li == 0 {
             let arrow_color = theme.response_arrow;
             let text_dw = 4 + display_width(wl); // "  ▶ " width
-            out.push(ctx.bordered(
+            out.push(ctx.row_line(
                 vec![
                     Span::styled(
                         "  ▶ ",
@@ -325,7 +321,7 @@ fn prompt_rows(pane: &crate::tmux::PaneInfo, ctx: &RowCtx) -> Vec<Line<'static>>
             let indent = if is_response { "    " } else { "  " };
             let text = format!("{}{}", indent, wl);
             let text_dw = display_width(&text);
-            out.push(ctx.bordered(
+            out.push(ctx.row_line(
                 vec![Span::styled(
                     text,
                     ctx.apply_bg(Style::default().fg(prompt_color)),
@@ -345,7 +341,7 @@ fn idle_hint_row(ctx: &RowCtx) -> Line<'static> {
     } else {
         ctx.theme.text_muted
     };
-    ctx.bordered(
+    ctx.row_line(
         vec![Span::styled(
             text.to_string(),
             ctx.apply_bg(Style::default().fg(idle_color)),
@@ -362,39 +358,63 @@ pub(super) fn render_pane_lines_with_ports(
     task_progress: Option<&crate::activity::TaskProgress>,
     selected: bool,
     active: bool,
-    border_color: Color,
     width: usize,
     icons: &StatusIcons,
     theme: &ColorTheme,
     spinner_frame: usize,
     now: u64,
 ) -> Vec<Line<'static>> {
-    let ctx = RowCtx {
-        border_style: Style::default().fg(border_color),
-        inner_width: width.saturating_sub(3),
-        theme,
-        bg: if selected {
-            Some(theme.selection_bg)
+    let bg = if selected {
+        Some(theme.selection_bg)
+    } else {
+        None
+    };
+    let apply_bg = |style: Style| match bg {
+        Some(c) => style.bg(c),
+        None => style,
+    };
+    // The left marker `┃` highlights the pane that is currently focused in
+    // tmux (`active`). To keep the active accent compact, it only appears on
+    // the status row and the branch/ports row (when present) — never on
+    // deeper details like task progress or prompt wrapping. The sidebar
+    // cursor position (`selected`) still paints the full pane with the
+    // selection background.
+    let marker_ctx = RowCtx {
+        marker_char: if active { SELECTION_MARKER } else { " " },
+        marker_style: if active {
+            apply_bg(Style::default().fg(theme.accent))
         } else {
-            None
+            apply_bg(Style::default())
         },
+        inner_width: width.saturating_sub(2),
+        theme,
+        bg,
+        active,
+    };
+    let plain_ctx = RowCtx {
+        marker_char: " ",
+        marker_style: Style::default(),
+        inner_width: width.saturating_sub(2),
+        theme,
+        bg: None,
         active,
     };
 
     let mut out: Vec<Line<'static>> = Vec::with_capacity(8);
-    out.push(status_row(pane, &ctx, icons, spinner_frame, now));
-    if let Some(line) = branch_ports_row(git_info, ports, &ctx) {
+    out.push(status_row(pane, &marker_ctx, icons, spinner_frame, now));
+    if let Some(line) = branch_ports_row(git_info, ports, &marker_ctx) {
         out.push(line);
     }
-    if let Some(line) = task_progress_row(task_progress, &ctx) {
+    let ctx = &plain_ctx;
+    if let Some(line) = task_progress_row(task_progress, ctx) {
         out.push(line);
     }
-    out.extend(subagent_rows(&pane.subagents, &ctx));
-    if let Some(line) = wait_reason_row(&pane.wait_reason, &pane.status, &ctx) {
+    out.extend(subagent_rows(&pane.subagents, ctx));
+    if let Some(line) = wait_reason_row(&pane.wait_reason, &pane.status, ctx) {
         out.push(line);
     }
     if !pane.prompt.is_empty() {
-        out.extend(prompt_rows(pane, &ctx));
+        out.extend(prompt_rows(pane, ctx));
     } else if matches!(pane.status, PaneStatus::Idle) {
         out.push(idle_hint_row(&ctx));
     }
@@ -463,7 +483,8 @@ mod tests {
 
     fn test_ctx<'a>(theme: &'a ColorTheme, inner_width: usize, active: bool) -> RowCtx<'a> {
         RowCtx {
-            border_style: Style::default().fg(theme.border_active),
+            marker_char: " ",
+            marker_style: Style::default(),
             inner_width,
             theme,
             bg: None,
@@ -482,7 +503,6 @@ mod tests {
             None,
             false,
             false,
-            theme.border_active,
             40,
             &StatusIcons::default(),
             &theme,
@@ -511,7 +531,6 @@ mod tests {
             None,
             false,
             false,
-            theme.border_active,
             40,
             &StatusIcons::default(),
             &theme,
@@ -543,7 +562,6 @@ mod tests {
             None,
             false,
             false,
-            theme.border_active,
             40,
             &StatusIcons::default(),
             &theme,
@@ -576,7 +594,6 @@ mod tests {
             None,
             false,
             false,
-            theme.border_active,
             40,
             &StatusIcons::default(),
             &theme,
@@ -618,7 +635,6 @@ mod tests {
             None,
             false,
             false,
-            theme.border_active,
             40,
             &StatusIcons::default(),
             &theme,
@@ -646,7 +662,6 @@ mod tests {
             None,
             false,
             false,
-            theme.border_active,
             18,
             &StatusIcons::default(),
             &theme,
@@ -672,7 +687,6 @@ mod tests {
             None,
             false,
             false,
-            theme.border_active,
             40,
             &StatusIcons::default(),
             &theme,
@@ -698,7 +712,6 @@ mod tests {
             None,
             false,
             false,
-            theme.border_active,
             40,
             &StatusIcons::default(),
             &theme,
@@ -728,7 +741,6 @@ mod tests {
             None,
             false,
             false,
-            theme.border_active,
             40,
             &StatusIcons::default(),
             &theme,
@@ -759,7 +771,6 @@ mod tests {
             None,
             false,
             false,
-            theme.border_active,
             40,
             &StatusIcons::default(),
             &theme,
@@ -789,7 +800,6 @@ mod tests {
             None,
             false,
             false,
-            theme.border_active,
             20,
             &StatusIcons::default(),
             &theme,
@@ -816,7 +826,6 @@ mod tests {
             None,
             false,
             false,
-            theme.border_active,
             40,
             &StatusIcons::default(),
             &theme,
@@ -849,7 +858,6 @@ mod tests {
             Some(&progress),
             false,
             false,
-            theme.border_active,
             40,
             &StatusIcons::default(),
             &theme,
@@ -876,7 +884,6 @@ mod tests {
             Some(&progress),
             false,
             false,
-            theme.border_active,
             40,
             &StatusIcons::default(),
             &theme,
@@ -924,7 +931,6 @@ mod tests {
             None,
             true, // selected
             false,
-            theme.border_active,
             40,
             &StatusIcons::default(),
             &theme,
@@ -932,8 +938,8 @@ mod tests {
             0,
         );
 
-        // Every inner (non-border) span on the status line must carry the selection bg.
-        // Borders "│" use border_style only and keep bg = None.
+        // Every inner (non-marker) span on the status line must carry the selection bg.
+        // The left marker uses marker_style only.
         let status = &lines[0];
         let has_bg = status
             .spans
@@ -946,7 +952,35 @@ mod tests {
     }
 
     #[test]
-    fn render_pane_lines_active_bolds_agent_title() {
+    fn render_pane_lines_selected_leaves_content_rows_unhighlighted() {
+        let theme = ColorTheme::default();
+        let pane = pane(PermissionMode::Auto, PaneStatus::Running, "do work");
+        let lines = render_pane_lines_with_ports(
+            &pane,
+            &PaneGitInfo::default(),
+            None,
+            None,
+            true, // selected
+            false,
+            40,
+            &StatusIcons::default(),
+            &theme,
+            0,
+            0,
+        );
+
+        assert!(
+            lines
+                .iter()
+                .skip(1)
+                .flat_map(|line| &line.spans)
+                .all(|span| span.style.bg != Some(theme.selection_bg)),
+            "content rows should not carry the selection background"
+        );
+    }
+
+    #[test]
+    fn render_pane_lines_active_shows_left_marker_on_status_row() {
         let theme = ColorTheme::default();
         let pane = pane(PermissionMode::Default, PaneStatus::Running, "");
         let lines = render_pane_lines_with_ports(
@@ -956,7 +990,6 @@ mod tests {
             None,
             false,
             true, // active
-            theme.border_active,
             40,
             &StatusIcons::default(),
             &theme,
@@ -964,14 +997,20 @@ mod tests {
             0,
         );
 
+        // The status row (line 0) must start with the SELECTION_MARKER in the
+        // accent fg; no BOLD is applied to the title span.
+        let marker_span = &lines[0].spans[0];
+        assert_eq!(marker_span.content, SELECTION_MARKER);
+        assert_eq!(marker_span.style.fg, Some(theme.accent));
+
         let title_span = lines[0]
             .spans
             .iter()
             .find(|s| s.content.contains("codex"))
             .expect("title span should be present");
         assert!(
-            title_span.style.add_modifier.contains(Modifier::BOLD),
-            "active pane title should be BOLD"
+            !title_span.style.add_modifier.contains(Modifier::BOLD),
+            "active pane title should not be BOLD"
         );
     }
 
@@ -1006,10 +1045,10 @@ mod tests {
         );
         for line in &lines {
             let text = line_text(line);
-            // Each line must start "│  " (border + 2-space indent).
+            // Each line starts with marker(1) + space(1) + indent(2) = "    " for non-selected.
             assert!(
-                text.starts_with("│  "),
-                "each wrapped line should carry the 2-space indent, got: {text}"
+                text.starts_with("    "),
+                "each wrapped line should carry the left padding, got: {text}"
             );
         }
     }
