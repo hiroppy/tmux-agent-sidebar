@@ -907,8 +907,8 @@ fn snapshot_response_japanese_ui() {
                               All▾
     project
     ┃ ○ claude
-        ▶ 修 正 が 完 了 し ま し た 。 テ ス
-          ト も 全 て 通 っ て い ま す 。
+      ▶ 修 正 が 完 了 し ま し た 。 テ ス ト
+        も 全 て 通 っ て い ま す 。
     ╭ Activity │ Git ────────────╮
     │       No activity yet      │
     ╰────────────────────────────╯
@@ -991,6 +991,75 @@ fn snapshot_full_auto_badge_ui() {
     ╭ Activity │ Git ──────────╮
     │      No activity yet     │
     ╰──────────────────────────╯
+    ");
+}
+
+#[test]
+fn snapshot_plan_badge_ui() {
+    let mut pane = make_pane(AgentType::Claude, PaneStatus::Running);
+    pane.permission_mode = PermissionMode::Plan;
+
+    let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
+
+    let output = render_to_string(&mut state, 28, 25);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●1  ◐0  ○0  ✕0
+                            All▾
+    project
+    ┃ ● claude plan
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
+}
+
+#[test]
+fn snapshot_accept_edits_badge_ui() {
+    let mut pane = make_pane(AgentType::Claude, PaneStatus::Running);
+    pane.permission_mode = PermissionMode::AcceptEdits;
+
+    let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
+
+    let output = render_to_string(&mut state, 28, 25);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●1  ◐0  ○0  ✕0
+                            All▾
+    project
+    ┃ ● claude edit
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
+}
+
+#[test]
+fn snapshot_response_with_branch_ui() {
+    let mut pane = make_pane(AgentType::Claude, PaneStatus::Idle);
+    pane.prompt = "Done. All tests are green.".into();
+    pane.prompt_is_response = true;
+    let git_info = PaneGitInfo {
+        repo_root: Some("/home/user/project".into()),
+        branch: Some("feature/ui-v2".into()),
+        is_worktree: false,
+        worktree_name: None,
+    };
+    let mut state = make_state_with_groups(vec![tmux_agent_sidebar::group::RepoGroup {
+        name: "project".into(),
+        has_focus: true,
+        panes: vec![(pane, git_info)],
+    }]);
+
+    let output = render_to_string(&mut state, 34, 27);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●0  ◐0  ○1  ✕0
+                                  All▾
+    project
+    ┃ ○ claude
+    ┃   feature/ui-v2
+      ▶ Done. All tests are green.
+    ╭ Activity │ Git ────────────────╮
+    │         No activity yet        │
+    ╰────────────────────────────────╯
     ");
 }
 

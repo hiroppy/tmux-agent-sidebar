@@ -289,9 +289,7 @@ fn prompt_rows(pane: &crate::tmux::PaneInfo, ctx: &RowCtx) -> Vec<Line<'static>>
     } else {
         theme.text_muted
     };
-    let wrap_width = ctx
-        .inner_width
-        .saturating_sub(if is_response { 4 } else { 2 });
+    let wrap_width = ctx.inner_width.saturating_sub(2);
     let wrapped = if is_response {
         wrap_text_char(&pane.prompt, wrap_width, 3)
     } else {
@@ -302,11 +300,11 @@ fn prompt_rows(pane: &crate::tmux::PaneInfo, ctx: &RowCtx) -> Vec<Line<'static>>
     for (li, wl) in wrapped.iter().enumerate() {
         if is_response && li == 0 {
             let arrow_color = theme.response_arrow;
-            let text_dw = 4 + display_width(wl); // "  ▶ " width
+            let text_dw = 2 + display_width(wl); // "▶ " width
             out.push(ctx.row_line(
                 vec![
                     Span::styled(
-                        "  ▶ ",
+                        "▶ ",
                         ctx.apply_bg(
                             Style::default()
                                 .fg(arrow_color)
@@ -318,7 +316,7 @@ fn prompt_rows(pane: &crate::tmux::PaneInfo, ctx: &RowCtx) -> Vec<Line<'static>>
                 text_dw,
             ));
         } else {
-            let indent = if is_response { "    " } else { "  " };
+            let indent = "  ";
             let text = format!("{}{}", indent, wl);
             let text_dw = display_width(&text);
             out.push(ctx.row_line(
