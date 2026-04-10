@@ -87,6 +87,7 @@ fn render_secondary_header<'a>(state: &AppState, width: u16) -> (Line<'a>, Optio
         .map(|notice| format!("new release v{}!", notice.latest_version));
 
     if let Some(text) = banner_text {
+        let text = truncate_to_width(&text, width as usize);
         let gap = pad_to(display_width(&text), width as usize);
         return (
             Line::from(vec![

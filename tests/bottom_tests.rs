@@ -515,7 +515,10 @@ fn snapshot_git_pr_number_ui() {
         output.contains("underline"),
         "PR number should be underlined"
     );
-    assert!(output.contains("fg:153"));
+    assert!(
+        output.contains("fg:117"),
+        "PR link should use pr_link color (117)"
+    );
 }
 
 #[test]

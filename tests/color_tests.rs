@@ -416,7 +416,7 @@ fn test_pr_link_uses_pr_link_color() {
     let styled = render_to_styled_string(&mut state, 28, 40);
     // pr_link color is 117 (pale blue)
     assert!(
-        styled.contains("fg:153"),
+        styled.contains("fg:117"),
         "PR link should use pr_link color (117)"
     );
     assert!(styled.contains("underline"), "PR link should be underlined");
