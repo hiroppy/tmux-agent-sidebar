@@ -75,8 +75,6 @@ git clone https://github.com/hiroppy/tmux-agent-sidebar.git ~/.tmux/plugins/tmux
 run-shell ~/.tmux/plugins/tmux-agent-sidebar/tmux-agent-sidebar.tmux
 ```
 
-Set `@sidebar_auto_create` to `off` if you want to open the sidebar only with the toggle key and avoid installing the plugin's `after-new-window` auto-create hook.
-
 3. Install the binary using one of the following methods:
 
    <details>
