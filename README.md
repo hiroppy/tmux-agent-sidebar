@@ -99,13 +99,15 @@ run-shell ~/.tmux/plugins/tmux-agent-sidebar/tmux-agent-sidebar.tmux
 
    </details>
 
-Reload tmux config with `prefix + r` after updating `tmux.conf`. This works for both TPM and manual installs.
+### 2. Reload tmux config
 
-### 2. Agent Hooks
+After updating `tmux.conf`, press `prefix + r` to reload. This applies to both TPM and manual installs.
+
+### 3. Agent Hooks
 
 The sidebar receives status updates through agent hooks. Add the following hook configurations to your agent settings.
 
-#### 2.1 Claude Code
+#### 3.1 Claude Code
 
 Add to your Claude Code hooks configuration (e.g. `~/.claude/settings.json`):
 
@@ -198,7 +200,7 @@ Add to your Claude Code hooks configuration (e.g. `~/.claude/settings.json`):
 
 </details>
 
-#### 2.2 Codex
+#### 3.2 Codex
 
 Create or edit `~/.codex/hooks.json`:
 
