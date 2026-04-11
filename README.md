@@ -255,9 +255,7 @@ Create or edit `~/.codex/hooks.json`:
 
 </details>
 
-## Usage
-
-### Keybindings
+## Keybindings
 
 | Key | Action |
 |---|---|
@@ -275,7 +273,7 @@ Create or edit `~/.codex/hooks.json`:
 
 If a newer release is available, the version notice banner replaces the repo filter on the second header row.
 
-### Feature Support by Agent
+## Feature Support by Agent
 
 | Feature | Claude Code | Codex | Notes |
 |---|---|---|---|
@@ -291,7 +289,7 @@ If a newer release is available, the version notice banner replaces the repo fil
 | Subagent display | :white_check_mark: | :x: | Requires `SubagentStart` / `SubagentStop` |
 | Activity log | :white_check_mark: | :x: | Requires `PostToolUse` |
 
-### Known Limitations
+## Known Limitations
 
 - **Waiting status (Claude Code)** — After approving a permission prompt, the status stays `waiting` until the next hook event fires. This is a limitation of the Claude Code hook system.
 - **Codex hook coverage** — Codex does not support `Notification` or `PostToolUse` hooks, so waiting status, activity log, and task progress are unavailable.
