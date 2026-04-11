@@ -267,12 +267,13 @@ Create or edit `~/.codex/hooks.json`:
 | `prefix + E` | Toggle sidebar in all windows (default, customizable) |
 | `j` / `Down` | Move selection down (filter → agents → bottom panel) |
 | `k` / `Up` | Move selection up |
-| `h` / `Left` | Previous filter (when on filter bar) |
-| `l` / `Right` | Next filter (when on filter bar) |
-| `Enter` | Jump to selected agent's pane |
+| `h` / `Left` | Previous status filter (filter bar only) |
+| `l` / `Right` | Next status filter (filter bar only) |
+| `r` | Open repo filter popup (filter bar only) |
+| `Enter` | Jump to selected agent's pane / confirm repo popup |
 | `Tab` | Cycle status filter (All → Running → Waiting → Idle → Error) |
 | `Shift+Tab` | Switch bottom panel tab (Activity / Git) |
-| `Esc` | Return focus to agents panel |
+| `Esc` | Return focus to agents panel / close repo popup |
 | Mouse click | Click agent to jump to its pane, click status tabs to filter, click the repo area to open the repo popup |
 
 
@@ -292,11 +293,10 @@ Create or edit `~/.codex/hooks.json`:
 | Subagent display | :white_check_mark: | :x: | Requires `SubagentStart` / `SubagentStop` |
 | Activity log | :white_check_mark: | :x: | Requires `PostToolUse` |
 
-## Known Limitations
+### Known Limitations
 
 - **Waiting status (Claude Code)** — After approving a permission prompt, the status stays `waiting` until the next hook event fires. This is a limitation of the Claude Code hook system.
 - **Codex hook coverage** — Codex does not support `Notification` or `PostToolUse` hooks, so waiting status, activity log, and task progress are unavailable.
-- **Dead pane cleanup** — If an agent exits without a hook, the periodic pid scan removes the stale pane on the next refresh cycle.
 
 ## Customization
 
