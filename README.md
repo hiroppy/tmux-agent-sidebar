@@ -61,6 +61,8 @@ run '~/.tmux/plugins/tpm/tpm'
 
 Press `prefix + I` to install. On first run, an install wizard will prompt you to download a pre-built binary or build from source.
 
+To update later, press `prefix + U` in TPM's plugin list and select `tmux-agent-sidebar`. The install wizard runs again if the bundled binary has changed.
+
 #### Manual
 
 1. Clone the repository:
