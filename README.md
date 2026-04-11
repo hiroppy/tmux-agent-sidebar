@@ -24,6 +24,32 @@ A tmux sidebar that monitors all AI coding agents (Claude Code, Codex) across ev
 - **Worktree-aware grouping** — Groups agents by the same repo, including worktrees, so related panes stay together
 - **Pane metadata** — Shows listening localhost ports and execution command info for each pane
 
+## Agent Tab
+
+<table>
+  <tr>
+    <td width="55%"><img src="assets/agent-tab.png" alt="Agent tab" /></td>
+    <td valign="top">
+      <ul>
+        <li><b>Status icon</b> — <code>●</code> running / <code>◐</code> waiting / <code>○</code> idle / <code>✕</code> error</li>
+        <li><b>Agent color</b> — Claude (terracotta) / Codex (purple)</li>
+        <li><b>Permission badge</b> — <code>plan</code> / <code>edit</code> / <code>auto</code> / <code>!</code></li>
+        <li><b>Session name</b> — tmux session the pane belongs to</li>
+        <li><b>+ marker</b> — indicates a git worktree</li>
+        <li><b>Branch</b> — current git branch for the pane's cwd</li>
+        <li><b>Elapsed time</b> — time since the last user prompt</li>
+        <li><b>Task progress</b> — e.g. <code>3/7</code>, synced from the agent's task list</li>
+        <li><b>Subagent tree</b> — parent-child branches for spawned subagents</li>
+        <li><b>Listening ports</b> — localhost ports the pane's process is listening on</li>
+        <li><b>Exec command</b> — the running command for the pane</li>
+        <li><b>Response arrow (▶)</b> — latest agent response preview</li>
+        <li><b>Prompt text</b> — latest user prompt</li>
+        <li><b>Wait reason</b> — why the agent is waiting (yellow, Claude only)</li>
+      </ul>
+    </td>
+  </tr>
+</table>
+
 ## Requirements
 
 - tmux 3.0+
