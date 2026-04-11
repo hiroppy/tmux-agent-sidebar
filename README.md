@@ -30,7 +30,6 @@
         <li><b>Task progress</b> — e.g. <code>3/7</code>, synced from the agent's task list</li>
         <li><b>Subagent tree</b> — parent-child branches for spawned subagents</li>
         <li><b>Listening ports</b> — localhost ports the pane's process is listening on</li>
-        <li><b>Exec command</b> — the running command for the pane</li>
         <li><b>Response arrow (▶)</b> — latest agent response preview</li>
         <li><b>Prompt text</b> — latest user prompt</li>
         <li><b>Wait reason</b> — why the agent is waiting (yellow, Claude only)</li>
