@@ -18,17 +18,11 @@ A tmux sidebar that monitors all AI coding agents (Claude Code, Codex) across ev
 ## Features
 
 - **Cross-session monitoring** — Shows all agents across every tmux session and window in one sidebar
-- **Pane jump** — Select an agent and press Enter to jump to its pane, even across different windows
-- **Repository grouping** — Groups agents by the same repo, including worktrees, so related panes stay together
-- **Repo filter** — Switch between `All` and a specific repo from the secondary header row
-- **Version notice** — Shows a release banner in the secondary header row when a newer version is available
-- **Status filter** — Filters by Running / Waiting / Idle / Error with live counts per status
-- **Subagent tree** — Shows spawned subagents as a parent-child tree
-- **Task progress** — Displays task completion (e.g. `3/7`) synced from agent task lists
 - **Activity log** — Streams each tool invocation (Read, Edit, Bash, etc.) per agent in real time
+- **Task & subagent tracking** — Displays task progress (e.g. `3/7`) and spawned subagents as a parent-child tree
 - **Git integration** — Shows branch name, ahead/behind counts, PR number (`gh`), and per-file diff stats
-- **Pane metadata** — Shows listening localhost ports and execution command info for each pane, alongside branch and elapsed time
-- **Permission mode** — Shows `auto` / `plan` / `!` badge so you know each agent's permission level
+- **Worktree-aware grouping** — Groups agents by the same repo, including worktrees, so related panes stay together
+- **Pane metadata** — Shows listening localhost ports and execution command info for each pane
 
 ## Requirements
 
