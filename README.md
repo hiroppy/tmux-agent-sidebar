@@ -101,7 +101,7 @@ run-shell ~/.tmux/plugins/tmux-agent-sidebar/tmux-agent-sidebar.tmux
 
 ### 2. Reload tmux config
 
-After updating `tmux.conf`, press `prefix + r` to reload. This applies to both TPM and manual installs.
+After updating `tmux.conf`, press `prefix + r` to reload.
 
 ### 3. Agent Hooks
 
