@@ -277,15 +277,6 @@ Create or edit `~/.codex/hooks.json`:
 
 If a newer release is available, the version notice banner replaces the repo filter on the second header row.
 
-### Status Icons
-
-| Icon | State | Description |
-|---|---|---|
-| `●` | Running | Agent is actively processing (pulsing animation) |
-| `◐` | Waiting | Agent needs user attention (e.g. permission approval) |
-| `○` | Idle | Agent is ready and waiting for input |
-| `✕` | Error | Agent encountered an error |
-
 ### Feature Support by Agent
 
 | Feature | Claude Code | Codex | Notes |
