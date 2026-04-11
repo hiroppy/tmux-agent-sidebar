@@ -13,11 +13,11 @@ A tmux sidebar that monitors all AI coding agents (Claude Code, Codex) across ev
 - **Worktree-aware grouping** — Groups agents by the same repo, including worktrees, so related panes stay together
 - **Pane metadata** — Shows listening localhost ports and execution command info for each pane
 
-## Agent Tab
+## Agent Pane
 
 <table>
   <tr>
-    <td width="55%"><img src="assets/agent-tab.png" alt="Agent tab" /></td>
+    <td width="55%"><img src="assets/agent-pane.png" alt="Agent pane" /></td>
     <td valign="top">
       <ul>
         <li><b>Status icon</b> — <code>●</code> running / <code>◐</code> waiting / <code>○</code> idle / <code>✕</code> error</li>
