@@ -295,22 +295,6 @@ If a newer release is available, the version notice banner replaces the repo fil
 - **Codex hook coverage** — Codex does not support `Notification` or `PostToolUse` hooks, so waiting status, activity log, and task progress are unavailable.
 - **Dead pane cleanup** — If an agent exits without a hook, the periodic pid scan removes the stale pane on the next refresh cycle.
 
-## Accessing Agent Status from Scripts
-
-The sidebar stores agent status in tmux pane options, which you can read from your own scripts or status bar:
-
-```sh
-# Get a specific pane's agent status
-tmux show -t "$pane_id" -pv @pane_status
-# Returns: running / waiting / idle / error / (empty)
-
-# Get agent type
-tmux show -t "$pane_id" -pv @pane_agent
-# Returns: claude / codex / (empty)
-```
-
-This is useful for integrating agent status into your tmux status bar, custom scripts, or notifications.
-
 ## Customization
 
 Most options can be set **before** loading the plugin in your `tmux.conf`:
@@ -362,6 +346,22 @@ set -g @sidebar_icon_unknown ·           # unknown status icon
 
 run-shell ~/.tmux/plugins/tmux-agent-sidebar/tmux-agent-sidebar.tmux
 ```
+
+## Accessing Agent Status from Scripts
+
+The sidebar stores agent status in tmux pane options, which you can read from your own scripts or status bar:
+
+```sh
+# Get a specific pane's agent status
+tmux show -t "$pane_id" -pv @pane_status
+# Returns: running / waiting / idle / error / (empty)
+
+# Get agent type
+tmux show -t "$pane_id" -pv @pane_agent
+# Returns: claude / codex / (empty)
+```
+
+This is useful for integrating agent status into your tmux status bar, custom scripts, or notifications.
 
 ## Uninstalling
 
