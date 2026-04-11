@@ -383,19 +383,21 @@ Create or edit `~/.codex/hooks.json`:
 | Status tracking (running / idle / error) | :white_check_mark: | :white_check_mark: | Driven by `SessionStart` / `UserPromptSubmit` / `Stop` |
 | Prompt text display | :white_check_mark: | :white_check_mark: | Saved from `UserPromptSubmit` |
 | Response text display (`▶ ...`) | :white_check_mark: | :white_check_mark: | Populated from `Stop` payload |
-| Waiting status + wait reason | :white_check_mark: | :x: | Codex has no `Notification` hook |
+| Waiting status + wait reason | :white_check_mark: | :x: | Populated from `Notification`, `PermissionDenied`, and `TeammateIdle` (all Claude-only) |
 | API failure reason display | :white_check_mark: | :x: | `StopFailure` is wired only for Claude |
 | Permission badge | :white_check_mark: (`plan` / `edit` / `auto` / `!`) | :white_check_mark: (`auto` / `!` only) | Codex badges are inferred from process args |
-| Git branch display | :white_check_mark: | :white_check_mark: | Uses the pane `cwd` |
+| Git branch display | :white_check_mark: | :white_check_mark: | Uses the pane `cwd`; Claude updates dynamically via `CwdChanged` |
 | Elapsed time | :white_check_mark: | :white_check_mark: | Since the last prompt |
 | Task progress | :white_check_mark: | :x: | Requires `PostToolUse` |
+| Task lifecycle notifications | :white_check_mark: | :x: | Requires `TaskCreated` / `TaskCompleted` |
 | Subagent display | :white_check_mark: | :x: | Requires `SubagentStart` / `SubagentStop` |
 | Activity log | :white_check_mark: | :x: | Requires `PostToolUse` |
+| Worktree lifecycle tracking | :white_check_mark: | :x: | Requires `WorktreeCreate` / `WorktreeRemove` |
 
 ### Known Limitations
 
 - **Waiting status (Claude Code)** — After approving a permission prompt, the status stays `waiting` until the next hook event fires. This is a limitation of the Claude Code hook system.
-- **Codex hook coverage** — Codex does not support `Notification` or `PostToolUse` hooks, so waiting status, activity log, and task progress are unavailable.
+- **Codex hook coverage** — Codex only emits `SessionStart`, `UserPromptSubmit`, `Stop`, and `SessionEnd`, so waiting status, activity log, task progress, subagent display, and worktree tracking are unavailable.
 
 ## Customization
 
