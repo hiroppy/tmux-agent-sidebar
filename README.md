@@ -1,8 +1,8 @@
-# tmux-agent-sidebar
+<h1 align="center">tmux-agent-sidebar</h1>
 
-A tmux sidebar that monitors all AI coding agents (Claude Code, Codex) across every session and window — statuses, prompts, git info, activity logs, and more in one place.
+<p align="center">A tmux sidebar that monitors all AI coding agents (Claude Code, Codex) across every session and window — statuses, prompts, git info, activity logs, and more in one place.</p>
 
-![main](assets/main.png)
+<p align="center"><img src="assets/main.png" alt="main" /></p>
 
 ## Features
 
