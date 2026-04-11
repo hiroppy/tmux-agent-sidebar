@@ -367,12 +367,6 @@ set -g @sidebar_icon_unknown ·           # unknown status icon
 run-shell ~/.tmux/plugins/tmux-agent-sidebar/tmux-agent-sidebar.tmux
 ```
 
-Internal tmux options are managed by the plugin itself and are not meant to
-be set manually:
-
-- `@agent_sidebar_dir`
-- `@sidebar_pid`
-
 ## Uninstalling
 
 1. Remove the `set -g @plugin` (or `run-shell`) line from your `tmux.conf`
