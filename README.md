@@ -273,7 +273,6 @@ Create or edit `~/.codex/hooks.json`:
 | `Esc` | Return focus to agents panel |
 | Mouse click | Click agent to jump to its pane, click status tabs to filter, click the repo area to open the repo popup |
 
-If a newer release is available, the version notice banner replaces the repo filter on the second header row.
 
 ## Feature Support by Agent
 
