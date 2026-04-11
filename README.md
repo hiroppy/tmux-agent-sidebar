@@ -80,7 +80,7 @@ Press `prefix + I` to install. On first run, an install wizard will prompt you t
 git clone https://github.com/hiroppy/tmux-agent-sidebar.git ~/.tmux/plugins/tmux-agent-sidebar
 ```
 
-1. Add the plugin to your `tmux.conf`:
+2. Add the plugin to your `tmux.conf`:
 
 ```tmux
 run-shell ~/.tmux/plugins/tmux-agent-sidebar/tmux-agent-sidebar.tmux
@@ -88,7 +88,7 @@ run-shell ~/.tmux/plugins/tmux-agent-sidebar/tmux-agent-sidebar.tmux
 
 Set `@sidebar_auto_create` to `off` if you want to open the sidebar only with the toggle key and avoid installing the plugin's `after-new-window` auto-create hook.
 
-1. Install the binary using one of the following methods:
+3. Install the binary using one of the following methods:
 
    <details>
    <summary>Download pre-built binary</summary>
