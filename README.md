@@ -110,7 +110,7 @@ The sidebar receives status updates through agent hooks. Add the following hook 
 
 #### 3.1 Claude Code
 
-Two paths — the LLM-assisted one is recommended because it merges with any existing settings and picks up the right `hook.sh` path automatically.
+Please create ~/.claude/settings.json first.
 
 **Option A — Let an LLM wire it up (recommended).** Paste the following prompt into a Claude Code session:
 
@@ -308,7 +308,7 @@ Run ~/.tmux/plugins/tmux-agent-sidebar/target/release/tmux-agent-sidebar doctor 
 
 #### 3.2 Codex
 
-Same two paths as Claude Code.
+Please create ~/.codex/hooks.json first.
 
 **Option A — Let an LLM wire it up (recommended).** Paste the following prompt into a Codex session:
 
