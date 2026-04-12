@@ -337,18 +337,30 @@ fn sanitize_prompt(raw: &str) -> String {
 
 /// Parse subagent list from tmux variable.
 /// Format: comma-separated "type" entries, e.g. "Explore,Explore,Plan"
-/// Assigns sequential numbers when the same type appears multiple times:
-/// "Explore,Explore,Plan" → ["Explore #1", "Explore #2", "Plan"]
+/// Parse the comma-separated `@pane_subagents` value into display strings.
+///
+/// Each entry is either `agent_type` (legacy) or `agent_type:agent_id`
+/// (current). When an `agent_id` is present, the entry is rendered as
+/// `"agent_type #<id-prefix>"` where `<id-prefix>` is the first 4 characters
+/// of the id — stable per instance, so the UI label does not shift when
+/// sibling subagents stop. The `#` embedding is recognized by the `#`-based
+/// numbering branch in `subagent_rows`, which keeps it verbatim.
 fn parse_subagents(raw: &str) -> Vec<String> {
+    const ID_PREFIX_LEN: usize = 4;
     if raw.is_empty() {
         return vec![];
     }
-    let items: Vec<&str> = raw
-        .split(',')
+    raw.split(',')
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
-        .collect();
-    items.iter().map(|item| item.to_string()).collect()
+        .map(|entry| match entry.split_once(':') {
+            Some((ty, id)) if !id.is_empty() => {
+                let prefix: String = id.chars().take(ID_PREFIX_LEN).collect();
+                format!("{} #{}", ty, prefix)
+            }
+            _ => entry.to_string(),
+        })
+        .collect()
 }
 
 /// Split a tmux format line while honoring tmux `#{q:...}` backslash escapes.
@@ -721,6 +733,44 @@ mod tests {
         assert_eq!(
             parse_subagents("Explore,Explore,Plan"),
             vec!["Explore", "Explore", "Plan"]
+        );
+    }
+
+    #[test]
+    fn parse_subagents_renders_id_prefix() {
+        // Current format: `type:id`. The id prefix is used as a stable
+        // `#<prefix>` label so surviving siblings do not renumber when
+        // another subagent stops.
+        assert_eq!(
+            parse_subagents("Explore:sub123456,Plan:abc987654"),
+            vec!["Explore #sub1", "Plan #abc9"]
+        );
+    }
+
+    #[test]
+    fn parse_subagents_id_prefix_distinguishes_parallel_same_type() {
+        // Two subagents of the same type get distinct labels from their ids,
+        // which is the whole point of id-based tagging.
+        assert_eq!(
+            parse_subagents("Explore:aaaa1111,Explore:bbbb2222"),
+            vec!["Explore #aaaa", "Explore #bbbb"]
+        );
+    }
+
+    #[test]
+    fn parse_subagents_id_shorter_than_prefix_len_uses_full_id() {
+        // Short ids (e.g. test fixtures like "s1") render in full rather
+        // than being padded or truncated to nothing.
+        assert_eq!(parse_subagents("Plan:s1"), vec!["Plan #s1"]);
+    }
+
+    #[test]
+    fn parse_subagents_legacy_without_id_renders_type_only() {
+        // Stale entry written before id tracking (or by an older build)
+        // falls back to the bare type name.
+        assert_eq!(
+            parse_subagents("Explore,Plan:sub-999"),
+            vec!["Explore", "Plan #sub-"]
         );
     }
 

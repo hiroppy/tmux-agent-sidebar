@@ -228,6 +228,7 @@ impl EventAdapter for ClaudeAdapter {
                 }
                 Some(AgentEvent::SubagentStart {
                     agent_type: agent_type.into(),
+                    agent_id: parse_agent_id(input),
                 })
             }
             "subagent-stop" => {
@@ -237,6 +238,9 @@ impl EventAdapter for ClaudeAdapter {
                 }
                 Some(AgentEvent::SubagentStop {
                     agent_type: agent_type.into(),
+                    agent_id: parse_agent_id(input),
+                    last_message: json_str(input, "last_assistant_message").into(),
+                    transcript_path: json_str(input, "agent_transcript_path").into(),
                 })
             }
             "activity-log" => {
@@ -463,7 +467,21 @@ mod tests {
         assert_eq!(
             adapter.parse("subagent-start", &input).unwrap(),
             AgentEvent::SubagentStart {
-                agent_type: "Explore".into()
+                agent_type: "Explore".into(),
+                agent_id: None,
+            }
+        );
+    }
+
+    #[test]
+    fn subagent_start_captures_agent_id() {
+        let adapter = ClaudeAdapter;
+        let input = json!({"agent_type": "Explore", "agent_id": "sub-42"});
+        assert_eq!(
+            adapter.parse("subagent-start", &input).unwrap(),
+            AgentEvent::SubagentStart {
+                agent_type: "Explore".into(),
+                agent_id: Some("sub-42".into()),
             }
         );
     }
@@ -481,7 +499,30 @@ mod tests {
         assert_eq!(
             adapter.parse("subagent-stop", &input).unwrap(),
             AgentEvent::SubagentStop {
-                agent_type: "Plan".into()
+                agent_type: "Plan".into(),
+                agent_id: None,
+                last_message: "".into(),
+                transcript_path: "".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn subagent_stop_captures_full_payload() {
+        let adapter = ClaudeAdapter;
+        let input = json!({
+            "agent_type": "Explore",
+            "agent_id": "sub-42",
+            "last_assistant_message": "Found the bug at main.rs:42",
+            "agent_transcript_path": "/tmp/sub-transcript.json"
+        });
+        assert_eq!(
+            adapter.parse("subagent-stop", &input).unwrap(),
+            AgentEvent::SubagentStop {
+                agent_type: "Explore".into(),
+                agent_id: Some("sub-42".into()),
+                last_message: "Found the bug at main.rs:42".into(),
+                transcript_path: "/tmp/sub-transcript.json".into(),
             }
         );
     }
