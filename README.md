@@ -20,19 +20,51 @@
     <td width="55%"><img src="assets/agent-pane.png" alt="Agent pane" /></td>
     <td valign="top">
       <ul>
-        <li><b>Status icon</b> — <code>●</code> running / <code>◐</code> waiting / <code>○</code> idle / <code>✕</code> error</li>
-        <li><b>Agent color</b> — Claude (terracotta) / Codex (purple)</li>
-        <li><b>Permission badge</b> — <code>plan</code> / <code>edit</code> / <code>auto</code> / <code>!</code></li>
-        <li><b>Session name</b> — tmux session the pane belongs to</li>
-        <li><b>+ marker</b> — indicates a git worktree</li>
-        <li><b>Branch</b> — current git branch for the pane's cwd</li>
-        <li><b>Elapsed time</b> — time since the last user prompt</li>
-        <li><b>Task progress</b> — e.g. <code>3/7</code>, synced from the agent's task list</li>
-        <li><b>Subagent tree</b> — parent-child branches for spawned subagents</li>
-        <li><b>Listening ports</b> — localhost ports the pane's process is listening on</li>
-        <li><b>Response arrow (▶)</b> — latest agent response preview</li>
-        <li><b>Prompt text</b> — latest user prompt</li>
-        <li><b>Wait reason</b> — why the agent is waiting (yellow, Claude only)</li>
+        <li><b>Status icon</b>
+          <ul>
+            <li><code>●</code> running, <code>◐</code> waiting, <code>○</code> idle, <code>✕</code> error</li>
+          </ul>
+        </li>
+        <li><b>Agent color</b>
+          <ul>
+            <li>Claude (terracotta), Codex (purple)</li>
+          </ul>
+        </li>
+        <li><b>Permission badge</b>
+          <ul>
+            <li><code>plan</code>, <code>edit</code>, <code>auto</code>, <code>!</code></li>
+          </ul>
+        </li>
+        <li><b>Session name</b>
+          <ul><li>tmux session the pane belongs to</li></ul>
+        </li>
+        <li><b>+ marker</b>
+          <ul><li>indicates a git worktree</li></ul>
+        </li>
+        <li><b>Branch</b>
+          <ul><li>current git branch for the pane's cwd</li></ul>
+        </li>
+        <li><b>Elapsed time</b>
+          <ul><li>time since the last user prompt</li></ul>
+        </li>
+        <li><b>Task progress</b>
+          <ul><li>e.g. <code>3/7</code>, synced from the agent's task list</li></ul>
+        </li>
+        <li><b>Subagent tree</b>
+          <ul><li>parent-child branches for spawned subagents</li></ul>
+        </li>
+        <li><b>Listening ports</b>
+          <ul><li>localhost ports the pane's process is listening on</li></ul>
+        </li>
+        <li><b>Response arrow (▶)</b>
+          <ul><li>latest agent response preview</li></ul>
+        </li>
+        <li><b>Prompt text</b>
+          <ul><li>latest user prompt</li></ul>
+        </li>
+        <li><b>Wait reason</b>
+          <ul><li>why the agent is waiting</li></ul>
+        </li>
       </ul>
     </td>
   </tr>
