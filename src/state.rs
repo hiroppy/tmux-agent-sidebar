@@ -454,7 +454,14 @@ impl AppState {
     }
 
     /// Refresh the missing-hook list for the currently selected agent pane.
+    ///
+    /// Always clears the previous result first: the early-return branches
+    /// below leave nothing behind, so focus moving to a non-agent pane (or
+    /// the focused pane disappearing) correctly drops the stale ⓘ badge
+    /// and copy actions instead of pinning them to the last agent.
     pub fn refresh_notices(&mut self) {
+        self.notices_missing_hook_groups.clear();
+
         let Some(pane_id) = self.focused_pane_id.clone() else {
             return;
         };
@@ -530,17 +537,17 @@ impl AppState {
             return false;
         };
         let clip_ok = arboard::Clipboard::new()
-            .and_then(|mut c| c.set_text(prompt.to_string()))
+            .and_then(|mut c| c.set_text(prompt.clone()))
             .is_ok();
         let tmux_ok = std::process::Command::new("tmux")
-            .args(["set-buffer", prompt])
+            .args(["set-buffer", &prompt])
             .status()
             .map(|s| s.success())
             .unwrap_or(false);
         // OSC 52 is queued regardless — it reaches the upstream terminal
         // even when the local sinks above fail (SSH case). But we do not
         // count it toward the feedback because there is no success signal.
-        self.pending_osc52_copy = Some(prompt.to_string());
+        self.pending_osc52_copy = Some(prompt);
         self.record_notices_copy_result(agent, clip_ok || tmux_ok)
     }
 

@@ -10,17 +10,36 @@ use crate::state::{AppState, NoticesCopyTarget, debug_forced_display};
 
 use super::text::{display_width, truncate_to_width};
 
-pub(crate) const CLAUDE_SETUP_PROMPT: &str = "Run ~/.tmux/plugins/tmux-agent-sidebar/target/release/tmux-agent-sidebar setup claude (fall back to ~/.tmux/plugins/tmux-agent-sidebar/bin/tmux-agent-sidebar if that path is missing). Add these hooks to ~/.claude/settings.json. If hooks already exist, merge them without making destructive changes.";
+/// Whether `agent` has a runnable setup prompt. Pure check used by the
+/// popup renderer to decide if a `[copy]` button should be shown — kept
+/// separate from `prompt_for_agent` so layout calculations do not pay the
+/// cost of resolving the running binary path on every frame.
+pub(crate) fn agent_has_prompt(agent: &str) -> bool {
+    matches!(agent, "claude" | "codex")
+}
 
-pub(crate) const CODEX_SETUP_PROMPT: &str = "Run ~/.tmux/plugins/tmux-agent-sidebar/target/release/tmux-agent-sidebar setup codex (fall back to ~/.tmux/plugins/tmux-agent-sidebar/bin/tmux-agent-sidebar if that path is missing). Add these hooks to ~/.codex/hooks.json. If hooks already exist, merge them without making destructive changes.";
-
-/// Return the ready-to-paste setup prompt for the given agent name.
-pub(crate) fn prompt_for_agent(agent: &str) -> Option<&'static str> {
-    match agent {
-        "claude" => Some(CLAUDE_SETUP_PROMPT),
-        "codex" => Some(CODEX_SETUP_PROMPT),
-        _ => None,
+/// Build the ready-to-paste LLM setup prompt for the given agent name,
+/// using the *currently running* binary path (`std::env::current_exe`)
+/// instead of a hardcoded `~/.tmux/plugins/...` template. This makes the
+/// pasted command runnable for non-default install layouts (Cargo target
+/// dirs, plugin-managers that put binaries under `bin/`, custom checkouts,
+/// etc.). Returns `None` for unknown agents or when the running exe path
+/// cannot be resolved.
+pub(crate) fn prompt_for_agent(agent: &str) -> Option<String> {
+    if !agent_has_prompt(agent) {
+        return None;
     }
+    let exe = std::env::current_exe().ok()?;
+    let exe_path = exe.to_string_lossy();
+    let (config_path, subcommand) = match agent {
+        "claude" => ("~/.claude/settings.json", "claude"),
+        "codex" => ("~/.codex/hooks.json", "codex"),
+        _ => return None,
+    };
+    Some(format!(
+        "Run {exe_path} setup {subcommand}. Add these hooks to {config_path}. \
+         If hooks already exist, merge them without making destructive changes."
+    ))
 }
 
 /// Width (in columns) reserved for the notices indicator button in the
@@ -102,7 +121,7 @@ pub(super) fn render_notices_popup(frame: &mut Frame, state: &mut AppState, area
             lines_len += 1;
         }
         for group in groups.iter() {
-            let group_width = if prompt_for_agent(&group.agent).is_some() {
+            let group_width = if agent_has_prompt(&group.agent) {
                 display_width(ITEM_INDENT) + display_width(&group.agent) + 2 + LABEL_MAX_WIDTH
             } else {
                 display_width(ITEM_INDENT) + display_width(&group.agent)
@@ -118,12 +137,14 @@ pub(super) fn render_notices_popup(frame: &mut Frame, state: &mut AppState, area
     }
     // Width: padding(1 left + 1 right) + widest rendered line + borders(2)
     let popup_width = (widest_line + 4).min(area.width as usize).max(12) as u16;
-    // `lines_len` counts the inner text rows; add 2 for the border frame.
-    let popup_height = ((lines_len as u16) + 2).min(area.height).max(3);
-
-    // Left-aligned, below the 2-row header
+    // Left-aligned, below the 2-row header. Clamp the height to the space
+    // *below* the header so the rect never extends past the widget bottom
+    // on short sidebars (capping against `area.height` would overflow).
     let popup_x = area.x;
     let popup_y = area.y + 2;
+    let height_budget = area.height.saturating_sub(2);
+    // `lines_len` counts the inner text rows; add 2 for the border frame.
+    let popup_height = ((lines_len as u16) + 2).min(height_budget).max(3);
 
     let popup_rect = Rect::new(popup_x, popup_y, popup_width, popup_height);
     state.notices_popup_area = Some(popup_rect);
@@ -179,7 +200,7 @@ pub(super) fn render_notices_popup(frame: &mut Frame, state: &mut AppState, area
             let agent_text = truncate_to_width(&group.agent, inner_width.saturating_sub(1));
             let agent_width = display_width(&agent_text);
             let line_index = lines.len();
-            let has_prompt = prompt_for_agent(&group.agent).is_some();
+            let has_prompt = agent_has_prompt(&group.agent);
 
             if has_prompt
                 && inner_width >= display_width(ITEM_INDENT) + agent_width + 2 + LABEL_MAX_WIDTH
@@ -285,25 +306,44 @@ mod tests {
     // ─── prompt_for_agent ────────────────────────────────────────────
 
     #[test]
-    fn prompt_for_agent_returns_claude_prompt_verbatim() {
-        assert_eq!(prompt_for_agent("claude"), Some(CLAUDE_SETUP_PROMPT));
-        let prompt = prompt_for_agent("claude").unwrap();
-        assert!(prompt.contains("setup claude"));
-        assert!(prompt.contains("~/.claude/settings.json"));
-    }
+    fn prompt_for_agent_uses_running_executable_path() {
+        // The prompt must reference the *real* current executable, not
+        // a hardcoded ~/.tmux/plugins/... template — otherwise paste
+        // instructions are unrunnable on custom install layouts.
+        let exe = std::env::current_exe()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
 
-    #[test]
-    fn prompt_for_agent_returns_codex_prompt_verbatim() {
-        assert_eq!(prompt_for_agent("codex"), Some(CODEX_SETUP_PROMPT));
-        let prompt = prompt_for_agent("codex").unwrap();
-        assert!(prompt.contains("setup codex"));
-        assert!(prompt.contains("~/.codex/hooks.json"));
+        let claude = prompt_for_agent("claude").unwrap();
+        assert!(
+            claude.contains(&exe),
+            "claude prompt missing current_exe path: {claude}"
+        );
+        assert!(claude.contains("setup claude"));
+        assert!(claude.contains("~/.claude/settings.json"));
+
+        let codex = prompt_for_agent("codex").unwrap();
+        assert!(
+            codex.contains(&exe),
+            "codex prompt missing current_exe path: {codex}"
+        );
+        assert!(codex.contains("setup codex"));
+        assert!(codex.contains("~/.codex/hooks.json"));
     }
 
     #[test]
     fn prompt_for_agent_none_for_unknown_agent() {
         assert_eq!(prompt_for_agent("gemini"), None);
         assert_eq!(prompt_for_agent(""), None);
+    }
+
+    #[test]
+    fn agent_has_prompt_only_known_agents() {
+        assert!(agent_has_prompt("claude"));
+        assert!(agent_has_prompt("codex"));
+        assert!(!agent_has_prompt("gemini"));
+        assert!(!agent_has_prompt(""));
     }
 
     // ─── has_info branches ───────────────────────────────────────────

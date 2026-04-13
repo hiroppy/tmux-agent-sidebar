@@ -189,19 +189,56 @@ fn normalize_hook_spec(mut spec: HookSpec) -> HookSpec {
 /// Paths that fail to canonicalize (missing file, unresolved `~`) are
 /// returned with tilde expansion only, so a stale config does not collapse
 /// onto the expected command by accident.
+///
+/// `format_hook_command` POSIX-quotes paths that contain spaces or other
+/// shell metacharacters (e.g. `bash '/path with spaces/hook.sh' …`), so
+/// the parser must understand single-quoted scripts — splitting on raw
+/// spaces would treat `'/path` as the script and break canonicalization
+/// for exactly the installs that need quoting.
 fn normalize_hook_command(cmd: &str) -> String {
-    let mut parts = cmd.splitn(3, ' ');
-    let (Some(head), Some(script)) = (parts.next(), parts.next()) else {
+    let Some((head, rest)) = cmd.split_once(' ') else {
         return cmd.to_string();
     };
-    let tail = parts.next();
-    let expanded = expand_home_tilde(script);
+    let rest = rest.trim_start_matches(' ');
+
+    let (script, tail) = if let Some(after) = rest.strip_prefix('\'') {
+        // POSIX single-quoted: the next `'` ends the script. We do not
+        // try to honour the `'\''` escape sequence — paths containing a
+        // literal single quote are vanishingly rare and not worth the
+        // complexity here.
+        match after.find('\'') {
+            Some(end) => (
+                after[..end].to_string(),
+                after[end + 1..].trim_start_matches(' ').to_string(),
+            ),
+            None => return cmd.to_string(),
+        }
+    } else if let Some(after) = rest.strip_prefix('"') {
+        match after.find('"') {
+            Some(end) => (
+                after[..end].to_string(),
+                after[end + 1..].trim_start_matches(' ').to_string(),
+            ),
+            None => return cmd.to_string(),
+        }
+    } else {
+        match rest.split_once(' ') {
+            Some((s, t)) => (s.to_string(), t.to_string()),
+            None => (rest.to_string(), String::new()),
+        }
+    };
+
+    let expanded = expand_home_tilde(&script);
     let resolved = std::fs::canonicalize(&expanded)
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or(expanded);
-    match tail {
-        Some(tail) if !tail.is_empty() => format!("{} {} {}", head, resolved, tail),
-        _ => format!("{} {}", head, resolved),
+    // Re-quote with the same rules `format_hook_command` uses so the
+    // expected and actual specs compare equal byte-for-byte.
+    let quoted = shell_quote(&resolved);
+    if tail.is_empty() {
+        format!("{} {}", head, quoted)
+    } else {
+        format!("{} {} {}", head, quoted, tail)
     }
 }
 
@@ -697,6 +734,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn missing_hooks_accepts_symlinked_command_path() {
         // If the config command resolves (via canonicalize) to the same
@@ -712,7 +750,6 @@ mod tests {
         }
         let link_path = tmp.join(format!("mh-link-{}.sh", std::process::id()));
         let _ = std::fs::remove_file(&link_path);
-        #[cfg(unix)]
         std::os::unix::fs::symlink(&real_script, &link_path).unwrap();
 
         let expected_hook = real_script.to_string_lossy().into_owned();
@@ -753,6 +790,47 @@ mod tests {
 
         let _ = std::fs::remove_file(&link_path);
         let _ = std::fs::remove_file(&real_script);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn missing_hooks_accepts_quoted_command_path_with_spaces() {
+        // Regression: paths that need POSIX quoting (e.g. spaces) used to
+        // break normalize_hook_command because it split on raw spaces and
+        // treated `'/path` as the script. The expected and actual specs
+        // diverged even though they pointed at the same real file.
+        use std::io::Write;
+        let tmp = std::env::temp_dir().join(format!("mh quoted {}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let real_script = tmp.join("hook.sh");
+        {
+            let mut f = std::fs::File::create(&real_script).unwrap();
+            writeln!(f, "#!/bin/sh").unwrap();
+        }
+        let hook_path = real_script.to_string_lossy().into_owned();
+
+        let config = build_agent_snippet("claude", &hook_path).unwrap();
+        // Sanity check: the snippet really did emit a quoted command, so
+        // we are exercising the parser, not just the unquoted fast path.
+        let snippet_command = config
+            .pointer("/hooks/SessionStart/0/hooks/0/command")
+            .and_then(Value::as_str)
+            .unwrap();
+        assert!(
+            snippet_command.contains("'"),
+            "expected POSIX-quoted command for path with spaces, got {:?}",
+            snippet_command
+        );
+
+        let missing = missing_hooks("claude", &config, &hook_path);
+        assert!(
+            missing.is_empty(),
+            "quoted paths must round-trip through normalize_hook_command: missing = {:?}",
+            missing
+        );
+
+        let _ = std::fs::remove_file(&real_script);
+        let _ = std::fs::remove_dir(&tmp);
     }
 
     #[test]
