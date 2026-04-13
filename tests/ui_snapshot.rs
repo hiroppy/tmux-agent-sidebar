@@ -39,6 +39,40 @@ fn snapshot_single_agent_idle_ui() {
     ");
 }
 
+// Locks down the secondary header layout when there are no notices —
+// `make_state()` injects a Claude missing-hook notice as the shared
+// baseline so the ⓘ badge is on every other snapshot, which means a
+// regression in the no-notices path would slip past unnoticed without
+// this dedicated coverage.
+#[test]
+fn snapshot_secondary_header_without_notices() {
+    let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
+    let mut state = make_state(vec![SessionInfo {
+        session_name: "main".into(),
+        windows: vec![WindowInfo {
+            window_id: "@1".into(),
+            window_name: "project".into(),
+            window_active: true,
+            auto_rename: false,
+            panes: vec![pane.clone()],
+        }],
+    }]);
+    state.repo_groups = vec![make_repo_group("project", vec![pane])];
+    state.notices_missing_hook_groups.clear();
+    state.rebuild_row_targets();
+
+    let output = render_to_string(&mut state, 28, 25);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●0  ◐0  ○1  ✕0
+                             — ▾
+    ┃ ○ claude
+        Waiting for prompt…
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
+}
+
 #[test]
 fn snapshot_version_banner_does_not_duplicate_in_scroll_area() {
     let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
