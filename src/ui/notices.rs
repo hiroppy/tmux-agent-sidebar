@@ -6,40 +6,124 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph},
 };
 
-use crate::state::{AppState, NoticesCopyTarget, debug_forced_display};
+use crate::state::{AppState, ClaudePluginNotice, NoticesCopyTarget, debug_forced_display};
+use crate::tmux::{CLAUDE_AGENT, CODEX_AGENT};
 
 use super::text::{display_width, truncate_to_width};
 
-/// Whether `agent` has a runnable setup prompt. Pure check used by the
-/// popup renderer to decide if a `[copy]` button should be shown — kept
-/// separate from `prompt_for_agent` so layout calculations do not pay the
-/// cost of resolving the running binary path on every frame.
-pub(crate) fn agent_has_prompt(agent: &str) -> bool {
-    matches!(agent, "claude" | "codex")
+/// Whether the missing-hooks section should render a `[copy]` button
+/// next to `agent`. Only Codex qualifies — Claude's setup story is
+/// owned by the dedicated `Plugin / claude` section (which has its own
+/// `[prompt]` button), so adding a second clickable copy target on the
+/// Claude row would race with it and flip the shared `[copied]` feedback
+/// state for both buttons at once.
+///
+/// Kept as a pure check so layout calculations do not pay the cost of
+/// resolving the running binary path on every frame.
+fn missing_hooks_has_copy_button(agent: &str) -> bool {
+    agent == CODEX_AGENT
 }
 
-/// Build the ready-to-paste LLM setup prompt for the given agent name,
-/// using the *currently running* binary path (`std::env::current_exe`)
-/// instead of a hardcoded `~/.tmux/plugins/...` template. This makes the
-/// pasted command runnable for non-default install layouts (Cargo target
-/// dirs, plugin-managers that put binaries under `bin/`, custom checkouts,
-/// etc.). Returns `None` for unknown agents or when the running exe path
-/// cannot be resolved.
+/// Build the ready-to-paste LLM prompt for the given agent name.
+///
+/// - **Claude**: emits a *migration* prompt that asks the LLM to delete any
+///   existing `tmux-agent-sidebar/hook.sh` entries from the user's
+///   `~/.claude/settings.json` and then point the user at `/plugin install`.
+///   This is the only supported wiring path going forward — bundled
+///   hooks via the Claude Code plugin manifest. The prompt embeds the
+///   plugin root resolved from the running binary so users with custom
+///   install layouts get a working install path. If `current_exe()`
+///   fails, the prompt still works because the plugin root falls back
+///   to the canonical TPM path.
+/// - **Codex**: emits the legacy `setup codex` prompt because Codex CLI
+///   has no plugin mechanism upstream. This branch genuinely needs the
+///   running executable path, so it returns `None` if `current_exe()`
+///   cannot be resolved.
+///
+/// Returns `None` for unknown agents.
 pub(crate) fn prompt_for_agent(agent: &str) -> Option<String> {
-    if !agent_has_prompt(agent) {
-        return None;
+    match agent {
+        CLAUDE_AGENT => Some(build_claude_migration_prompt(
+            plugin_root_from_exe().as_deref(),
+        )),
+        CODEX_AGENT => {
+            let exe_path = std::env::current_exe().ok()?.to_string_lossy().into_owned();
+            Some(format!(
+                "Run {exe_path} setup codex. Add these hooks to ~/.codex/hooks.json. \
+                 If hooks already exist, merge them without making destructive changes."
+            ))
+        }
+        _ => None,
     }
-    let exe = std::env::current_exe().ok()?;
-    let exe_path = exe.to_string_lossy();
-    let (config_path, subcommand) = match agent {
-        "claude" => ("~/.claude/settings.json", "claude"),
-        "codex" => ("~/.codex/hooks.json", "codex"),
-        _ => return None,
-    };
-    Some(format!(
-        "Run {exe_path} setup {subcommand}. Add these hooks to {config_path}. \
-         If hooks already exist, merge them without making destructive changes."
-    ))
+}
+
+/// Walk up from the running binary looking for `.claude-plugin/plugin.json`,
+/// matching the install layouts supported elsewhere in the project
+/// (`<plugin>/bin/tmux-agent-sidebar` and
+/// `<plugin>/target/release/tmux-agent-sidebar`). Shares the upward-walk
+/// loop with `cli::setup::resolve_hook_script`.
+fn plugin_root_from_exe() -> Option<String> {
+    crate::cli::setup::walk_up_from_exe(3, |dir| {
+        dir.join(".claude-plugin")
+            .join("plugin.json")
+            .is_file()
+            .then(|| dir.to_string_lossy().into_owned())
+    })
+}
+
+/// Collapse an absolute path to a `~`-prefixed form when it lives
+/// under the user's home directory. Used to make the migration prompt
+/// portable across machines: `/Users/hiroppy/.tmux/plugins/...`
+/// renders as `~/.tmux/plugins/...` so a screenshot or copy-paste
+/// from one user does not bake in another user's literal home path.
+fn tildify(path: &str) -> String {
+    match std::env::var("HOME") {
+        Ok(home) => tildify_with_home(path, &home),
+        Err(_) => path.to_string(),
+    }
+}
+
+fn tildify_with_home(path: &str, home: &str) -> String {
+    if home.is_empty() {
+        return path.to_string();
+    }
+    if path == home {
+        return "~".to_string();
+    }
+    if let Some(rest) = path.strip_prefix(home).and_then(|s| s.strip_prefix('/')) {
+        return format!("~/{}", rest);
+    }
+    path.to_string()
+}
+
+/// Compose the LLM migration prompt for Claude Code users. `plugin_root`
+/// is `Some` when the binary lives next to a `.claude-plugin/plugin.json`
+/// (the common case), in which case the prompt names that exact path so
+/// the user can paste a runnable `/plugin marketplace add` command. The
+/// resolved path is tilde-collapsed when it lives under the user's home
+/// so the rendered command stays portable (and fits narrower sidebars).
+/// The fallback is the canonical TPM install path documented in the
+/// README.
+fn build_claude_migration_prompt(plugin_root: Option<&str>) -> String {
+    let marketplace_path = plugin_root
+        .map(tildify)
+        .unwrap_or_else(|| "~/.tmux/plugins/tmux-agent-sidebar".to_string());
+    format!(
+        "Migrate this user from the manual ~/.claude/settings.json setup to the \
+         tmux-agent-sidebar Claude Code plugin:\n\
+         \n\
+         1. Edit ~/.claude/settings.json and remove every \"command\" entry whose \
+         value contains \"tmux-agent-sidebar/hook.sh\" from each \"hooks\" section. \
+         Clean up any \"hooks\" arrays that become empty (drop the trigger key) and \
+         remove the top-level \"hooks\" object if it becomes empty. If no such \
+         entries exist, skip this step silently.\n\
+         \n\
+         2. Then tell the user verbatim:\n\
+         \"Run these two commands in this Claude Code session, then restart \
+         Claude Code so the bundled hooks take effect:\n\
+         /plugin marketplace add {marketplace_path}\n\
+         /plugin install tmux-agent-sidebar@hiroppy\""
+    )
 }
 
 /// Width (in columns) reserved for the notices indicator button in the
@@ -48,6 +132,7 @@ pub(super) const BUTTON_WIDTH: usize = 2;
 
 const COPY_LABEL: &str = "[copy]";
 const COPIED_LABEL: &str = "[copied]";
+const PROMPT_LABEL: &str = "[prompt]";
 
 /// How long the `[copied]` label remains after a successful copy before
 /// reverting to `[copy]`.
@@ -57,6 +142,7 @@ const COPIED_FEEDBACK_DURATION: std::time::Duration = std::time::Duration::from_
 pub(super) fn has_info(state: &AppState) -> bool {
     debug_forced_display()
         || state.version_notice.is_some()
+        || state.claude_plugin_notice.is_some()
         || !state.notices_missing_hook_groups.is_empty()
 }
 
@@ -77,13 +163,49 @@ fn notices_popup_version_text(notice: Option<&crate::version::UpdateNotice>) -> 
     }
 }
 
-/// Maximum display width of any copy-state label (`[copy]` / `[copied]`).
-/// Used to reserve constant space so the popup layout does not shift when
-/// switching between states.
+/// Description of how the `Plugin / claude` sub-item should render.
+/// `body` is the text that appears after `- ` on the sub-item line, and
+/// `show_prompt_button` toggles the right-aligned `[prompt]` clickable
+/// label (set for both `InstallRecommended` and `DuplicateHooks`, since
+/// both states are resolved by the same migration recipe).
+struct PluginSubItem {
+    body: String,
+    show_prompt_button: bool,
+}
+
+fn notices_popup_plugin_subitem(notice: Option<&ClaudePluginNotice>) -> Option<PluginSubItem> {
+    match (debug_forced_display(), notice) {
+        (_, Some(ClaudePluginNotice::InstallRecommended)) => Some(PluginSubItem {
+            body: "migrate".to_string(),
+            show_prompt_button: true,
+        }),
+        (_, Some(ClaudePluginNotice::DuplicateHooks)) => Some(PluginSubItem {
+            body: "cleanup".to_string(),
+            show_prompt_button: true,
+        }),
+        (_, Some(ClaudePluginNotice::Stale { installed, current })) => Some(PluginSubItem {
+            body: format!("v{} -> v{}", installed, current),
+            show_prompt_button: false,
+        }),
+        // Debug forced-display fallback when no real notice is set: show
+        // the dummy "vX -> vX" version line so layout is exercised.
+        (true, None) => Some(PluginSubItem {
+            body: format!("v{} -> v{}", crate::VERSION, crate::VERSION),
+            show_prompt_button: false,
+        }),
+        (false, None) => None,
+    }
+}
+
+/// Maximum display width of any clickable label
+/// (`[copy]` / `[copied]` / `[prompt]`). Used to reserve constant space
+/// so the popup layout does not shift when switching between states.
 const LABEL_MAX_WIDTH: usize = {
     let a = COPY_LABEL.len();
     let b = COPIED_LABEL.len();
-    if a > b { a } else { b }
+    let c = PROMPT_LABEL.len();
+    let ab = if a > b { a } else { b };
+    if ab > c { ab } else { c }
 };
 
 pub(super) fn render_notices_popup(frame: &mut Frame, state: &mut AppState, area: Rect) {
@@ -92,6 +214,7 @@ pub(super) fn render_notices_popup(frame: &mut Frame, state: &mut AppState, area
     let version_text = notices_popup_version_text(state.version_notice.as_ref());
     let show_version = debug_forced_display() || version_text.is_some();
     let show_hooks = debug_forced_display() || !groups.is_empty();
+    let plugin_subitem = notices_popup_plugin_subitem(state.claude_plugin_notice.as_ref());
     let copied_agent: Option<String> = state
         .notices_copied_at
         .as_ref()
@@ -112,6 +235,22 @@ pub(super) fn render_notices_popup(frame: &mut Frame, state: &mut AppState, area
     if show_version {
         lines_len += 1;
     }
+    if let Some(ref sub) = plugin_subitem {
+        widest_line = widest_line.max(display_width(&format!("{}Plugin", SECTION_INDENT)));
+        widest_line = widest_line.max(display_width(&format!("{}claude", ITEM_INDENT)));
+        // Plugin sub-items drop the `- ` bullet prefix that Missing
+        // hooks uses, but still indent two extra columns under
+        // `claude` so the hierarchy reads at a glance.
+        let head = format!("{}  {}", ITEM_INDENT, sub.body);
+        let sub_width = if sub.show_prompt_button {
+            display_width(&head) + 2 + LABEL_MAX_WIDTH
+        } else {
+            display_width(&head)
+        };
+        widest_line = widest_line.max(sub_width);
+        // section header + agent line + body sub-item
+        lines_len += 3;
+    }
     if show_hooks {
         widest_line = widest_line.max(display_width(&format!("{}Missing hooks", SECTION_INDENT)));
         lines_len += 1;
@@ -121,7 +260,7 @@ pub(super) fn render_notices_popup(frame: &mut Frame, state: &mut AppState, area
             lines_len += 1;
         }
         for group in groups.iter() {
-            let group_width = if agent_has_prompt(&group.agent) {
+            let group_width = if missing_hooks_has_copy_button(&group.agent) {
                 display_width(ITEM_INDENT) + display_width(&group.agent) + 2 + LABEL_MAX_WIDTH
             } else {
                 display_width(ITEM_INDENT) + display_width(&group.agent)
@@ -189,6 +328,55 @@ pub(super) fn render_notices_popup(frame: &mut Frame, state: &mut AppState, area
         );
     }
 
+    if let Some(sub) = plugin_subitem {
+        push_padded(
+            &mut lines,
+            format!("{}Plugin", SECTION_INDENT),
+            Style::default().fg(theme.accent),
+        );
+        push_padded(
+            &mut lines,
+            format!("{}claude", ITEM_INDENT),
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(ratatui::style::Modifier::BOLD),
+        );
+        let head = format!("{}  {}", ITEM_INDENT, sub.body);
+        if sub.show_prompt_button && inner_width >= display_width(&head) + 2 + LABEL_MAX_WIDTH {
+            // Space-between layout: body on the left, `[prompt]` slot
+            // pinned to the right edge of the popup so the click hit
+            // region stays in a constant column even if the body width
+            // changes (e.g. between `[prompt]` and `[copied]`).
+            let is_copied = copied_agent.as_deref() == Some(CLAUDE_AGENT);
+            let (label_text, label_color) = if is_copied {
+                (COPIED_LABEL, theme.status_running)
+            } else {
+                (PROMPT_LABEL, theme.status_waiting)
+            };
+            let head_width = display_width(&head);
+            let label_width = display_width(label_text);
+            let label_slot_start = inner_width - LABEL_MAX_WIDTH;
+            let gap_before_label = inner_width - head_width - label_width;
+            let line_index = lines.len();
+            copy_targets.push(NoticesCopyTarget {
+                area: Rect::new(
+                    inner.x + label_slot_start as u16,
+                    inner.y + line_index as u16,
+                    LABEL_MAX_WIDTH as u16,
+                    1,
+                ),
+                agent: CLAUDE_AGENT.to_string(),
+            });
+            lines.push(Line::from(vec![
+                Span::styled(head, Style::default().fg(theme.status_waiting)),
+                Span::raw(" ".repeat(gap_before_label)),
+                Span::styled(label_text.to_string(), Style::default().fg(label_color)),
+            ]));
+        } else {
+            push_padded(&mut lines, head, Style::default().fg(theme.status_waiting));
+        }
+    }
+
     if show_hooks {
         push_padded(
             &mut lines,
@@ -200,7 +388,7 @@ pub(super) fn render_notices_popup(frame: &mut Frame, state: &mut AppState, area
             let agent_text = truncate_to_width(&group.agent, inner_width.saturating_sub(1));
             let agent_width = display_width(&agent_text);
             let line_index = lines.len();
-            let has_prompt = agent_has_prompt(&group.agent);
+            let has_prompt = missing_hooks_has_copy_button(&group.agent);
 
             if has_prompt
                 && inner_width >= display_width(ITEM_INDENT) + agent_width + 2 + LABEL_MAX_WIDTH
@@ -303,26 +491,37 @@ mod tests {
         state
     }
 
+    fn state_with_plugin_stale(installed: &str, current: &str) -> AppState {
+        let mut state = crate::state::AppState::new(String::new());
+        state.claude_plugin_notice = Some(ClaudePluginNotice::Stale {
+            installed: installed.into(),
+            current: current.into(),
+        });
+        state
+    }
+
+    fn state_with_plugin_install_recommended() -> AppState {
+        let mut state = crate::state::AppState::new(String::new());
+        state.claude_plugin_notice = Some(ClaudePluginNotice::InstallRecommended);
+        state
+    }
+
+    fn state_with_plugin_duplicate_hooks() -> AppState {
+        let mut state = crate::state::AppState::new(String::new());
+        state.claude_plugin_notice = Some(ClaudePluginNotice::DuplicateHooks);
+        state
+    }
+
     // ─── prompt_for_agent ────────────────────────────────────────────
 
     #[test]
-    fn prompt_for_agent_uses_running_executable_path() {
-        // The prompt must reference the *real* current executable, not
-        // a hardcoded ~/.tmux/plugins/... template — otherwise paste
-        // instructions are unrunnable on custom install layouts.
+    fn prompt_for_agent_codex_uses_running_executable_path() {
+        // Codex stays on the legacy `setup` flow because Codex CLI has
+        // no plugin mechanism upstream.
         let exe = std::env::current_exe()
             .unwrap()
             .to_string_lossy()
             .into_owned();
-
-        let claude = prompt_for_agent("claude").unwrap();
-        assert!(
-            claude.contains(&exe),
-            "claude prompt missing current_exe path: {claude}"
-        );
-        assert!(claude.contains("setup claude"));
-        assert!(claude.contains("~/.claude/settings.json"));
-
         let codex = prompt_for_agent("codex").unwrap();
         assert!(
             codex.contains(&exe),
@@ -333,17 +532,124 @@ mod tests {
     }
 
     #[test]
+    fn prompt_for_agent_claude_is_a_migration_prompt() {
+        // The Claude prompt must steer users toward the plugin install
+        // and away from the legacy settings.json hook setup. It also
+        // needs a concrete removal step so users currently on the manual
+        // path get cleaned up before the plugin takes over.
+        let claude = prompt_for_agent("claude").unwrap();
+        // Claude Code's `/plugin install` does not accept local paths
+        // directly; users must register a marketplace first. The prompt
+        // therefore needs both `marketplace add` and `install` lines.
+        assert!(
+            claude.contains("/plugin marketplace add"),
+            "claude prompt must surface the marketplace add command: {claude}"
+        );
+        assert!(
+            claude.contains("/plugin install tmux-agent-sidebar@hiroppy"),
+            "claude prompt must surface the plugin install command keyed to \
+             the bundled marketplace name: {claude}"
+        );
+        assert!(
+            claude.contains("~/.claude/settings.json"),
+            "claude prompt must reference settings.json so the LLM knows \
+             which file to clean up: {claude}"
+        );
+        assert!(
+            claude.contains("tmux-agent-sidebar/hook.sh"),
+            "claude prompt must tell the LLM exactly which existing entries \
+             to remove: {claude}"
+        );
+        assert!(
+            claude.contains("restart Claude Code"),
+            "claude prompt must remind the user to restart so the plugin's \
+             bundled hooks load: {claude}"
+        );
+        assert!(
+            !claude.contains("setup claude"),
+            "claude prompt must NOT recommend the legacy `setup claude` \
+             flow anymore: {claude}"
+        );
+    }
+
+    #[test]
+    fn build_claude_migration_prompt_uses_resolved_plugin_root_when_available() {
+        // Use a path that is guaranteed NOT to live under HOME so the
+        // tildify pass cannot rewrite it on either the dev machine or
+        // CI (where HOME varies). The tilde-collapse behavior is
+        // covered directly by the `tildify_with_home` tests below.
+        let prompt = build_claude_migration_prompt(Some("/opt/tmux-agent-sidebar"));
+        assert!(prompt.contains("/opt/tmux-agent-sidebar"));
+    }
+
+    #[test]
+    fn build_claude_migration_prompt_falls_back_to_canonical_path() {
+        // No plugin root resolved → fall back to the README-documented
+        // TPM install path so the pasted command is still runnable for
+        // the typical user.
+        let prompt = build_claude_migration_prompt(None);
+        assert!(prompt.contains("~/.tmux/plugins/tmux-agent-sidebar"));
+    }
+
+    // ─── tildify_with_home ───────────────────────────────────────────
+
+    #[test]
+    fn tildify_collapses_paths_under_home_to_tilde() {
+        assert_eq!(
+            tildify_with_home(
+                "/Users/alice/.tmux/plugins/tmux-agent-sidebar",
+                "/Users/alice"
+            ),
+            "~/.tmux/plugins/tmux-agent-sidebar"
+        );
+    }
+
+    #[test]
+    fn tildify_returns_lone_tilde_when_path_is_home() {
+        assert_eq!(tildify_with_home("/Users/alice", "/Users/alice"), "~");
+    }
+
+    #[test]
+    fn tildify_leaves_paths_outside_home_unchanged() {
+        assert_eq!(
+            tildify_with_home("/opt/tmux-agent-sidebar", "/Users/alice"),
+            "/opt/tmux-agent-sidebar"
+        );
+    }
+
+    #[test]
+    fn tildify_does_not_collapse_a_prefix_that_only_shares_a_path_segment() {
+        // `/Users/aliceother/x` must not collapse against `/Users/alice`.
+        // The strip is gated on the trailing `/` so partial-name matches
+        // do not produce nonsense like `~other/x`.
+        assert_eq!(
+            tildify_with_home("/Users/aliceother/x", "/Users/alice"),
+            "/Users/aliceother/x"
+        );
+    }
+
+    #[test]
+    fn tildify_no_op_when_home_is_empty() {
+        // Defensive: an empty HOME (set but blank) must not collapse
+        // every absolute path to `~/...`.
+        assert_eq!(tildify_with_home("/Users/alice/x", ""), "/Users/alice/x");
+    }
+
+    #[test]
     fn prompt_for_agent_none_for_unknown_agent() {
         assert_eq!(prompt_for_agent("gemini"), None);
         assert_eq!(prompt_for_agent(""), None);
     }
 
     #[test]
-    fn agent_has_prompt_only_known_agents() {
-        assert!(agent_has_prompt("claude"));
-        assert!(agent_has_prompt("codex"));
-        assert!(!agent_has_prompt("gemini"));
-        assert!(!agent_has_prompt(""));
+    fn missing_hooks_has_copy_button_only_for_codex() {
+        // Claude is excluded because the Plugin / claude section owns
+        // its own [prompt] button — leaving a [copy] on the Claude row
+        // would race with it on the shared `[copied]` feedback state.
+        assert!(missing_hooks_has_copy_button("codex"));
+        assert!(!missing_hooks_has_copy_button("claude"));
+        assert!(!missing_hooks_has_copy_button("gemini"));
+        assert!(!missing_hooks_has_copy_button(""));
     }
 
     // ─── has_info branches ───────────────────────────────────────────
@@ -450,12 +756,106 @@ mod tests {
         │   New Version         │
         │     v0.2.6 -> v0.2.7  │
         │   Missing hooks       │
-        │     claude      [copy]│
+        │     claude            │
         │     - SessionStart    │
         │     - Stop            │
         │     codex       [copy]│
         │     - Stop            │
         └───────────────────────┘
+        ");
+    }
+
+    #[test]
+    fn snapshot_notices_popup_plugin_duplicate_hooks() {
+        // Plugin is installed AND the user still has legacy
+        // settings.json hook entries → render the cleanup nudge with
+        // the [prompt] button. The migration prompt handles cleanup.
+        let mut state = state_with_plugin_duplicate_hooks();
+        let text = render_notices_popup_text(&mut state, 40, 10);
+        insta::assert_snapshot!(text, @r"
+        ┌──────────────────────────┐
+        │ Notices                  │
+        │   Plugin                 │
+        │     claude               │
+        │       cleanup    [prompt]│
+        └──────────────────────────┘
+        ");
+    }
+
+    #[test]
+    fn snapshot_notices_popup_plugin_install_recommended_only() {
+        // No plugin install recorded → show migration prompt with the
+        // [prompt] click button right-aligned on the sub-item row.
+        let mut state = state_with_plugin_install_recommended();
+        let text = render_notices_popup_text(&mut state, 40, 10);
+        insta::assert_snapshot!(text, @r"
+        ┌──────────────────────────┐
+        │ Notices                  │
+        │   Plugin                 │
+        │     claude               │
+        │       migrate    [prompt]│
+        └──────────────────────────┘
+        ");
+    }
+
+    #[test]
+    fn rendering_populates_copy_target_for_plugin_install_recommended() {
+        let mut state = state_with_plugin_install_recommended();
+        let _ = render_notices_popup_text(&mut state, 40, 10);
+        // The Plugin section's [prompt] button must register a click
+        // target so `notices_copy_target_at` can route the click into
+        // `prompt_for_agent("claude")`.
+        assert_eq!(state.notices_copy_targets.len(), 1);
+        assert_eq!(state.notices_copy_targets[0].agent, "claude");
+        assert_eq!(
+            state.notices_copy_targets[0].area.width,
+            LABEL_MAX_WIDTH as u16
+        );
+    }
+
+    #[test]
+    fn rendering_skips_copy_target_for_plugin_stale() {
+        // Stale-version sub-item is informational only — no [prompt]
+        // button, so no copy target should be registered.
+        let mut state = state_with_plugin_stale("0.4.3", "0.5.0");
+        let _ = render_notices_popup_text(&mut state, 40, 10);
+        assert!(state.notices_copy_targets.is_empty());
+    }
+
+    #[test]
+    fn snapshot_notices_popup_plugin_stale_only() {
+        let mut state = state_with_plugin_stale("0.4.3", "0.5.0");
+        let text = render_notices_popup_text(&mut state, 40, 10);
+        insta::assert_snapshot!(text, @r"
+        ┌─────────────────────────┐
+        │ Notices                 │
+        │   Plugin                │
+        │     claude              │
+        │       v0.4.3 -> v0.5.0  │
+        └─────────────────────────┘
+        ");
+    }
+
+    #[test]
+    fn snapshot_notices_popup_plugin_stale_with_codex_missing_hooks() {
+        // Plugin install path: the Claude row is suppressed (the plugin
+        // owns it) and only Codex shows up in the missing-hooks section.
+        let mut state = state_with_plugin_stale("0.4.3", "0.5.0");
+        state.notices_missing_hook_groups = vec![crate::state::NoticesMissingHookGroup {
+            agent: "codex".into(),
+            hooks: vec!["Stop".into()],
+        }];
+        let text = render_notices_popup_text(&mut state, 40, 14);
+        insta::assert_snapshot!(text, @r"
+        ┌─────────────────────────┐
+        │ Notices                 │
+        │   Plugin                │
+        │     claude              │
+        │       v0.4.3 -> v0.5.0  │
+        │   Missing hooks         │
+        │     codex         [copy]│
+        │     - Stop              │
+        └─────────────────────────┘
         ");
     }
 
@@ -491,15 +891,15 @@ mod tests {
         ];
         let text = render_notices_popup_text(&mut state, 40, 14);
         insta::assert_snapshot!(text, @"
-        ┌───────────────────────┐
-        │ Notices               │
-        │   Missing hooks       │
-        │     claude      [copy]│
-        │     - SessionStart    │
-        │     - Stop            │
-        │     codex       [copy]│
-        │     - Stop            │
-        └───────────────────────┘
+        ┌──────────────────────┐
+        │ Notices              │
+        │   Missing hooks      │
+        │     claude           │
+        │     - SessionStart   │
+        │     - Stop           │
+        │     codex      [copy]│
+        │     - Stop           │
+        └──────────────────────┘
         ");
     }
 
@@ -508,12 +908,12 @@ mod tests {
         let mut state = state_with(None, vec![("claude", vec!["Stop"])]);
         let text = render_notices_popup_text(&mut state, 40, 8);
         insta::assert_snapshot!(text, @"
-        ┌───────────────────────┐
-        │ Notices               │
-        │   Missing hooks       │
-        │     claude      [copy]│
-        │     - Stop            │
-        └───────────────────────┘
+        ┌──────────────────┐
+        │ Notices          │
+        │   Missing hooks  │
+        │     claude       │
+        │     - Stop       │
+        └──────────────────┘
         ");
     }
 
@@ -537,7 +937,7 @@ mod tests {
         ┌─────────────────────────┐
         │ Notices                 │
         │   Missing hooks         │
-        │     claude        [copy]│
+        │     claude              │
         │     - SessionStart      │
         │     - SessionEnd        │
         │     - Stop              │
@@ -557,7 +957,7 @@ mod tests {
         │   New Version         │
         │     v0.2.6 -> v0.2.7  │
         │   Missing hooks       │
-        │     claude      [copy]│
+        │     claude            │
         │     - Stop            │
         └───────────────────────┘
         ");
@@ -592,12 +992,12 @@ mod tests {
         state.notices_copied_at = Some(("claude".into(), std::time::Instant::now()));
         let text = render_notices_popup_text(&mut state, 40, 8);
         insta::assert_snapshot!(text, @"
-        ┌───────────────────────┐
-        │ Notices               │
-        │   Missing hooks       │
-        │     claude    [copied]│
-        │     - Stop            │
-        └───────────────────────┘
+        ┌──────────────────┐
+        │ Notices          │
+        │   Missing hooks  │
+        │     claude       │
+        │     - Stop       │
+        └──────────────────┘
         ");
     }
 
@@ -611,14 +1011,14 @@ mod tests {
         state.notices_copied_at = Some(("codex".into(), std::time::Instant::now()));
         let text = render_notices_popup_text(&mut state, 40, 10);
         insta::assert_snapshot!(text, @"
-        ┌───────────────────────┐
-        │ Notices               │
-        │   Missing hooks       │
-        │     claude      [copy]│
-        │     - Stop            │
-        │     codex     [copied]│
-        │     - Stop            │
-        └───────────────────────┘
+        ┌──────────────────────┐
+        │ Notices              │
+        │   Missing hooks      │
+        │     claude           │
+        │     - Stop           │
+        │     codex    [copied]│
+        │     - Stop           │
+        └──────────────────────┘
         ");
     }
 
@@ -634,12 +1034,12 @@ mod tests {
         ));
         let text = render_notices_popup_text(&mut state, 40, 8);
         insta::assert_snapshot!(text, @"
-        ┌───────────────────────┐
-        │ Notices               │
-        │   Missing hooks       │
-        │     claude      [copy]│
-        │     - Stop            │
-        └───────────────────────┘
+        ┌──────────────────┐
+        │ Notices          │
+        │   Missing hooks  │
+        │     claude       │
+        │     - Stop       │
+        └──────────────────┘
         ");
     }
 
@@ -660,19 +1060,22 @@ mod tests {
     // ─── click target tracking ──────────────────────────────────────
 
     #[test]
-    fn rendering_populates_copy_targets_for_each_supported_agent() {
+    fn rendering_populates_copy_target_only_for_codex_in_missing_hooks() {
+        // Claude must NOT register a copy target in the missing-hooks
+        // section — its [prompt] button lives in the Plugin section
+        // and the two would race on the shared `[copied]` feedback.
         let mut state = state_with(
             None,
             vec![("claude", vec!["Stop"]), ("codex", vec!["Stop"])],
         );
         let _ = render_notices_popup_text(&mut state, 40, 10);
-        assert_eq!(state.notices_copy_targets.len(), 2);
-        assert_eq!(state.notices_copy_targets[0].agent, "claude");
-        assert_eq!(state.notices_copy_targets[1].agent, "codex");
-        for target in &state.notices_copy_targets {
-            assert_eq!(target.area.width, LABEL_MAX_WIDTH as u16);
-            assert_eq!(target.area.height, 1);
-        }
+        assert_eq!(state.notices_copy_targets.len(), 1);
+        assert_eq!(state.notices_copy_targets[0].agent, "codex");
+        assert_eq!(
+            state.notices_copy_targets[0].area.width,
+            LABEL_MAX_WIDTH as u16
+        );
+        assert_eq!(state.notices_copy_targets[0].area.height, 1);
     }
 
     #[test]
@@ -684,25 +1087,21 @@ mod tests {
 
     #[test]
     fn rendering_skips_copy_targets_when_popup_too_narrow() {
-        let mut state = state_with(
-            None,
-            vec![("claude", vec!["ThisIsAnExtremelyLongHookName"])],
-        );
+        let mut state = state_with(None, vec![("codex", vec!["ThisIsAnExtremelyLongHookName"])]);
         let _ = render_notices_popup_text(&mut state, 20, 8);
         assert!(state.notices_copy_targets.is_empty());
     }
 
     #[test]
     fn rendering_copy_target_reserves_label_slot_flush_right() {
-        let mut state = state_with(None, vec![("claude", vec!["Stop"])]);
+        let mut state = state_with(None, vec![("codex", vec!["Stop"])]);
         let _ = render_notices_popup_text(&mut state, 40, 8);
         let target = &state.notices_copy_targets[0];
         // The popup is left-aligned at x=0 with a single-column border.
         // Space-between rendering pins the label's `LABEL_MAX_WIDTH`-wide
-        // slot to the right edge of the inner area. With inner_width 23
-        // (popup width 25), the slot spans columns [15, 23) which maps
-        // to screen columns [16, 24).
-        assert_eq!(target.area.x + target.area.width, 1 + 23);
+        // slot to the right edge of the inner area. The label always
+        // ends at `border + inner_width`, regardless of inner width.
+        assert_eq!(target.area.x + target.area.width, 1 + 22);
         assert_eq!(target.area.width, LABEL_MAX_WIDTH as u16);
         assert_eq!(target.area.y, 2 + 1 + 2); // popup_y + border + title + "Missing hooks"
     }

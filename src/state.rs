@@ -283,6 +283,25 @@ pub struct AppState {
     pub notices_popup_area: Option<ratatui::layout::Rect>,
     pub notices_button_col: Option<u16>,
     pub notices_missing_hook_groups: Vec<NoticesMissingHookGroup>,
+    /// Version of the `tmux-agent-sidebar` Claude Code plugin install
+    /// detected at sidebar startup, or `None` when the plugin is not
+    /// installed. Resolved once from
+    /// `~/.claude/plugins/installed_plugins.json` and cached for the
+    /// lifetime of the TUI process — restart the sidebar after a
+    /// `/plugin install` or `/plugin uninstall` to pick up the change.
+    /// `claude_plugin_notice` and the missing-hooks Claude filter are
+    /// derived from this field.
+    pub claude_plugin_installed_version: Option<String>,
+    /// Whether `~/.claude/settings.json` still contains residual
+    /// `tmux-agent-sidebar/hook.sh` entries from the legacy manual
+    /// setup. Resolved once at startup. When this is `true` AND the
+    /// plugin is installed, every hook fires twice and the popup must
+    /// keep nagging the user to clean up.
+    pub claude_settings_has_residual_hooks: bool,
+    /// Drives the `Plugin / claude` section in the notices popup. See
+    /// [`ClaudePluginNotice`] for the two states. Derived from
+    /// `claude_plugin_installed_version` in `refresh_notices`.
+    pub claude_plugin_notice: Option<ClaudePluginNotice>,
     /// Click regions for the `copy` label on each agent row in the popup.
     pub notices_copy_targets: Vec<NoticesCopyTarget>,
     /// Agent name and timestamp of the most recent successful copy, shown
@@ -327,6 +346,29 @@ pub struct NoticesMissingHookGroup {
     pub hooks: Vec<String>,
 }
 
+/// Notice surfaced in the popup's `Plugin / claude` section. The
+/// variants are mutually exclusive and ordered by urgency:
+/// `DuplicateHooks` > `InstallRecommended` > `Stale`. When the plugin
+/// is installed, current, and the user has no residual manual hook
+/// entries, no notice is set.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClaudePluginNotice {
+    /// The Claude Code plugin is not installed. The popup offers a
+    /// `[prompt]` copy button that hands an LLM the migration recipe
+    /// (clean up `~/.claude/settings.json` then run `/plugin install`).
+    InstallRecommended,
+    /// The plugin is installed AND the user still has legacy
+    /// `tmux-agent-sidebar/hook.sh` entries in `~/.claude/settings.json`.
+    /// Every hook fires twice in this state — once via the plugin, once
+    /// via the manual setting. Takes precedence over `Stale` because it
+    /// is an actively-broken state, not just a pending update.
+    DuplicateHooks,
+    /// The plugin is installed but its `plugin.json` version is older
+    /// than the running binary, so the user needs to restart Claude
+    /// Code to pick up the new bundled hooks.
+    Stale { installed: String, current: String },
+}
+
 /// Click target for the `copy` label next to an agent in the notices popup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NoticesCopyTarget {
@@ -368,6 +410,9 @@ impl AppState {
             notices_popup_area: None,
             notices_button_col: None,
             notices_missing_hook_groups: vec![],
+            claude_plugin_installed_version: None,
+            claude_settings_has_residual_hooks: false,
+            claude_plugin_notice: None,
             notices_copy_targets: vec![],
             notices_copied_at: None,
             pending_osc52_copy: None,
@@ -461,6 +506,7 @@ impl AppState {
     /// and copy actions instead of pinning them to the last agent.
     pub fn refresh_notices(&mut self) {
         self.notices_missing_hook_groups.clear();
+        self.claude_plugin_notice = None;
 
         let Some(pane_id) = self.focused_pane_id.clone() else {
             return;
@@ -472,24 +518,42 @@ impl AppState {
             return;
         };
 
+        // Plugin notices are scoped to Claude panes (and the debug
+        // forced-display mode). Codex users never see plugin chatter
+        // because Codex CLI has no plugin mechanism upstream. The
+        // installed version + residual-hook flag are resolved once at
+        // sidebar startup from Claude Code's plugin registry and the
+        // user's settings.json — see `claude_plugin_installed_version`
+        // and `claude_settings_has_residual_hooks`.
+        let plugin_notice_relevant = agent == crate::tmux::CLAUDE_AGENT || debug_forced_display();
+        if plugin_notice_relevant {
+            self.claude_plugin_notice = compute_claude_plugin_notice(
+                self.claude_plugin_installed_version.as_deref(),
+                crate::VERSION,
+                self.claude_settings_has_residual_hooks,
+            );
+        }
+        // Suppress Claude from the missing-hooks list whenever the
+        // plugin is installed. Residual legacy entries are already
+        // surfaced by the Plugin section's `DuplicateHooks` notice, so
+        // re-adding Claude here would only duplicate the warning.
+        let claude_plugin_present = self.claude_plugin_installed_version.is_some();
+
         let hook_script = crate::cli::setup::resolve_hook_script().path;
         let force_missing = debug_forced_display();
-        self.notices_missing_hook_groups = notices_agents(&agent)
-            .into_iter()
-            .filter_map(|agent| {
-                let config = if force_missing {
-                    serde_json::Value::Null
-                } else {
-                    crate::cli::setup::load_current_config(&agent)
-                };
-                let hooks = crate::cli::setup::missing_hooks(&agent, &config, &hook_script);
-                if hooks.is_empty() {
-                    None
-                } else {
-                    Some(NoticesMissingHookGroup { agent, hooks })
-                }
-            })
-            .collect();
+        let load_config = |agent: &str| -> serde_json::Value {
+            if force_missing {
+                serde_json::Value::Null
+            } else {
+                crate::cli::setup::load_current_config(agent)
+            }
+        };
+        self.notices_missing_hook_groups = compute_missing_hook_groups(
+            claude_plugin_present,
+            notices_agents(&agent),
+            &hook_script,
+            load_config,
+        );
     }
 
     pub fn toggle_notices_popup(&mut self) {
@@ -873,6 +937,67 @@ fn notices_agents(current_agent: &str) -> Vec<String> {
     vec![current_agent.to_string()]
 }
 
+/// Compute the per-agent missing-hook list shown in the notices popup.
+///
+/// `claude_plugin_present` gates Claude visibility: when the plugin is
+/// installed, it owns the hook wiring so Claude is filtered out (the
+/// `Plugin / claude` section reports stale-version state instead). When
+/// the plugin is **not** installed, Claude must surface concrete
+/// missing-hook diagnostics for users still on the manual
+/// `~/.claude/settings.json` path. Codex is unaffected — Codex CLI has
+/// no plugin mechanism upstream.
+///
+/// Pure function: takes the agent list and a config loader as inputs so
+/// tests do not need to manipulate `/tmp` files or `~/.claude/`.
+fn compute_missing_hook_groups(
+    claude_plugin_present: bool,
+    agents: Vec<String>,
+    hook_script: &str,
+    load_config: impl Fn(&str) -> serde_json::Value,
+) -> Vec<NoticesMissingHookGroup> {
+    agents
+        .into_iter()
+        .filter(|agent| !(claude_plugin_present && agent == "claude"))
+        .filter_map(|agent| {
+            let config = load_config(&agent);
+            let hooks = crate::cli::setup::missing_hooks(&agent, &config, hook_script);
+            if hooks.is_empty() {
+                None
+            } else {
+                Some(NoticesMissingHookGroup { agent, hooks })
+            }
+        })
+        .collect()
+}
+
+/// Build the `Plugin / claude` notice based on the recorded plugin
+/// version and whether residual manual hook entries remain in
+/// `~/.claude/settings.json`. Priority order:
+///
+/// - No plugin install → `InstallRecommended` (the migration prompt
+///   handles legacy cleanup as part of the same step, so `has_residual`
+///   does not matter here).
+/// - Plugin installed + residual entries → `DuplicateHooks`. Takes
+///   precedence over `Stale` because hooks are firing twice right now
+///   and the cleanup is more urgent than a pending version bump.
+/// - Plugin installed, no residual, version mismatch → `Stale`.
+/// - Plugin installed, no residual, version match → no notice.
+fn compute_claude_plugin_notice(
+    installed_version: Option<&str>,
+    current_version: &str,
+    has_residual_hooks: bool,
+) -> Option<ClaudePluginNotice> {
+    match installed_version {
+        None => Some(ClaudePluginNotice::InstallRecommended),
+        Some(_) if has_residual_hooks => Some(ClaudePluginNotice::DuplicateHooks),
+        Some(v) if v == current_version => None,
+        Some(v) => Some(ClaudePluginNotice::Stale {
+            installed: v.to_string(),
+            current: current_version.to_string(),
+        }),
+    }
+}
+
 pub(crate) fn debug_forced_display() -> bool {
     option_env!("DEBUG")
         .map(|value| value != "0")
@@ -890,6 +1015,137 @@ mod tests {
     /// Reset filter click debounce so the next `handle_filter_click` is not ignored.
     fn reset_filter_debounce(state: &mut AppState) {
         state.last_filter_click = std::time::Instant::now() - std::time::Duration::from_millis(200);
+    }
+
+    // ─── compute_missing_hook_groups: claude_plugin_present gating ───
+
+    /// Return a config loader that always reports an empty config — i.e.
+    /// every hook the adapter expects is reported as missing. This keeps
+    /// these tests focused on the agent filtering logic instead of on
+    /// the `missing_hooks` algorithm itself.
+    fn empty_config_loader() -> impl Fn(&str) -> serde_json::Value {
+        |_agent: &str| serde_json::Value::Null
+    }
+
+    #[test]
+    fn missing_hook_groups_includes_claude_when_plugin_not_installed() {
+        // Manual `~/.claude/settings.json` path — Claude must surface
+        // concrete missing-hook diagnostics so the user knows what to
+        // wire up. The Plugin section's InstallRecommended notice is a
+        // companion, not a substitute.
+        let groups = compute_missing_hook_groups(
+            /* claude_plugin_present */ false,
+            vec!["claude".to_string()],
+            "/fake/hook.sh",
+            empty_config_loader(),
+        );
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].agent, "claude");
+        assert!(
+            !groups[0].hooks.is_empty(),
+            "claude should report missing hooks against an empty config"
+        );
+    }
+
+    #[test]
+    fn missing_hook_groups_skips_claude_when_plugin_installed() {
+        // The plugin owns the hook wiring once installed, so Claude
+        // must NOT appear under Missing hooks (the Plugin section
+        // reports stale-version state separately).
+        let groups = compute_missing_hook_groups(
+            /* claude_plugin_present */ true,
+            vec!["claude".to_string()],
+            "/fake/hook.sh",
+            empty_config_loader(),
+        );
+        assert!(
+            groups.is_empty(),
+            "claude must be filtered out when the plugin is detected, got {:?}",
+            groups
+        );
+    }
+
+    #[test]
+    fn missing_hook_groups_keeps_codex_regardless_of_plugin() {
+        let agents = vec!["codex".to_string()];
+
+        let without = compute_missing_hook_groups(
+            false,
+            agents.clone(),
+            "/fake/hook.sh",
+            empty_config_loader(),
+        );
+        let with =
+            compute_missing_hook_groups(true, agents, "/fake/hook.sh", empty_config_loader());
+        assert_eq!(without, with);
+        assert_eq!(without.len(), 1);
+        assert_eq!(without[0].agent, "codex");
+    }
+
+    #[test]
+    fn missing_hook_groups_drops_only_claude_when_both_agents_present_and_plugin_installed() {
+        // Forced-debug rendering passes both agents; verify the filter
+        // hits Claude alone without affecting the Codex row.
+        let groups = compute_missing_hook_groups(
+            true,
+            vec!["claude".to_string(), "codex".to_string()],
+            "/fake/hook.sh",
+            empty_config_loader(),
+        );
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].agent, "codex");
+    }
+
+    // ─── compute_claude_plugin_notice ────────────────────────────────
+
+    #[test]
+    fn plugin_notice_install_recommended_when_version_missing() {
+        // No version recorded → the user has not run `/plugin install`
+        // yet, so the popup should encourage them to. Residual hooks do
+        // not change this — the migration prompt cleans them up too.
+        assert_eq!(
+            compute_claude_plugin_notice(None, "0.5.0", false),
+            Some(ClaudePluginNotice::InstallRecommended)
+        );
+        assert_eq!(
+            compute_claude_plugin_notice(None, "0.5.0", true),
+            Some(ClaudePluginNotice::InstallRecommended)
+        );
+    }
+
+    #[test]
+    fn plugin_notice_none_when_versions_match_and_no_residual() {
+        assert_eq!(
+            compute_claude_plugin_notice(Some("0.5.0"), "0.5.0", false),
+            None
+        );
+    }
+
+    #[test]
+    fn plugin_notice_stale_when_versions_differ_and_no_residual() {
+        assert_eq!(
+            compute_claude_plugin_notice(Some("0.4.3"), "0.5.0", false),
+            Some(ClaudePluginNotice::Stale {
+                installed: "0.4.3".into(),
+                current: "0.5.0".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn plugin_notice_duplicate_hooks_when_residual_overrides_stale() {
+        // Plugin is installed AND legacy entries are still in
+        // settings.json. Hooks fire twice. The DuplicateHooks notice
+        // takes precedence over Stale even when the version is also
+        // out of date — cleanup is the more urgent action.
+        assert_eq!(
+            compute_claude_plugin_notice(Some("0.4.3"), "0.5.0", true),
+            Some(ClaudePluginNotice::DuplicateHooks)
+        );
+        assert_eq!(
+            compute_claude_plugin_notice(Some("0.5.0"), "0.5.0", true),
+            Some(ClaudePluginNotice::DuplicateHooks)
+        );
     }
 
     // ─── copy feedback policy ────────────────────────────────────────

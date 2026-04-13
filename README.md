@@ -142,200 +142,38 @@ The sidebar receives status updates through agent hooks. Add the following hook 
 
 #### 3.1 Claude Code
 
-Create `~/.claude/settings.json` first.
+The repository ships as a Claude Code plugin, so the hooks register themselves — you do **not** need to edit `~/.claude/settings.json`.
 
-**Option A — Copy from the sidebar (recommended).**
+Inside Claude Code, register the marketplace and install the plugin:
 
-1. Open a Claude Code pane in tmux and focus it.
-2. Press `prefix + e` to toggle the sidebar. A yellow `ⓘ` badge appears in the top row of the sidebar when required hooks are missing.
-3. Click `ⓘ`, then click `[copy]` next to `claude` in the Notices popup.
-4. Switch back to the Claude Code pane and paste. Claude Code will run `tmux-agent-sidebar setup claude` and merge the hooks into `~/.claude/settings.json`.
+```text
+/plugin marketplace add hiroppy/tmux-agent-sidebar
+/plugin install tmux-agent-sidebar@hiroppy
+```
+
+For a local checkout (development), point the marketplace at your repo path instead:
+
+```text
+/plugin marketplace add /path/to/tmux-agent-sidebar
+/plugin install tmux-agent-sidebar@hiroppy
+```
+
+Either form wires up the Claude Code hooks. Run `/reload-plugins` (or restart Claude Code) to activate them.
+
+If you want to inspect exactly which hooks the plugin registers (for example, to audit them before running `/plugin install`), run `tmux-agent-sidebar setup claude` — it prints the full hook list as JSON.
+
+> **Migrating from manual hooks?** If you previously pasted the `bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude ...` lines into `~/.claude/settings.json`, remove them now — leaving them in place causes every hook to fire twice. Opening the sidebar's notices popup on a Claude pane and clicking `[prompt]` will copy a migration recipe an LLM can apply for you.
 
 <details>
-<summary>Option B — Paste this JSON into <code>~/.claude/settings.json</code></summary>
+<summary>Plugin not an option? Manual <code>~/.claude/settings.json</code> setup</summary>
 
-```json
-{
-  "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude session-start"
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude session-end"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude user-prompt-submit"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude stop"
-          }
-        ]
-      }
-    ],
-    "StopFailure": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude stop-failure"
-          }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude notification"
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude activity-log"
-          }
-        ]
-      }
-    ],
-    "PermissionDenied": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude permission-denied"
-          }
-        ]
-      }
-    ],
-    "CwdChanged": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude cwd-changed"
-          }
-        ]
-      }
-    ],
-    "SubagentStart": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude subagent-start"
-          }
-        ]
-      }
-    ],
-    "SubagentStop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude subagent-stop"
-          }
-        ]
-      }
-    ],
-    "TaskCreated": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude task-created"
-          }
-        ]
-      }
-    ],
-    "TaskCompleted": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude task-completed"
-          }
-        ]
-      }
-    ],
-    "TeammateIdle": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude teammate-idle"
-          }
-        ]
-      }
-    ],
-    "WorktreeCreate": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude worktree-create"
-          }
-        ]
-      }
-    ],
-    "WorktreeRemove": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude worktree-remove"
-          }
-        ]
-      }
-    ]
-  }
-}
+If you cannot use the plugin (older Claude Code, locked-down environment, etc.), let an LLM wire it up by pasting this prompt into a Claude Code session:
+
 ```
+Run ~/.tmux/plugins/tmux-agent-sidebar/target/release/tmux-agent-sidebar setup claude (fall back to ~/.tmux/plugins/tmux-agent-sidebar/bin/tmux-agent-sidebar if that path is missing). Add these hooks to ~/.claude/settings.json. If hooks already exist, merge them without making destructive changes.
+```
+
+Or copy-paste the JSON output of `tmux-agent-sidebar setup claude` directly into `~/.claude/settings.json`.
 
 </details>
 

@@ -20,6 +20,8 @@ cargo fmt --check              # Check formatting (used in CI)
 
 CI runs `cargo test`, `cargo clippy`, and `cargo fmt --check` on every push/PR.
 
+**Before creating any git commit**, always run `cargo fmt` first to avoid CI formatting failures. This applies to every commit, not just the final one.
+
 After implementation is complete, run `cargo build --release`. The plugin directory is usually a symlink to this repo, so the binary is picked up automatically; only a worktree build needs a manual copy (see "Debugging" section below).
 
 ## Architecture

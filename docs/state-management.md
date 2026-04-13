@@ -82,6 +82,16 @@ Per-pane file-based state:
 | `theme` | Once at startup | Color theme from tmux `@sidebar_color_*` variables |
 | `repo_popup_open` | On user input | Repo filter popup visibility |
 | `repo_popup_selected` | On user input | Selected index in repo popup |
+| `notices_popup_open` | On user input | Notices popup visibility |
+| `notices_popup_area` | Every frame (render) | Rendered area of notices popup (for click routing) |
+| `notices_button_col` | Every frame (render) | Notices indicator button column position |
+| `notices_missing_hook_groups` | Every 1s (refresh cycle) | Per-agent missing hook groups shown in the popup |
+| `claude_plugin_installed_version` | Once at startup | Version recorded in Claude Code's installed plugin registry |
+| `claude_settings_has_residual_hooks` | Once at startup | Whether `~/.claude/settings.json` still contains legacy Claude hook entries |
+| `claude_plugin_notice` | Every 1s (refresh cycle) | Derived Claude plugin notice shown in the popup |
+| `notices_copy_targets` | Every frame (render) | Click targets for `[copy]` / `[prompt]` labels in the notices popup |
+| `notices_copied_at` | On successful copy | Transient `[copied]` feedback state |
+| `pending_osc52_copy` | On successful copy / frame flush | OSC 52 clipboard payload queued for terminal forwarding |
 | `cat_state` | Every 200ms (animation) | `Idle` / `WalkRight` / `Working` / `WalkLeft` |
 | `cat_x` | Every 200ms (animation) | Cat X position |
 | `cat_frame` | Every 200ms (animation) | Animation frame counter |
@@ -112,6 +122,10 @@ Per-pane file-based state:
 │  Every 10s (port scan)                                      │
 │  pane_states.ports, agent liveness cleanup                  │
 ├─────────────────────────────────────────────────────────────┤
+│  Once at startup                                             │
+│  theme, bottom_panel_height, claude_plugin_installed_version │
+│  claude_settings_has_residual_hooks                          │
+├─────────────────────────────────────────────────────────────┤
 │  Every 2s (git background thread)                           │
 │  git (branch, diff, ahead/behind, PR)                       │
 ├─────────────────────────────────────────────────────────────┤
@@ -123,10 +137,11 @@ Per-pane file-based state:
 ├─────────────────────────────────────────────────────────────┤
 │  On user input                                              │
 │  focus, scroll offsets, bottom_tab, GlobalState fields,     │
-│  repo_popup_*                                               │
+│  repo_popup_*, notices_popup_open                           │
 ├─────────────────────────────────────────────────────────────┤
-│  Once at startup                                            │
-│  theme                                                      │
+│  Every frame (render)                                       │
+│  line_to_row, repo_popup_area, notices_popup_area,         │
+│  notices_button_col, notices_copy_targets, hyperlink_overlays
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -141,6 +156,10 @@ Agent hooks (hook.sh)
     → handle_event() writes @pane_* tmux options + /tmp activity log files
                         ↓
 TUI main loop (main.rs)
+  → startup plugin-state reads (cli/plugin_state.rs)
+    → installed_plugins.json / ~/.claude/settings.json
+    → initializes Claude notices state once
+                        ↓
   → refresh() every 1s
     → query_sessions() (tmux.rs)     ← reads @pane_* via `tmux list-panes -a`
     → group_panes_by_repo() (group.rs)
@@ -151,6 +170,7 @@ TUI main loop (main.rs)
     → scan_session_process_snapshot() ← detects dead panes and clears stale tmux metadata
                         ↓
   → git_rx.try_recv()                ← receives GitData from background thread
+  → notices popup render/copy state  ← derived from AppState plugin fields
                         ↓
   → ui::draw() renders frame         ← reads all AppState fields
 ```

@@ -105,6 +105,18 @@ fn run_app(
         }
     }
 
+    // Resolve the installed Claude Code plugin version once at startup,
+    // matching the version_notice pattern. Restart the sidebar after a
+    // /plugin install or /plugin uninstall to pick up the new state.
+    state.claude_plugin_installed_version =
+        tmux_agent_sidebar::cli::plugin_state::installed_plugin_version();
+    // Likewise resolve whether the user still has legacy
+    // tmux-agent-sidebar/hook.sh entries in ~/.claude/settings.json so
+    // the notices popup can warn about duplicate hook execution.
+    state.claude_settings_has_residual_hooks =
+        tmux_agent_sidebar::cli::plugin_state::claude_settings_has_residual_hooks();
+    state.refresh();
+
     let (git_tx, git_rx) = mpsc::channel::<GitData>();
     let (version_tx, version_rx) = mpsc::channel::<UpdateNotice>();
     let tmux_pane_clone = state.tmux_pane.clone();

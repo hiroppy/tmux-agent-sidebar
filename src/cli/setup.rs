@@ -355,33 +355,42 @@ const FALLBACK_HOOK_SCRIPT: &str = "~/.tmux/plugins/tmux-agent-sidebar/hook.sh";
 /// `detected = false` and `cmd_setup` surfaces a stderr warning. Never
 /// panics.
 pub(crate) fn resolve_hook_script() -> ResolvedHookScript {
-    fn fallback() -> ResolvedHookScript {
-        ResolvedHookScript {
-            path: FALLBACK_HOOK_SCRIPT.to_string(),
-            detected: false,
-        }
-    }
-
-    let Ok(exe) = std::env::current_exe() else {
-        return fallback();
-    };
-    let Some(mut dir) = exe.parent().map(|p| p.to_path_buf()) else {
-        return fallback();
-    };
-    for _ in 0..=3 {
+    walk_up_from_exe(3, |dir| {
         let candidate = dir.join("hook.sh");
-        if candidate.is_file() {
-            return ResolvedHookScript {
-                path: candidate.to_string_lossy().into_owned(),
-                detected: true,
-            };
+        candidate
+            .is_file()
+            .then(|| candidate.to_string_lossy().into_owned())
+    })
+    .map(|path| ResolvedHookScript {
+        path,
+        detected: true,
+    })
+    .unwrap_or_else(|| ResolvedHookScript {
+        path: FALLBACK_HOOK_SCRIPT.to_string(),
+        detected: false,
+    })
+}
+
+/// Walk up from the running binary (`current_exe()`) and invoke `probe`
+/// at each ancestor directory, stopping at the first non-`None` result
+/// or after `max_depth` steps. Returns `None` when the executable path
+/// cannot be resolved (e.g. exotic platforms) — callers must be prepared
+/// to fall back gracefully. Used by `resolve_hook_script` and by
+/// `notices::plugin_root_from_exe` so the upward-walk loop lives in one
+/// place.
+pub(crate) fn walk_up_from_exe<F, T>(max_depth: usize, mut probe: F) -> Option<T>
+where
+    F: FnMut(&std::path::Path) -> Option<T>,
+{
+    let exe = std::env::current_exe().ok()?;
+    let mut dir = exe.parent()?.to_path_buf();
+    for _ in 0..=max_depth {
+        if let Some(value) = probe(&dir) {
+            return Some(value);
         }
-        match dir.parent() {
-            Some(parent) => dir = parent.to_path_buf(),
-            None => break,
-        }
+        dir = dir.parent()?.to_path_buf();
     }
-    fallback()
+    None
 }
 
 /// Return the default config path for `agent` under the current user's home.

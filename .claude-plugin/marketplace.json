@@ -1,0 +1,13 @@
+{
+  "name": "hiroppy",
+  "owner": {
+    "name": "Yuta Hiroto"
+  },
+  "plugins": [
+    {
+      "name": "tmux-agent-sidebar",
+      "source": "./",
+      "description": "Monitor Claude Code agents across tmux panes in a real-time sidebar TUI"
+    }
+  ]
+}

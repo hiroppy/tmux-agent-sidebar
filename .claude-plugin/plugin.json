@@ -1,0 +1,12 @@
+{
+  "name": "tmux-agent-sidebar",
+  "version": "0.5.1",
+  "description": "Monitor Claude Code agents across tmux panes in a real-time sidebar TUI",
+  "author": {
+    "name": "Yuta Hiroto",
+    "url": "https://github.com/hiroppy"
+  },
+  "repository": "https://github.com/hiroppy/tmux-agent-sidebar",
+  "license": "MIT",
+  "keywords": ["tmux", "agent", "monitoring", "tui", "sidebar"]
+}
