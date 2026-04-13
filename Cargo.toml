@@ -1,6 +1,6 @@
 [package]
 name = "tmux-agent-sidebar"
-version = "0.4.3"
+version = "0.5.0"
 edition = "2024"
 license = "MIT"
 description = "A tmux sidebar that monitors AI coding agents across all windows and sessions in real-time"
