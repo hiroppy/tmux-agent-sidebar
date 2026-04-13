@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::process::Command;
 
 pub const CLAUDE_AGENT: &str = "claude";
@@ -293,7 +294,38 @@ pub(crate) fn parse_pane_line(line: &str) -> Option<PaneInfo> {
 }
 
 fn is_shell_command(command: &str) -> bool {
-    matches!(command, "bash" | "fish" | "nu" | "sh" | "zsh")
+    const SHELL_COMMANDS: &[&str] = &[
+        "ash",
+        "bash",
+        "csh",
+        "dash",
+        "elvish",
+        "fish",
+        "ksh",
+        "mksh",
+        "nu",
+        "oksh",
+        "pdksh",
+        "posh",
+        "powershell",
+        "powershell.exe",
+        "pwsh",
+        "sh",
+        "tcsh",
+        "xonsh",
+        "zsh",
+    ];
+
+    let Some(token) = command.split_whitespace().next() else {
+        return false;
+    };
+    let executable = Path::new(token)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(token)
+        .to_ascii_lowercase();
+
+    SHELL_COMMANDS.contains(&executable.as_str())
 }
 
 /// Detect Codex permission mode from process args (--full-auto, --yolo, etc.)
@@ -1022,7 +1054,7 @@ mod tests {
         let mut fields = full_fields();
         fields[3] = "codex";
         fields[6] = "node";
-        fields[15] = "auto"; // should be ignored for codex
+        fields[16] = "auto"; // should be ignored for codex
         let line = make_pane_line(&fields);
         let pane = parse_pane_line(&line).unwrap();
         assert_eq!(
@@ -1041,6 +1073,18 @@ mod tests {
         assert!(
             parse_pane_line(&line).is_none(),
             "codex metadata on a shell pane should be treated as stale"
+        );
+    }
+
+    #[test]
+    fn parse_pane_line_rejects_stale_codex_shell_pane_with_path_and_args() {
+        let mut fields = full_fields();
+        fields[3] = "codex";
+        fields[6] = "/usr/local/bin/PwSh -l";
+        let line = make_pane_line(&fields);
+        assert!(
+            parse_pane_line(&line).is_none(),
+            "shell detection should handle paths, args, and case differences"
         );
     }
 }
