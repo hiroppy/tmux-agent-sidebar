@@ -93,6 +93,8 @@ fn run_app(
 ) -> io::Result<()> {
     let mut state = AppState::new(tmux_pane);
     state.theme = tmux_agent_sidebar::ui::colors::ColorTheme::from_tmux();
+    state.icons = tmux_agent_sidebar::ui::icons::StatusIcons::from_tmux();
+    state.bottom_panel_height = tmux_agent_sidebar::ui::bottom_panel_height_from_tmux();
     state.global.load_from_tmux();
     state.refresh();
     let mut window_inactive_count: u32 = 0;
@@ -155,15 +157,15 @@ fn run_app(
                     Event::Key(key) => match key.code {
                         KeyCode::Esc => {
                             if state.focus == Focus::ActivityLog || state.focus == Focus::Filter {
-                                state.focus = Focus::Agents;
+                                state.focus = Focus::Panes;
                             }
                         }
                         KeyCode::Char('j') | KeyCode::Down => match state.focus {
                             Focus::Filter => {
-                                state.focus = Focus::Agents;
+                                state.focus = Focus::Panes;
                             }
-                            Focus::Agents => {
-                                if state.move_agent_selection(1) {
+                            Focus::Panes => {
+                                if state.move_pane_selection(1) {
                                     state.global.save_cursor();
                                 } else {
                                     state.focus = Focus::ActivityLog;
@@ -173,8 +175,8 @@ fn run_app(
                         },
                         KeyCode::Char('k') | KeyCode::Up => match state.focus {
                             Focus::Filter => {}
-                            Focus::Agents => {
-                                if state.move_agent_selection(-1) {
+                            Focus::Panes => {
+                                if state.move_pane_selection(-1) {
                                     state.global.save_cursor();
                                 } else {
                                     state.focus = Focus::Filter;
@@ -190,7 +192,7 @@ fn run_app(
                                     }
                                 };
                                 if at_top {
-                                    state.focus = Focus::Agents;
+                                    state.focus = Focus::Panes;
                                 } else {
                                     state.scroll_bottom(-1);
                                 }
@@ -198,14 +200,14 @@ fn run_app(
                         },
                         KeyCode::Char('h') | KeyCode::Left => {
                             if state.focus == Focus::Filter {
-                                state.global.agent_filter = state.global.agent_filter.prev();
+                                state.global.status_filter = state.global.status_filter.prev();
                                 state.global.save_filter();
                                 state.rebuild_row_targets();
                             }
                         }
                         KeyCode::Char('l') | KeyCode::Right => {
                             if state.focus == Focus::Filter {
-                                state.global.agent_filter = state.global.agent_filter.next();
+                                state.global.status_filter = state.global.status_filter.next();
                                 state.global.save_filter();
                                 state.rebuild_row_targets();
                             }
@@ -216,12 +218,12 @@ fn run_app(
                             }
                         }
                         KeyCode::Enter => {
-                            if state.focus == Focus::Agents {
-                                state.activate_selection();
+                            if state.focus == Focus::Panes {
+                                state.activate_selected_pane();
                             }
                         }
                         KeyCode::Tab => {
-                            state.global.agent_filter = state.global.agent_filter.next();
+                            state.global.status_filter = state.global.status_filter.next();
                             state.global.save_filter();
                             state.rebuild_row_targets();
                         }
@@ -234,10 +236,10 @@ fn run_app(
                     },
                     Event::Mouse(mouse) => {
                         let term_height = terminal.size().map(|s| s.height).unwrap_or(0);
+                        let bottom_h = state.bottom_panel_height;
                         match mouse.kind {
                             MouseEventKind::Down(MouseButton::Left) => {
-                                let bottom_start =
-                                    term_height.saturating_sub(ui::BOTTOM_PANEL_HEIGHT);
+                                let bottom_start = term_height.saturating_sub(bottom_h);
                                 if mouse.row < bottom_start {
                                     state.handle_mouse_click(mouse.row, mouse.column);
                                 } else if mouse.row == bottom_start {
@@ -245,20 +247,10 @@ fn run_app(
                                 }
                             }
                             MouseEventKind::ScrollDown => {
-                                state.handle_mouse_scroll(
-                                    mouse.row,
-                                    term_height,
-                                    ui::BOTTOM_PANEL_HEIGHT,
-                                    3,
-                                );
+                                state.handle_mouse_scroll(mouse.row, term_height, bottom_h, 3);
                             }
                             MouseEventKind::ScrollUp => {
-                                state.handle_mouse_scroll(
-                                    mouse.row,
-                                    term_height,
-                                    ui::BOTTOM_PANEL_HEIGHT,
-                                    -3,
-                                );
+                                state.handle_mouse_scroll(mouse.row, term_height, bottom_h, -3);
                             }
                             _ => {}
                         }

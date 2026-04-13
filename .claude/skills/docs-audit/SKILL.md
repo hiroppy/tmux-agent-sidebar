@@ -1,160 +1,160 @@
 ---
 name: docs-audit
-description: docs/ にある設計書・仕様書・実装計画が現在のソースコードと乖離していないか調査し、乖離レポートを出力してドキュメントを更新する。「docs が最新か確認して」「ドキュメントとコードの差分を調べて」「設計書を更新して」「docs の整合性チェック」「仕様書がソースと合ってるか調べて」「plan の完了状態を確認して」などで発動。ドキュメントやコードの変更後に呼び出すと効果的。
+description: Audit docs/ design documents, specs, and implementation plans against current source code for drift. Outputs a drift report and updates documents. Triggers on "check if docs are up to date", "diff docs vs code", "update design docs", "docs consistency check", "verify specs match source", "check plan completion status". Most effective after code or documentation changes.
 ---
 
-# Docs Audit — ドキュメント × ソースコード整合性チェック
+# Docs Audit — Document vs. Source Code Consistency Check
 
-`docs/` 配下の設計書・仕様書・計画がソースコードの現状と一致しているか監査し、乖離を報告してドキュメントを更新するスキル。
+A skill that audits design documents, specs, and plans under `docs/` against the current source code, reports drift, and updates documents.
 
-## なぜこのスキルが必要か
+## Why This Skill Exists
 
-コードは日々進化するが、ドキュメントは書いた時点の設計を反映している。enum にバリアントが追加されたり、struct のフィールドが変わったり、計画が完了してもチェックボックスが未更新だったりする。こうした乖離は、後からコードベースに入る人を混乱させる。このスキルはその乖離を体系的に検出する。
+Code evolves daily, but documentation reflects the design at the time it was written. Enum variants get added, struct fields change, plan checkboxes go un-updated. This drift confuses anyone entering the codebase later. This skill systematically detects such drift.
 
-## 手順
+## Procedure
 
-### Step 1: ドキュメント探索と分類
+### Step 1: Discover and Classify Documents
 
-`docs/**/*.md` を Glob で収集し、以下のルールで分類する：
+Collect files with `Glob docs/**/*.md` and classify them by the following rules:
 
-| 分類 | 判定条件 | 例 |
-|------|---------|-----|
-| **reference** | 上記以外の `docs/` 直下の .md | `event-mapping.md`, `state-management.md` |
-| **spec** | パスに `/specs/` を含む、またはファイル名に `design` を含む | `event-adapter-design.md` |
-| **plan** | パスに `/plans/` を含む | `2026-04-06-event-adapter.md` |
-| **todo** | ファイル名が `TODO-` で始まる | `TODO-background-shell-detection.md` |
+| Category | Criteria | Example |
+|----------|----------|---------|
+| **reference** | `.md` files directly under `docs/` not matching other categories | `event-mapping.md`, `state-management.md` |
+| **spec** | Path contains `/specs/` or filename contains `design` | `event-adapter-design.md` |
+| **plan** | Path contains `/plans/` | `2026-04-06-event-adapter.md` |
+| **todo** | Filename starts with `TODO-` | `TODO-background-shell-detection.md` |
 
-ユーザーが特定のファイルを指定した場合は、そのファイルのみを対象にする。
+If the user specifies particular files, audit only those files.
 
-### Step 2: ソースコードの公開 API を抽出
+### Step 2: Extract Public API from Source Code
 
-ソースファイルから型定義・関数シグネチャを抽出する。全文を読む必要はなく、Grep で公開 API のみを取得してコンテキストを節約する。
+Extract type definitions and function signatures from source files. No need to read entire files — use Grep to get only public APIs and conserve context.
 
-**Rust プロジェクトの場合:**
+**For Rust projects:**
 ```
 Grep: "pub (enum|struct|trait|fn|type)" in src/**/*.rs
 ```
 
-抽出対象：
-- enum のバリアント一覧とそのフィールド
-- struct のフィールド一覧
-- pub fn のシグネチャ（引数と戻り値）
-- trait の定義
+Extraction targets:
+- Enum variant lists and their fields
+- Struct field lists
+- `pub fn` signatures (parameters and return types)
+- Trait definitions
 
-大きなファイル（500行以上）は、ドキュメントが言及している型・関数に絞って Read する。
+For large files (500+ lines), Read only the types/functions mentioned in the document.
 
-**他言語の場合（参考）:**
+**For other languages (reference):**
 - TypeScript: `export (interface|type|class|function|const)`
-- Python: `class |def ` のインデントレベル0
+- Python: `class |def ` at indentation level 0
 
-### Step 3: ドキュメント種別ごとの監査
+### Step 3: Audit by Document Type
 
-#### reference ドキュメント
+#### Reference Documents
 
-最も厳密にチェックする。ドキュメント内の以下の記述をすべてソースと照合する：
+Check most strictly. Cross-reference ALL of the following against source code:
 
-- **enum バリアント**: ドキュメントに列挙されたバリアントがソースに存在するか。ソースに追加されたバリアントがドキュメントに反映されているか
-- **struct フィールド**: フィールド名・型が一致するか
-- **関数シグネチャ**: 引数・戻り値が一致するか
-- **ファイルパス**: ドキュメントで参照されているファイルが実在するか
-- **データフロー記述**: 「A が B を呼ぶ」「X が Y に書き込む」といった記述が実際のコードと一致するか
-- **テーブル/マッピング**: イベント名の対応表やフィールドマッピングが正確か
+- **Enum variants**: Do documented variants exist in source? Are source-added variants reflected in docs?
+- **Struct fields**: Do field names and types match?
+- **Function signatures**: Do parameters and return types match?
+- **File paths**: Do referenced files actually exist?
+- **Data flow descriptions**: Do statements like "A calls B" or "X writes to Y" match actual code?
+- **Tables/mappings**: Are event name mappings and field mappings accurate?
 
-#### spec ドキュメント
+#### Spec Documents
 
-設計仕様は「書かれた時点の設計意図」を記録するものなので、reference ほど厳密に合わせる必要はない。ただし、実装との大きな乖離は記録しておく価値がある。
+Design specs record "design intent at the time of writing," so they don't need to be as strictly aligned as reference docs. However, major drift is still worth recording.
 
-チェック対象：
-- spec で定義された enum/struct が実装でどう変わったか（バリアント追加・削除・改名）
-- spec のモジュール構成 vs 実際のモジュール構成
-- spec のデータフロー vs 実際のデータフロー
+Check targets:
+- How enums/structs defined in spec changed in implementation (variants added/removed/renamed)
+- Spec module structure vs. actual module structure
+- Spec data flow vs. actual data flow
 
-乖離があっても spec が「間違い」とは限らない。「設計時点ではこうだったが、実装ではこう変わった」という情報が有用。
+Drift doesn't necessarily mean the spec is "wrong." The information "it was designed this way, but implemented differently" is valuable.
 
-#### plan ドキュメント
+#### Plan Documents
 
-タスクの完了状態を中心にチェックする：
+Focus on task completion status:
 
-- `- [ ]`（未完了）のタスクについて、記述された変更がソースに存在するか確認
-  - 存在する → タスクは実装済みだがチェックボックスが未更新
-- `- [x]`（完了）のタスクについて、実装が本当に存在するか確認
-- 計画全体のステータスを判定：`fully-implemented` / `partially-implemented` / `not-started`
-- 計画内のコードスニペットと実際のコードの構造的差分（リテラル比較ではなく、型名・バリアント名レベルで比較）
+- For `- [ ]` (incomplete) tasks: check if the described changes exist in source
+  - If they exist → task is implemented but checkbox is not updated
+- For `- [x]` (complete) tasks: verify the implementation actually exists
+- Determine overall plan status: `fully-implemented` / `partially-implemented` / `not-started`
+- Structural diff between code snippets in plan and actual code (compare at type/variant name level, not literal comparison)
 
-#### todo ドキュメント
+#### Todo Documents
 
-記述された機能が実装されたかを確認する：
-- TODO 内で言及された型・関数・ファイルがソースに存在するか
-- 実装済みなら `implemented`、一部なら `partially-implemented`、未着手なら `not-started`
+Check whether described features have been implemented:
+- Do types/functions/files mentioned in the TODO exist in source?
+- If implemented: `implemented`; if partial: `partially-implemented`; if not started: `not-started`
 
-### Step 4: 乖離レポートの出力
+### Step 4: Output Drift Report
 
-以下の構成でレポートを出力する。ドキュメントが日本語なら日本語で、英語なら英語で出力する。
+Output the report in the following structure. Match the language of the document (English docs → English report, Japanese docs → Japanese report).
 
-#### サマリー
-
-```
-# ドキュメント監査レポート
-
-## サマリー
-- 監査対象: N ドキュメント
-- 乖離あり: X ドキュメント (High: A, Medium: B, Low: C)
-- 問題なし: Y ドキュメント
-```
-
-#### ドキュメントごとの結果
-
-各ドキュメントについて：
-
-**reference / spec の場合:**
+#### Summary
 
 ```
-### docs/event-mapping.md (reference) — N 件の乖離
+# Document Audit Report
 
-| セクション | ドキュメントの記述 | ソースの実態 | 重大度 |
-|-----------|------------------|-------------|--------|
-| AgentEvent enum | 9 バリアント | 11 バリアント（PermissionDenied, CwdChanged 追加） | High |
+## Summary
+- Audited: N documents
+- Drift found: X documents (High: A, Medium: B, Low: C)
+- No issues: Y documents
+```
+
+#### Per-Document Results
+
+For each document:
+
+**For reference / spec:**
+
+```
+### docs/event-mapping.md (reference) — N drift items
+
+| Section | Documented | Actual Source | Severity |
+|---------|-----------|--------------|----------|
+| AgentEvent enum | 9 variants | 11 variants (PermissionDenied, CwdChanged added) | High |
 | SessionStart fields | cwd, permission_mode | cwd, permission_mode, worktree, agent_id | High |
 ```
 
-**plan の場合:**
+**For plan:**
 
 ```
 ### docs/plans/2026-04-06-event-adapter.md (plan) — Status: fully-implemented
 
-全 6 タスク実装済み。チェックボックスが未更新（すべて `- [ ]` のまま）。
+All 6 tasks implemented. Checkboxes not updated (all still `- [ ]`).
 ```
 
-**todo の場合:**
+**For todo:**
 
 ```
 ### docs/TODO-background-shell-detection.md (todo) — Status: not-started
 
-PaneStatus::Background が src/tmux.rs に存在しない。
+PaneStatus::Background does not exist in src/tmux.rs.
 ```
 
-#### 重大度の基準
+#### Severity Criteria
 
-- **High**: ドキュメントの記述がソースと矛盾している（存在しないバリアント、間違ったフィールド、存在しないファイルパス）
-- **Medium**: ドキュメントが不完全（ソースに追加された要素がドキュメントに反映されていない、spec と実装の設計差分）
-- **Low**: 軽微な乖離（plan のチェックボックス未更新、todo の完了未反映）
+- **High**: Document contradicts source (nonexistent variant, wrong field, nonexistent file path)
+- **Medium**: Document is incomplete (source-added elements not reflected in docs, spec vs. implementation design differences)
+- **Low**: Minor drift (plan checkbox not updated, todo completion not reflected)
 
-### Step 5: 修正提案
+### Step 5: Propose Fixes
 
-レポートを出力した後、修正を提案する。**ユーザーの確認なしに修正しない。**
+After outputting the report, propose fixes. **Do not fix without user confirmation.**
 
-修正方針：
+Fix strategy:
 
-| ドキュメント種別 | 修正方法 |
-|----------------|---------|
-| reference | 内容をソースの現状に合わせて更新する |
-| spec | 本文を更新するか、末尾に「## 実装との差分」セクションを追加する。ユーザーに選択を委ねる |
-| plan | チェックボックスを更新し、冒頭に `**Status: Completed**`（または `Partially Implemented`）を追加 |
-| todo | 実装済みの場合、ファイル削除を提案する |
+| Document Type | Fix Method |
+|--------------|-----------|
+| reference | Update content to match current source |
+| spec | Either update the body, or add a `## Differences from Implementation` section at the end. Let the user choose |
+| plan | Update checkboxes, add `**Status: Completed**` (or `Partially Implemented`) at the top |
+| todo | If fully implemented, propose file deletion |
 
-## 注意事項
+## Notes
 
-- CLAUDE.md は対象外とする（別スキル `claude-md-management:revise-claude-md` の管轄）
-- README.md、CHANGELOG.md も対象外
-- ドキュメントにない情報をソースから「発見」しても、それ自体は乖離ではない。ドキュメントに書かれた記述がソースと矛盾している場合のみ報告する
-- コードスニペットのリテラル比較は行わない。構造的な差分（型名、バリアント名、フィールド名）に注目する
+- CLAUDE.md is out of scope
+- README.md and CHANGELOG.md are also out of scope
+- Information "discovered" in source that isn't in the document is not drift. Only report when documented statements contradict source
+- Do not perform literal comparison of code snippets. Focus on structural differences (type names, variant names, field names)

@@ -1,5 +1,8 @@
 use std::process::Command;
 
+pub const CLAUDE_AGENT: &str = "claude";
+pub const CODEX_AGENT: &str = "codex";
+
 #[derive(Debug, Clone)]
 pub struct PaneInfo {
     pub pane_id: String,
@@ -8,6 +11,7 @@ pub struct PaneInfo {
     pub attention: bool,
     pub agent: AgentType,
     pub path: String,
+    pub current_command: String,
     pub prompt: String,
     pub prompt_is_response: bool,
     pub started_at: Option<u64>,
@@ -34,6 +38,7 @@ pub enum PermissionMode {
     Plan,
     AcceptEdits,
     Auto,
+    DontAsk,
     BypassPermissions,
 }
 
@@ -42,7 +47,8 @@ impl PermissionMode {
         match s {
             "plan" => Self::Plan,
             "acceptEdits" => Self::AcceptEdits,
-            "auto" | "dontAsk" => Self::Auto,
+            "auto" => Self::Auto,
+            "dontAsk" => Self::DontAsk,
             "bypassPermissions" => Self::BypassPermissions,
             _ => Self::Default,
         }
@@ -54,6 +60,7 @@ impl PermissionMode {
             Self::Plan => "plan",
             Self::AcceptEdits => "edit",
             Self::Auto => "auto",
+            Self::DontAsk => "dontAsk",
             Self::BypassPermissions => "!",
         }
     }
@@ -85,18 +92,22 @@ pub struct SessionInfo {
 impl AgentType {
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
-            "claude" => Some(Self::Claude),
-            "codex" => Some(Self::Codex),
+            CLAUDE_AGENT => Some(Self::Claude),
+            CODEX_AGENT => Some(Self::Codex),
             _ => None,
         }
     }
 
-    pub fn label(&self) -> &str {
+    pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Claude => "claude",
-            Self::Codex => "codex",
+            Self::Claude => CLAUDE_AGENT,
+            Self::Codex => CODEX_AGENT,
             Self::Unknown => "unknown",
         }
+    }
+
+    pub fn label(&self) -> &str {
+        self.as_str()
     }
 }
 
@@ -267,6 +278,7 @@ pub(crate) fn parse_pane_line(line: &str) -> Option<PaneInfo> {
         attention: !parts[2].is_empty(),
         agent,
         path,
+        current_command: parts[6].to_string(),
         pane_id: parts[8].to_string(),
         prompt,
         prompt_is_response,
@@ -337,18 +349,30 @@ fn sanitize_prompt(raw: &str) -> String {
 
 /// Parse subagent list from tmux variable.
 /// Format: comma-separated "type" entries, e.g. "Explore,Explore,Plan"
-/// Assigns sequential numbers when the same type appears multiple times:
-/// "Explore,Explore,Plan" → ["Explore #1", "Explore #2", "Plan"]
+/// Parse the comma-separated `@pane_subagents` value into display strings.
+///
+/// Each entry is either `agent_type` (legacy) or `agent_type:agent_id`
+/// (current). When an `agent_id` is present, the entry is rendered as
+/// `"agent_type #<id-prefix>"` where `<id-prefix>` is the first 4 characters
+/// of the id — stable per instance, so the UI label does not shift when
+/// sibling subagents stop. The `#` embedding is recognized by the `#`-based
+/// numbering branch in `subagent_rows`, which keeps it verbatim.
 fn parse_subagents(raw: &str) -> Vec<String> {
+    const ID_PREFIX_LEN: usize = 4;
     if raw.is_empty() {
         return vec![];
     }
-    let items: Vec<&str> = raw
-        .split(',')
+    raw.split(',')
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
-        .collect();
-    items.iter().map(|item| item.to_string()).collect()
+        .map(|entry| match entry.split_once(':') {
+            Some((ty, id)) if !id.is_empty() => {
+                let prefix: String = id.chars().take(ID_PREFIX_LEN).collect();
+                format!("{} #{}", ty, prefix)
+            }
+            _ => entry.to_string(),
+        })
+        .collect()
 }
 
 /// Split a tmux format line while honoring tmux `#{q:...}` backslash escapes.
@@ -586,7 +610,7 @@ mod tests {
             PermissionMode::AcceptEdits
         );
         assert_eq!(PermissionMode::from_str("auto"), PermissionMode::Auto);
-        assert_eq!(PermissionMode::from_str("dontAsk"), PermissionMode::Auto);
+        assert_eq!(PermissionMode::from_str("dontAsk"), PermissionMode::DontAsk);
         assert_eq!(
             PermissionMode::from_str("bypassPermissions"),
             PermissionMode::BypassPermissions
@@ -601,15 +625,21 @@ mod tests {
         assert_eq!(PermissionMode::Plan.badge(), "plan");
         assert_eq!(PermissionMode::AcceptEdits.badge(), "edit");
         assert_eq!(PermissionMode::Auto.badge(), "auto");
+        assert_eq!(PermissionMode::DontAsk.badge(), "dontAsk");
         assert_eq!(PermissionMode::BypassPermissions.badge(), "!");
     }
 
     #[test]
-    fn dont_ask_maps_to_auto_badge() {
-        // dontAsk should behave identically to auto in the UI
-        let mode = PermissionMode::from_str("dontAsk");
-        assert_eq!(mode, PermissionMode::Auto);
-        assert_eq!(mode.badge(), "auto");
+    fn dont_ask_is_distinct_from_auto() {
+        // Upstream docs list "auto" and "dontAsk" as separate permission_mode
+        // values (code.claude.com/docs/en/hooks "Common input fields"), so
+        // they must not collapse to the same variant.
+        let auto = PermissionMode::from_str("auto");
+        let dont_ask = PermissionMode::from_str("dontAsk");
+        assert_eq!(auto, PermissionMode::Auto);
+        assert_eq!(dont_ask, PermissionMode::DontAsk);
+        assert_ne!(auto, dont_ask);
+        assert_ne!(auto.badge(), dont_ask.badge());
     }
 
     #[test]
@@ -641,6 +671,7 @@ mod tests {
             attention: false,
             agent: AgentType::Codex,
             path: "/tmp".into(),
+            current_command: String::new(),
             prompt: String::new(),
             prompt_is_response: false,
             started_at: None,
@@ -717,6 +748,44 @@ mod tests {
         );
     }
 
+    #[test]
+    fn parse_subagents_renders_id_prefix() {
+        // Current format: `type:id`. The id prefix is used as a stable
+        // `#<prefix>` label so surviving siblings do not renumber when
+        // another subagent stops.
+        assert_eq!(
+            parse_subagents("Explore:sub123456,Plan:abc987654"),
+            vec!["Explore #sub1", "Plan #abc9"]
+        );
+    }
+
+    #[test]
+    fn parse_subagents_id_prefix_distinguishes_parallel_same_type() {
+        // Two subagents of the same type get distinct labels from their ids,
+        // which is the whole point of id-based tagging.
+        assert_eq!(
+            parse_subagents("Explore:aaaa1111,Explore:bbbb2222"),
+            vec!["Explore #aaaa", "Explore #bbbb"]
+        );
+    }
+
+    #[test]
+    fn parse_subagents_id_shorter_than_prefix_len_uses_full_id() {
+        // Short ids (e.g. test fixtures like "s1") render in full rather
+        // than being padded or truncated to nothing.
+        assert_eq!(parse_subagents("Plan:s1"), vec!["Plan #s1"]);
+    }
+
+    #[test]
+    fn parse_subagents_legacy_without_id_renders_type_only() {
+        // Stale entry written before id tracking (or by an older build)
+        // falls back to the bare type name.
+        assert_eq!(
+            parse_subagents("Explore,Plan:sub-999"),
+            vec!["Explore", "Plan #sub-"]
+        );
+    }
+
     // ─── parse_pane_line tests ──────────────────────────────────────
 
     fn make_pane_line(fields: &[&str]) -> String {
@@ -755,6 +824,7 @@ mod tests {
         assert_eq!(pane.status, PaneStatus::Running);
         assert_eq!(pane.agent, AgentType::Claude);
         assert_eq!(pane.path, "/custom/cwd"); // pane_cwd preferred
+        assert_eq!(pane.current_command, "fish");
         assert_eq!(pane.pane_id, "%1");
         assert_eq!(pane.prompt, "fix the bug");
         assert!(!pane.prompt_is_response);

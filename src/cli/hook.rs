@@ -89,26 +89,35 @@ fn clear_all_meta(pane: &str) {
 }
 
 /// Append an agent type to a comma-separated subagent list.
-fn append_subagent(current: &str, agent_type: &str) -> String {
+/// Append a subagent entry to the comma-separated `@pane_subagents` list.
+///
+/// Format: each entry is `agent_type:agent_id`. The id suffix lets
+/// `remove_subagent` match the exact instance on stop, and also lets the
+/// UI render a stable `#<id-prefix>` tag that does not shift when siblings
+/// stop.
+fn append_subagent(current: &str, agent_type: &str, agent_id: &str) -> String {
+    let entry = format!("{}:{}", agent_type, agent_id);
     if current.is_empty() {
-        agent_type.to_string()
+        entry
     } else {
-        format!("{},{}", current, agent_type)
+        format!("{},{}", current, entry)
     }
 }
 
-/// Remove the last occurrence of `agent_type` from a comma-separated list.
-/// Returns `None` if not found, `Some(new_list)` otherwise (empty string if list becomes empty).
-fn remove_last_subagent(current: &str, agent_type: &str) -> Option<String> {
-    if current.is_empty() {
+/// Remove the entry with the given `agent_id` from the comma-separated list.
+/// Returns `None` if `agent_id` is not present, `Some(new_list)` otherwise
+/// (empty string if the list becomes empty).
+fn remove_subagent(current: &str, agent_id: &str) -> Option<String> {
+    if current.is_empty() || agent_id.is_empty() {
         return None;
     }
+    let needle = format!(":{}", agent_id);
     let items: Vec<&str> = current.split(',').collect();
-    let last_idx = items.iter().rposition(|&s| s == agent_type)?;
+    let idx = items.iter().position(|entry| entry.ends_with(&needle))?;
     let filtered: Vec<&str> = items
         .iter()
         .enumerate()
-        .filter(|&(i, _)| i != last_idx)
+        .filter(|&(i, _)| i != idx)
         .map(|(_, s)| *s)
         .collect();
     Some(filtered.join(","))
@@ -274,14 +283,26 @@ fn handle_event(pane: &str, event: AgentEvent) -> i32 {
             }
             set_status(pane, "error");
         }
-        AgentEvent::SubagentStart { agent_type } => {
+        AgentEvent::SubagentStart {
+            agent_type,
+            agent_id,
+        } => {
+            // Claude Code always sends agent_id per the hooks spec; drop the
+            // event silently if it's missing so the tree never gains an
+            // untrackable entry.
+            let Some(id) = agent_id.as_deref().filter(|s| !s.is_empty()) else {
+                return 0;
+            };
             let current = tmux::get_pane_option_value(pane, "@pane_subagents");
-            let new_val = append_subagent(&current, &agent_type);
+            let new_val = append_subagent(&current, &agent_type, id);
             tmux::set_pane_option(pane, "@pane_subagents", &new_val);
         }
-        AgentEvent::SubagentStop { agent_type } => {
+        AgentEvent::SubagentStop { agent_id, .. } => {
+            let Some(id) = agent_id.as_deref().filter(|s| !s.is_empty()) else {
+                return 0;
+            };
             let current = tmux::get_pane_option_value(pane, "@pane_subagents");
-            match remove_last_subagent(&current, &agent_type) {
+            match remove_subagent(&current, id) {
                 None => return 0,
                 Some(new_val) if new_val.is_empty() => {
                     tmux::unset_pane_option(pane, "@pane_subagents");
@@ -425,66 +446,98 @@ mod tests {
 
     #[test]
     fn append_subagent_to_empty() {
-        assert_eq!(append_subagent("", "Explore"), "Explore");
+        assert_eq!(append_subagent("", "Explore", "sub-1"), "Explore:sub-1");
     }
 
     #[test]
     fn append_subagent_to_existing() {
-        assert_eq!(append_subagent("Explore", "Plan"), "Explore,Plan");
-    }
-
-    #[test]
-    fn append_subagent_multiple() {
-        let list = append_subagent("Explore,Plan", "Explore");
-        assert_eq!(list, "Explore,Plan,Explore");
-    }
-
-    // ─── remove_last_subagent tests ─────────────────────────────────
-
-    #[test]
-    fn remove_last_subagent_empty_list() {
-        assert_eq!(remove_last_subagent("", "Explore"), None);
-    }
-
-    #[test]
-    fn remove_last_subagent_not_found() {
-        assert_eq!(remove_last_subagent("Explore,Plan", "Bash"), None);
-    }
-
-    #[test]
-    fn remove_last_subagent_single_item() {
-        assert_eq!(remove_last_subagent("Explore", "Explore"), Some("".into()));
-    }
-
-    #[test]
-    fn remove_last_subagent_removes_last_occurrence() {
         assert_eq!(
-            remove_last_subagent("Explore,Plan,Explore", "Explore"),
-            Some("Explore,Plan".into())
+            append_subagent("Explore:sub-1", "Plan", "sub-2"),
+            "Explore:sub-1,Plan:sub-2"
         );
     }
 
     #[test]
-    fn remove_last_subagent_middle_item() {
+    fn append_subagent_same_type_parallel() {
+        // Two Explore subagents running in parallel must be stored as
+        // distinct entries — the ids disambiguate them.
+        let list = append_subagent("Explore:sub-1", "Explore", "sub-2");
+        assert_eq!(list, "Explore:sub-1,Explore:sub-2");
+    }
+
+    // ─── remove_subagent tests ──────────────────────────────────────
+
+    #[test]
+    fn remove_subagent_empty_list() {
+        assert_eq!(remove_subagent("", "sub-1"), None);
+    }
+
+    #[test]
+    fn remove_subagent_empty_id_is_noop() {
+        assert_eq!(remove_subagent("Explore:sub-1", ""), None);
+    }
+
+    #[test]
+    fn remove_subagent_id_not_found() {
+        assert_eq!(remove_subagent("Explore:sub-1,Plan:sub-2", "sub-9"), None);
+    }
+
+    #[test]
+    fn remove_subagent_single_item() {
+        assert_eq!(remove_subagent("Explore:sub-1", "sub-1"), Some("".into()));
+    }
+
+    #[test]
+    fn remove_subagent_first_item() {
         assert_eq!(
-            remove_last_subagent("Explore,Plan,Bash", "Plan"),
-            Some("Explore,Bash".into())
+            remove_subagent("Explore:sub-1,Plan:sub-2", "sub-1"),
+            Some("Plan:sub-2".into())
         );
     }
 
     #[test]
-    fn remove_last_subagent_first_item() {
+    fn remove_subagent_middle_item() {
         assert_eq!(
-            remove_last_subagent("Plan,Explore", "Plan"),
-            Some("Explore".into())
+            remove_subagent("Explore:sub-1,Plan:sub-2,Bash:sub-3", "sub-2"),
+            Some("Explore:sub-1,Bash:sub-3".into())
         );
     }
 
     #[test]
-    fn remove_last_subagent_all_same_removes_last() {
+    fn remove_subagent_last_item() {
         assert_eq!(
-            remove_last_subagent("Explore,Explore,Explore", "Explore"),
-            Some("Explore,Explore".into())
+            remove_subagent("Explore:sub-1,Plan:sub-2", "sub-2"),
+            Some("Explore:sub-1".into())
+        );
+    }
+
+    #[test]
+    fn remove_subagent_same_type_uses_id_not_position() {
+        // Regression: with two Explore subagents running in parallel, stopping
+        // the FIRST one (sub-1) must remove that specific entry, not the last
+        // occurrence. Old type-based remove_last_subagent got this wrong.
+        assert_eq!(
+            remove_subagent("Explore:sub-1,Explore:sub-2", "sub-1"),
+            Some("Explore:sub-2".into())
+        );
+    }
+
+    #[test]
+    fn remove_subagent_same_type_three_parallel() {
+        // Stop the middle one of three same-type parallel subagents.
+        assert_eq!(
+            remove_subagent("Explore:a,Explore:b,Explore:c", "b"),
+            Some("Explore:a,Explore:c".into())
+        );
+    }
+
+    #[test]
+    fn remove_subagent_ignores_id_collision_across_types() {
+        // The `:id` match must include the colon prefix so a type name ending
+        // with the id substring cannot match by accident.
+        assert_eq!(
+            remove_subagent("TrailingX:y,Explore:x", "x"),
+            Some("TrailingX:y".into())
         );
     }
 
@@ -724,32 +777,37 @@ mod tests {
     // ─── subagent lifecycle tests ───────────────────────────────────
 
     #[test]
-    fn subagent_lifecycle_two_start_one_stop_leaves_one() {
-        // Simulate: two subagents start, then one stops
-        let list = append_subagent("", "Explore");
-        assert_eq!(list, "Explore");
+    fn subagent_lifecycle_two_parallel_same_type_stop_first() {
+        // Regression for the parallel-same-type bug. Two Explore subagents
+        // start, then the FIRST one (sub-1) completes — id-based removal
+        // must leave sub-2 in place.
+        let list = append_subagent("", "Explore", "sub-1");
+        let list = append_subagent(&list, "Explore", "sub-2");
+        assert_eq!(list, "Explore:sub-1,Explore:sub-2");
 
-        let list = append_subagent(&list, "Explore");
-        assert_eq!(list, "Explore,Explore");
+        let remaining = remove_subagent(&list, "sub-1").unwrap();
+        assert_eq!(remaining, "Explore:sub-2");
 
-        // First one completes
-        let remaining = remove_last_subagent(&list, "Explore").unwrap();
-        assert_eq!(remaining, "Explore");
-
-        // Second one completes
-        let remaining = remove_last_subagent(&remaining, "Explore").unwrap();
+        let remaining = remove_subagent(&remaining, "sub-2").unwrap();
         assert_eq!(remaining, "");
     }
 
     #[test]
     fn subagent_lifecycle_mixed_types() {
-        let list = append_subagent("", "Explore");
-        let list = append_subagent(&list, "Plan");
-        assert_eq!(list, "Explore,Plan");
+        let list = append_subagent("", "Explore", "sub-1");
+        let list = append_subagent(&list, "Plan", "sub-2");
+        assert_eq!(list, "Explore:sub-1,Plan:sub-2");
 
         // Plan completes, Explore still running
-        let remaining = remove_last_subagent(&list, "Plan").unwrap();
-        assert_eq!(remaining, "Explore");
+        let remaining = remove_subagent(&list, "sub-2").unwrap();
+        assert_eq!(remaining, "Explore:sub-1");
+    }
+
+    #[test]
+    fn subagent_lifecycle_stop_unknown_id_is_noop() {
+        // A stop with an unknown id should leave the list untouched.
+        let list = append_subagent("", "Explore", "sub-1");
+        assert_eq!(remove_subagent(&list, "sub-999"), None);
     }
 
     // ─── should_update_cwd tests (worktree subagent bug) ───────────
@@ -765,19 +823,19 @@ mod tests {
         // Subagent is running (possibly in a worktree) → do NOT overwrite
         // parent's cwd, because the event may come from the subagent
         // which inherits the same $TMUX_PANE.
-        assert!(!should_update_cwd("Explore"));
+        assert!(!should_update_cwd("Explore:sub-1"));
     }
 
     #[test]
     fn should_not_update_cwd_when_multiple_subagents_active() {
-        assert!(!should_update_cwd("Explore,Plan"));
+        assert!(!should_update_cwd("Explore:sub-1,Plan:sub-2"));
     }
 
     #[test]
     fn should_update_cwd_lifecycle_subagent_start_then_stop() {
         // Full lifecycle: subagent starts → blocks cwd update → subagent stops → allows again
         let no_subagents = "";
-        let one_subagent = append_subagent(no_subagents, "Explore");
+        let one_subagent = append_subagent(no_subagents, "Explore", "sub-1");
 
         // Before subagent: cwd update allowed
         assert!(should_update_cwd(no_subagents));
@@ -786,23 +844,23 @@ mod tests {
         assert!(!should_update_cwd(&one_subagent));
 
         // After subagent stops: cwd update allowed again
-        let after_stop = remove_last_subagent(&one_subagent, "Explore").unwrap();
+        let after_stop = remove_subagent(&one_subagent, "sub-1").unwrap();
         assert!(should_update_cwd(&after_stop));
     }
 
     #[test]
     fn should_update_cwd_nested_subagents_require_all_stopped() {
         // Two subagents running: cwd blocked until BOTH stop
-        let list = append_subagent("", "Explore");
-        let list = append_subagent(&list, "Plan");
+        let list = append_subagent("", "Explore", "sub-1");
+        let list = append_subagent(&list, "Plan", "sub-2");
         assert!(!should_update_cwd(&list));
 
         // One stops: still blocked
-        let list = remove_last_subagent(&list, "Plan").unwrap();
+        let list = remove_subagent(&list, "sub-2").unwrap();
         assert!(!should_update_cwd(&list));
 
         // Both stopped: allowed
-        let list = remove_last_subagent(&list, "Explore").unwrap();
+        let list = remove_subagent(&list, "sub-1").unwrap();
         assert!(should_update_cwd(&list));
     }
 

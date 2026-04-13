@@ -1,11 +1,10 @@
 #[allow(dead_code, unused_imports)]
 mod test_helpers;
 
-use indoc::indoc;
 use test_helpers::*;
 use tmux_agent_sidebar::activity::{ActivityEntry, TaskProgress, TaskStatus};
 use tmux_agent_sidebar::group::PaneGitInfo;
-use tmux_agent_sidebar::state::{AgentFilter, Focus};
+use tmux_agent_sidebar::state::{Focus, StatusFilter};
 use tmux_agent_sidebar::tmux::{
     AgentType, PaneInfo, PaneStatus, PermissionMode, SessionInfo, WindowInfo,
 };
@@ -29,15 +28,78 @@ fn snapshot_single_agent_idle_ui() {
     state.rebuild_row_targets();
 
     let output = render_to_string(&mut state, 28, 25);
-    let expected = indoc! {r#"
- All  ●0  ◐0  ○1  ✕0       ▼
-│ ○ claude                 │
-│   Waiting for prompt…    │
-╰──────────────────────────╯
-╭ Activity │ Git ──────────╮
-│      No activity yet     │
-╰──────────────────────────╯"#};
-    assert_eq!(output, expected);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●0  ◐0  ○1  ✕0
+                             — ▾
+    ┃ ○ claude
+        Waiting for prompt…
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
+}
+
+#[test]
+fn snapshot_version_banner_replaces_repo_filter_ui() {
+    let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
+    let mut state = make_state(vec![SessionInfo {
+        session_name: "main".into(),
+        windows: vec![WindowInfo {
+            window_id: "@1".into(),
+            window_name: "project".into(),
+            window_active: true,
+            auto_rename: false,
+            panes: vec![pane.clone()],
+        }],
+    }]);
+    state.repo_groups = vec![make_repo_group("project", vec![pane])];
+    state.version_notice = Some(tmux_agent_sidebar::version::UpdateNotice {
+        local_version: "0.2.6".into(),
+        latest_version: "0.2.7".into(),
+    });
+    state.rebuild_row_targets();
+
+    let output = render_to_string(&mut state, 28, 25);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●0  ◐0  ○1  ✕0
+             new release v0.2.7!
+    ┃ ○ claude
+        Waiting for prompt…
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
+}
+
+#[test]
+fn snapshot_version_banner_does_not_duplicate_in_scroll_area() {
+    let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
+    let mut state = make_state(vec![SessionInfo {
+        session_name: "main".into(),
+        windows: vec![WindowInfo {
+            window_id: "@1".into(),
+            window_name: "project".into(),
+            window_active: true,
+            auto_rename: false,
+            panes: vec![pane.clone()],
+        }],
+    }]);
+    state.repo_groups = vec![make_repo_group("project", vec![pane])];
+    state.version_notice = Some(tmux_agent_sidebar::version::UpdateNotice {
+        local_version: "0.2.6".into(),
+        latest_version: "0.2.7".into(),
+    });
+    state.bottom_panel_height = 0;
+    state.rebuild_row_targets();
+
+    let output = render_to_string(&mut state, 28, 10);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●0  ◐0  ○1  ✕0
+             new release v0.2.7!
+    project
+    ┃ ○ claude
+        Waiting for prompt…
+    ");
 }
 
 #[test]
@@ -59,15 +121,15 @@ fn snapshot_single_agent_running_with_elapsed() {
     state.rebuild_row_targets();
 
     let output = render_to_string(&mut state, 28, 25);
-    let expected = indoc! {r#"
- All  ●1  ◐0  ○0  ✕0       ▼
-╭ dotfiles ────────────────╮
-│ ● claude             2m5s│
-╰──────────────────────────╯
-╭ Activity │ Git ──────────╮
-│      No activity yet     │
-╰──────────────────────────╯"#};
-    assert_eq!(output, expected);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●1  ◐0  ○0  ✕0
+                             — ▾
+    dotfiles
+    ┃ ● claude              2m5s
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
 }
 
 #[test]
@@ -88,8 +150,15 @@ fn running_spinner_different_frame() {
     state.spinner_frame = 0;
 
     let output = render_to_string(&mut state, 28, 25);
-    assert!(output.contains("●"));
-    assert!(output.contains("claude"));
+    insta::assert_snapshot!(output, @"
+     ≡1  ●1  ◐0  ○0  ✕0
+                             — ▾
+    project
+    ┃ ● claude
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
 }
 
 #[test]
@@ -111,15 +180,15 @@ fn snapshot_agent_with_prompt_ui() {
     state.rebuild_row_targets();
 
     let output = render_to_string(&mut state, 28, 25);
-    let expected = indoc! {r#"
- All  ●0  ◐0  ○1  ✕0       ▼
-│ ○ claude                 │
-│   fix the bug            │
-╰──────────────────────────╯
-╭ Activity │ Git ──────────╮
-│      No activity yet     │
-╰──────────────────────────╯"#};
-    assert_eq!(output, expected);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●0  ◐0  ○1  ✕0
+                             — ▾
+    ┃ ○ claude
+        fix the bug
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
 }
 
 #[test]
@@ -141,17 +210,17 @@ fn snapshot_agent_with_japanese_prompt_ui() {
     state.rebuild_row_targets();
 
     let output = render_to_string(&mut state, 28, 27);
-    let expected = indoc! {r#"
- All  ●1  ◐0  ○0  ✕0       ▼
-│ ● claude                 │
-│   こ れ っ て 今 1時 間 経 っ て い │
-│   る け ど 、 起 動 し て 確 認 し  │
-│   て も 問 題 な い ？          │
-╰──────────────────────────╯
-╭ Activity │ Git ──────────╮
-│      No activity yet     │
-╰──────────────────────────╯"#};
-    assert_eq!(output, expected);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●1  ◐0  ○0  ✕0
+                             — ▾
+    ┃ ● claude
+        こ れ っ て 今 1時 間 経 っ て い
+        る け ど 、 起 動 し て 確 認 し て
+        も 問 題 な い ？
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
 }
 
 #[test]
@@ -163,6 +232,7 @@ fn snapshot_two_agents_same_window_ui() {
         attention: false,
         agent: AgentType::Claude,
         path: "/home/user/project".into(),
+        current_command: String::new(),
         prompt: "fix the bug".into(),
         prompt_is_response: false,
         started_at: None,
@@ -180,6 +250,7 @@ fn snapshot_two_agents_same_window_ui() {
         attention: false,
         agent: AgentType::Codex,
         path: "/home/user/project".into(),
+        current_command: String::new(),
         prompt: String::new(),
         prompt_is_response: false,
         started_at: None,
@@ -205,15 +276,15 @@ fn snapshot_two_agents_same_window_ui() {
     state.rebuild_row_targets();
 
     let output = render_to_string(&mut state, 28, 25);
-    let expected = indoc! {r#"
- All  ●1  ◐0  ○1  ✕0       ▼
-│ ● claude                 │
-│   fix the bug            │
-│ ──────────────────────── │
-╭ Activity │ Git ──────────╮
-│      No activity yet     │
-╰──────────────────────────╯"#};
-    assert_eq!(output, expected);
+    insta::assert_snapshot!(output, @"
+     ≡2  ●1  ◐0  ○1  ✕0
+                             — ▾
+    ┃ ● claude
+        fix the bug
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
 }
 
 #[test]
@@ -251,15 +322,15 @@ fn snapshot_two_windows_ui() {
     state.rebuild_row_targets();
 
     let output = render_to_string(&mut state, 28, 25);
-    let expected = indoc! {r#"
- All  ●1  ◐0  ○1  ✕0       ▼
-│ ● claude                 │
-╰──────────────────────────╯
-╭ project-b ───────────────╮
-╭ Activity │ Git ──────────╮
-│      No activity yet     │
-╰──────────────────────────╯"#};
-    assert_eq!(output, expected);
+    insta::assert_snapshot!(output, @"
+     ≡2  ●1  ◐0  ○1  ✕0
+                             — ▾
+    project-a
+    ┃ ● claude
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
 }
 
 #[test]
@@ -300,15 +371,15 @@ fn snapshot_multi_session_ui() {
     state.rebuild_row_targets();
 
     let output = render_to_string(&mut state, 28, 25);
-    let expected = indoc! {r#"
- All  ●1  ◐0  ○1  ✕0       ▼
-│ ● claude                 │
-╰──────────────────────────╯
-╭ api ─────────────────────╮
-╭ Activity │ Git ──────────╮
-│      No activity yet     │
-╰──────────────────────────╯"#};
-    assert_eq!(output, expected);
+    insta::assert_snapshot!(output, @"
+     ≡2  ●1  ◐0  ○1  ✕0
+                             — ▾
+    dotfiles
+    ┃ ● claude
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
 }
 
 #[test]
@@ -330,15 +401,15 @@ fn snapshot_wait_reason_ui() {
     state.rebuild_row_targets();
 
     let output = render_to_string(&mut state, 28, 25);
-    let expected = indoc! {r#"
- All  ●0  ◐1  ○0  ✕0       ▼
-│ ◐ claude                 │
-│   permission required    │
-╰──────────────────────────╯
-╭ Activity │ Git ──────────╮
-│      No activity yet     │
-╰──────────────────────────╯"#};
-    assert_eq!(output, expected);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●0  ◐1  ○0  ✕0
+                             — ▾
+    ┃ ◐ claude
+        permission required
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
 }
 
 #[test]
@@ -360,15 +431,15 @@ fn snapshot_auto_rename_window_title_ui() {
     state.rebuild_row_targets();
 
     let output = render_to_string(&mut state, 28, 25);
-    let expected = indoc! {r#"
- All  ●0  ◐0  ○1  ✕0       ▼
-│ ○ claude                 │
-│   Waiting for prompt…    │
-╰──────────────────────────╯
-╭ Activity │ Git ──────────╮
-│      No activity yet     │
-╰──────────────────────────╯"#};
-    assert_eq!(output, expected);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●0  ◐0  ○1  ✕0
+                             — ▾
+    ┃ ○ claude
+        Waiting for prompt…
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
 }
 
 #[test]
@@ -406,20 +477,20 @@ fn snapshot_activity_log_ui() {
     ];
 
     let output = render_to_string(&mut state, 28, 25);
-    let expected = indoc! {r#"
- All  ●1  ◐0  ○0  ✕0       ▼
-╭ project ─────────────────╮
-│ ● claude                 │
-╰──────────────────────────╯
-╭ Activity │ Git ──────────╮
-│10:32                 Edit│
-│  src/main.rs             │
-│10:31                 Bash│
-│  cargo build             │
-│10:30                 Read│
-│  Cargo.toml              │
-╰──────────────────────────╯"#};
-    assert_eq!(output, expected);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●1  ◐0  ○0  ✕0
+                             — ▾
+    project
+    ┃ ● claude
+    ╭ Activity │ Git ──────────╮
+    │10:32                 Edit│
+    │  src/main.rs             │
+    │10:31                 Bash│
+    │  cargo build             │
+    │10:30                 Read│
+    │  Cargo.toml              │
+    ╰──────────────────────────╯
+    ");
 }
 
 #[test]
@@ -445,18 +516,18 @@ fn snapshot_activity_log_long_label_ui() {
     }];
 
     let output = render_to_string(&mut state, 28, 25);
-    let expected = indoc! {r#"
- All  ●1  ◐0  ○0  ✕0       ▼
-╭ project ─────────────────╮
-│ ● claude                 │
-╰──────────────────────────╯
-╭ Activity │ Git ──────────╮
-│10:32                 Read│
-│  config/tmux-agent-sideba│
-│  r-rs/src/very-long-filen│
-│  ame.rs                  │
-╰──────────────────────────╯"#};
-    assert_eq!(output, expected);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●1  ◐0  ○0  ✕0
+                             — ▾
+    project
+    ┃ ● claude
+    ╭ Activity │ Git ──────────╮
+    │10:32                 Read│
+    │  config/tmux-agent-sideba│
+    │  r-rs/src/very-long-filen│
+    │  ame.rs                  │
+    ╰──────────────────────────╯
+    ");
 }
 
 #[test]
@@ -480,17 +551,17 @@ fn snapshot_prompt_wrapping_ui() {
     state.rebuild_row_targets();
 
     let output = render_to_string(&mut state, 28, 27);
-    let expected = indoc! {r#"
- All  ●0  ◐0  ○1  ✕0       ▼
-│ ○ claude                 │
-│   Please fix the         │
-│   authentication bug in  │
-│   the login flow that ca…│
-╰──────────────────────────╯
-╭ Activity │ Git ──────────╮
-│      No activity yet     │
-╰──────────────────────────╯"#};
-    assert_eq!(output, expected);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●0  ◐0  ○1  ✕0
+                             — ▾
+    ┃ ○ claude
+        Please fix the
+        authentication bug in
+        the login flow that cau…
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
 }
 
 #[test]
@@ -511,16 +582,16 @@ fn snapshot_selected_unfocused_ui() {
     state.sidebar_focused = false;
 
     let output = render_to_string(&mut state, 28, 26);
-    let expected = indoc! {r#"
- All  ●0  ◐0  ○1  ✕0       ▼
-╭ project ─────────────────╮
-│ ○ claude                 │
-│   Waiting for prompt…    │
-╰──────────────────────────╯
-╭ Activity │ Git ──────────╮
-│      No activity yet     │
-╰──────────────────────────╯"#};
-    assert_eq!(output, expected);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●0  ◐0  ○1  ✕0
+                             — ▾
+    project
+    ┃ ○ claude
+        Waiting for prompt…
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
 }
 
 #[test]
@@ -542,15 +613,15 @@ fn snapshot_error_state_ui() {
     state.rebuild_row_targets();
 
     let output = render_to_string(&mut state, 28, 25);
-    let expected = indoc! {r#"
- All  ●0  ◐0  ○0  ✕1       ▼
-│ ✕ claude                 │
-│   something broke        │
-╰──────────────────────────╯
-╭ Activity │ Git ──────────╮
-│      No activity yet     │
-╰──────────────────────────╯"#};
-    assert_eq!(output, expected);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●0  ◐0  ○0  ✕1
+                             — ▾
+    ┃ ✕ claude
+        something broke
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
 }
 
 #[test]
@@ -572,15 +643,15 @@ fn snapshot_narrow_width_ui() {
     state.rebuild_row_targets();
 
     let output = render_to_string(&mut state, 18, 25);
-    let expected = indoc! {r#"
- All  ●0  ◐0  ○1
-│ ○ claude       │
-│   hello world  │
-╰────────────────╯
-╭ Activity │ Git ╮
-│ No activity yet│
-╰────────────────╯"#};
-    assert_eq!(output, expected);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●0  ◐0  ○1  ✕
+                   — ▾
+    ┃ ○ claude
+        hello world
+    ╭ Activity │ Git ╮
+    │ No activity yet│
+    ╰────────────────╯
+    ");
 }
 
 /// Create a state with a dummy session so draw() doesn't show "No agent panes found"
@@ -622,20 +693,16 @@ fn snapshot_worktree_branch_ui() {
     }]);
 
     let output = render_to_string(&mut state, 28, 26);
-    assert!(
-        output.contains("+ feature/sidebar"),
-        "worktree should show '+ ' prefix before branch name"
-    );
-    let expected = indoc! {r#"
- All  ●1  ◐0  ○0  ✕0       ▼
-│ ● claude                 │
-│   + feature/sidebar      │
-│   fix bug                │
-╰──────────────────────────╯
-╭ Activity │ Git ──────────╮
-│      No activity yet     │
-╰──────────────────────────╯"#};
-    assert_eq!(output, expected);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●1  ◐0  ○0  ✕0
+                             — ▾
+    ┃ ● claude
+    ┃   + feature/sidebar
+        fix bug
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
 }
 
 #[test]
@@ -654,14 +721,42 @@ fn snapshot_worktree_long_branch_truncated_ui() {
     }]);
 
     let output = render_to_string(&mut state, 28, 25);
-    assert!(
-        output.contains("+ feature/"),
-        "worktree marker should appear even when truncated"
-    );
-    assert!(
-        output.contains("…"),
-        "long worktree branch should be truncated with ellipsis"
-    );
+    insta::assert_snapshot!(output, @"
+     ≡1  ●0  ◐0  ○1  ✕0
+                             — ▾
+    ┃   + feature/very-long-bra…
+        Waiting for prompt…
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
+}
+
+#[test]
+fn snapshot_long_branch_with_ports_ui() {
+    let pane = make_pane(AgentType::Claude, PaneStatus::Running);
+    let git_info = PaneGitInfo {
+        repo_root: Some("/home/user/project".into()),
+        branch: Some("feature/sidebar/really-long-branch-name-that-should-truncate".into()),
+        is_worktree: false,
+        worktree_name: None,
+    };
+    let mut state = make_state_with_groups(vec![tmux_agent_sidebar::group::RepoGroup {
+        name: "project".into(),
+        has_focus: true,
+        panes: vec![(pane, git_info)],
+    }]);
+    state.set_pane_ports("%1", vec![3000, 5173]);
+
+    let output = render_to_string(&mut state, 40, 24);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●1  ◐0  ○0  ✕0
+                                         — ▾
+    ┃   feature/sidebar/really…  :3000, 5173
+    ╭ Activity │ Git ──────────────────────╮
+    │            No activity yet           │
+    ╰──────────────────────────────────────╯
+    ");
 }
 
 // ─── Task Progress Variations ─────────────────────────────────────
@@ -671,62 +766,80 @@ fn snapshot_task_progress_partial_ui() {
     let mut pane = make_pane(AgentType::Claude, PaneStatus::Running);
     pane.prompt = "working".into();
     let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
-    state.pane_task_progress.insert(
-        "%1".into(),
-        TaskProgress {
+    state.set_pane_task_progress(
+        "%1",
+        Some(TaskProgress {
             tasks: vec![
                 ("Task A".into(), TaskStatus::Completed),
                 ("Task B".into(), TaskStatus::InProgress),
                 ("Task C".into(), TaskStatus::Pending),
             ],
-        },
+        }),
     );
 
     let output = render_to_string(&mut state, 28, 25);
-    assert!(
-        output.contains("✔◼◻"),
-        "should show completed/in-progress/pending icons"
-    );
-    assert!(output.contains("1/3"), "should show 1 of 3 completed");
+    insta::assert_snapshot!(output, @"
+     ≡1  ●1  ◐0  ○0  ✕0
+                             — ▾
+        ✔◼◻ 1/3
+        working
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
 }
 
 #[test]
 fn snapshot_task_progress_all_completed_ui() {
     let pane = make_pane(AgentType::Claude, PaneStatus::Running);
     let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
-    state.pane_task_progress.insert(
-        "%1".into(),
-        TaskProgress {
+    state.set_pane_task_progress(
+        "%1",
+        Some(TaskProgress {
             tasks: vec![
                 ("A".into(), TaskStatus::Completed),
                 ("B".into(), TaskStatus::Completed),
             ],
-        },
+        }),
     );
 
     let output = render_to_string(&mut state, 28, 25);
-    assert!(output.contains("✔✔"), "should show all completed icons");
-    assert!(output.contains("2/2"), "should show 2 of 2 completed");
+    insta::assert_snapshot!(output, @"
+     ≡1  ●1  ◐0  ○0  ✕0
+                             — ▾
+    ┃ ● claude
+        ✔✔ 2/2
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
 }
 
 #[test]
 fn snapshot_task_progress_all_pending_ui() {
     let pane = make_pane(AgentType::Claude, PaneStatus::Running);
     let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
-    state.pane_task_progress.insert(
-        "%1".into(),
-        TaskProgress {
+    state.set_pane_task_progress(
+        "%1",
+        Some(TaskProgress {
             tasks: vec![
                 ("A".into(), TaskStatus::Pending),
                 ("B".into(), TaskStatus::Pending),
                 ("C".into(), TaskStatus::Pending),
             ],
-        },
+        }),
     );
 
     let output = render_to_string(&mut state, 28, 25);
-    assert!(output.contains("◻◻◻"), "should show all pending icons");
-    assert!(output.contains("0/3"), "should show 0 of 3 completed");
+    insta::assert_snapshot!(output, @"
+     ≡1  ●1  ◐0  ○0  ✕0
+                             — ▾
+    ┃ ● claude
+        ◻◻◻ 0/3
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
 }
 
 // ─── Combined Elements ────────────────────────────────────────────
@@ -751,42 +864,32 @@ fn snapshot_all_elements_combined_ui() {
         has_focus: true,
         panes: vec![(pane, git_info)],
     }]);
-    state.pane_task_progress.insert(
-        "%1".into(),
-        TaskProgress {
+    state.set_pane_task_progress(
+        "%1",
+        Some(TaskProgress {
             tasks: vec![
                 ("A".into(), TaskStatus::Completed),
                 ("B".into(), TaskStatus::InProgress),
             ],
-        },
+        }),
     );
 
     let output = render_to_string(&mut state, 30, 32);
-    assert!(output.contains("claude auto"), "should show Auto badge");
-    assert!(output.contains("main"), "should show branch");
-    assert!(output.contains("✔◼"), "should show task progress");
-    assert!(output.contains("├ "), "should show subagent tree");
-    assert!(output.contains("└ "), "should show last subagent");
-    assert!(
-        output.contains("permission required"),
-        "should show wait reason"
-    );
-    assert!(output.contains("fixing the bug"), "should show prompt");
-    let expected = indoc! {r#"
- All  ●0  ◐1  ○0  ✕0         ▼
-╭ project ───────────────────╮
-│ ◐ claude auto              │
-│   main                     │
-│   ✔◼ 1/2                   │
-│   ├ Explore #1             │
-│   └ Plan #2                │
-│   permission required      │
-│   fixing the bug           │
-╰────────────────────────────╯
-╭ Activity │ Git ────────────╮
-│       No activity yet      │
-╰────────────────────────────╯"#};
-    assert_eq!(output, expected);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●0  ◐1  ○0  ✕0
+                               — ▾
+    project
+    ┃ ◐ claude auto
+    ┃   main
+        ✔◼ 1/2
+        ├ Explore #1
+        └ Plan #2
+        permission required
+        fixing the bug
+    ╭ Activity │ Git ────────────╮
+    │       No activity yet      │
+    ╰────────────────────────────╯
+    ");
 }
 
 // ─── Response Display ─────────────────────────────────────────────
@@ -799,18 +902,17 @@ fn snapshot_response_japanese_ui() {
     let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
 
     let output = render_to_string(&mut state, 30, 27);
-    assert!(output.contains("▶"), "should show response arrow");
-    let expected = indoc! {r#"
- All  ●0  ◐0  ○1  ✕0         ▼
-│ ○ claude                   │
-│   ▶ 修 正 が 完 了 し ま し た 。 テ  │
-│     ス ト も 全 て 通 っ て い ま す  │
-│     。                      │
-╰────────────────────────────╯
-╭ Activity │ Git ────────────╮
-│       No activity yet      │
-╰────────────────────────────╯"#};
-    assert_eq!(output, expected);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●0  ◐0  ○1  ✕0
+                               — ▾
+    project
+    ┃ ○ claude
+      ▶ 修 正 が 完 了 し ま し た 。 テ ス ト
+        も 全 て 通 っ て い ま す 。
+    ╭ Activity │ Git ────────────╮
+    │       No activity yet      │
+    ╰────────────────────────────╯
+    ");
 }
 
 // ─── Three Groups with Focus ─────────────────────────────────────
@@ -835,26 +937,21 @@ fn snapshot_three_groups_middle_focused_ui() {
     state.focused_pane_id = Some("%2".into());
 
     let output = render_to_string(&mut state, 28, 33);
-    assert!(output.contains("repo-a"), "should show first group");
-    assert!(output.contains("repo-b"), "should show second group");
-    assert!(output.contains("repo-c"), "should show third group");
-    let expected = indoc! {r#"
- All  ●1  ◐0  ○2  ✕0       ▼
-╭ repo-a ──────────────────╮
-│ ● claude                 │
-╰──────────────────────────╯
-╭ repo-b ──────────────────╮
-│ ○ codex                  │
-│   Waiting for prompt…    │
-╰──────────────────────────╯
-╭ repo-c ──────────────────╮
-│ ○ claude                 │
-│   Waiting for prompt…    │
-╰──────────────────────────╯
-╭ Activity │ Git ──────────╮
-│      No activity yet     │
-╰──────────────────────────╯"#};
-    assert_eq!(output, expected);
+    insta::assert_snapshot!(output, @"
+     ≡3  ●1  ◐0  ○2  ✕0
+                             — ▾
+    repo-a
+      ● claude
+    repo-b
+    ┃ ○ codex
+        Waiting for prompt…
+    repo-c
+      ○ claude
+        Waiting for prompt…
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
 }
 
 // ─── PermissionMode Badges ────────────────────────────────────────
@@ -867,10 +964,15 @@ fn snapshot_bypass_all_badge_ui() {
     let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
 
     let output = render_to_string(&mut state, 28, 25);
-    assert!(
-        output.contains("claude !"),
-        "BypassPermissions should show ! badge"
-    );
+    insta::assert_snapshot!(output, @"
+     ≡1  ●1  ◐0  ○0  ✕0
+                             — ▾
+    project
+    ┃ ● claude !
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
 }
 
 #[test]
@@ -881,10 +983,84 @@ fn snapshot_full_auto_badge_ui() {
     let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
 
     let output = render_to_string(&mut state, 28, 25);
-    assert!(
-        output.contains("claude auto"),
-        "Auto should show auto badge"
-    );
+    insta::assert_snapshot!(output, @"
+     ≡1  ●1  ◐0  ○0  ✕0
+                             — ▾
+    project
+    ┃ ● claude auto
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
+}
+
+#[test]
+fn snapshot_plan_badge_ui() {
+    let mut pane = make_pane(AgentType::Claude, PaneStatus::Running);
+    pane.permission_mode = PermissionMode::Plan;
+
+    let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
+
+    let output = render_to_string(&mut state, 28, 25);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●1  ◐0  ○0  ✕0
+                             — ▾
+    project
+    ┃ ● claude plan
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
+}
+
+#[test]
+fn snapshot_accept_edits_badge_ui() {
+    let mut pane = make_pane(AgentType::Claude, PaneStatus::Running);
+    pane.permission_mode = PermissionMode::AcceptEdits;
+
+    let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
+
+    let output = render_to_string(&mut state, 28, 25);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●1  ◐0  ○0  ✕0
+                             — ▾
+    project
+    ┃ ● claude edit
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
+}
+
+#[test]
+fn snapshot_response_with_branch_ui() {
+    let mut pane = make_pane(AgentType::Claude, PaneStatus::Idle);
+    pane.prompt = "Done. All tests are green.".into();
+    pane.prompt_is_response = true;
+    let git_info = PaneGitInfo {
+        repo_root: Some("/home/user/project".into()),
+        branch: Some("feature/ui-v2".into()),
+        is_worktree: false,
+        worktree_name: None,
+    };
+    let mut state = make_state_with_groups(vec![tmux_agent_sidebar::group::RepoGroup {
+        name: "project".into(),
+        has_focus: true,
+        panes: vec![(pane, git_info)],
+    }]);
+
+    let output = render_to_string(&mut state, 34, 27);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●0  ◐0  ○1  ✕0
+                                   — ▾
+    project
+    ┃ ○ claude
+    ┃   feature/ui-v2
+      ▶ Done. All tests are green.
+    ╭ Activity │ Git ────────────────╮
+    │         No activity yet        │
+    ╰────────────────────────────────╯
+    ");
 }
 
 // ─── Multiple Wait Reasons ────────────────────────────────────────
@@ -897,10 +1073,15 @@ fn snapshot_wait_reason_elicitation_ui() {
     let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
 
     let output = render_to_string(&mut state, 28, 25);
-    assert!(
-        output.contains("waiting for selection"),
-        "elicitation should show selection label"
-    );
+    insta::assert_snapshot!(output, @"
+     ≡1  ●0  ◐1  ○0  ✕0
+                             — ▾
+    ┃ ◐ claude
+        waiting for selection
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
 }
 
 #[test]
@@ -911,10 +1092,15 @@ fn snapshot_wait_reason_unknown_ui() {
     let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
 
     let output = render_to_string(&mut state, 28, 25);
-    assert!(
-        output.contains("some_future_reason"),
-        "unknown wait reason should show raw value"
-    );
+    insta::assert_snapshot!(output, @"
+     ≡1  ●0  ◐1  ○0  ✕0
+                             — ▾
+    ┃ ◐ claude
+        some_future_reason
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
 }
 
 // ─── Permission Denied ───────────────────────────────────────────
@@ -927,10 +1113,15 @@ fn snapshot_wait_reason_permission_denied_ui() {
     let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
 
     let output = render_to_string(&mut state, 28, 25);
-    assert!(
-        output.contains("permission denied"),
-        "permission_denied should show human-readable label"
-    );
+    insta::assert_snapshot!(output, @"
+     ≡1  ●0  ◐1  ○0  ✕0
+                             — ▾
+    ┃ ◐ claude
+        permission denied
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
 }
 
 // ─── Worktree Name Display ──────────────────────────────────────
@@ -951,10 +1142,15 @@ fn snapshot_worktree_with_name_ui() {
     }]);
 
     let output = render_to_string(&mut state, 28, 25);
-    assert!(
-        output.contains("+ auth-wt: feat/auth"),
-        "worktree with different name should show 'name: branch' format"
-    );
+    insta::assert_snapshot!(output, @"
+     ≡1  ●1  ◐0  ○0  ✕0
+                             — ▾
+    ┃ ● claude
+    ┃   + auth-wt: feat/auth
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
 }
 
 #[test]
@@ -973,14 +1169,15 @@ fn snapshot_worktree_name_same_as_branch_ui() {
     }]);
 
     let output = render_to_string(&mut state, 28, 25);
-    assert!(
-        output.contains("+ feat/auth"),
-        "worktree with same name as branch should show just branch"
-    );
-    assert!(
-        !output.contains("feat/auth: feat/auth"),
-        "should not duplicate name and branch"
-    );
+    insta::assert_snapshot!(output, @"
+     ≡1  ●1  ◐0  ○0  ✕0
+                             — ▾
+    ┃ ● claude
+    ┃   + feat/auth
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
 }
 
 // ─── Activity Log Tool Types ──────────────────────────────────────
@@ -1029,10 +1226,28 @@ fn snapshot_activity_all_tool_types_ui() {
     ];
 
     let output = render_to_string(&mut state, 28, 25);
-    assert!(output.contains("Agent"), "should show Agent tool");
-    assert!(output.contains("Skill"), "should show Skill tool");
-    assert!(output.contains("ToolSearch"), "should show ToolSearch tool");
-    assert!(output.contains("TaskCreate"), "should show TaskCreate tool");
+    insta::assert_snapshot!(output, @"
+     ≡1  ●1  ◐0  ○0  ✕0
+                             — ▾
+    project
+    ┃ ● claude
+    ╭ Activity │ Git ──────────╮
+    │10:07                Agent│
+    │  Explore codebase        │
+    │10:06                Skill│
+    │  commit                  │
+    │10:05           ToolSearch│
+    │  select:Read             │
+    │10:04           TaskCreate│
+    │  #1 Fix bug              │
+    │10:03             WebFetch│
+    │  docs.rs/ratatui         │
+    │10:02                 Grep│
+    │  run_git                 │
+    │10:01                Write│
+    │  new_file.rs             │
+    ╰──────────────────────────╯
+    ");
 }
 
 // ─── Focus Transitions ───────────────────────────────────────────
@@ -1050,8 +1265,16 @@ fn snapshot_focus_activity_log_ui() {
     }];
 
     let output = render_to_string(&mut state, 28, 25);
-    // Agent should NOT have selection background when focus is on activity
-    assert!(output.contains("claude"), "agent should still be visible");
+    insta::assert_snapshot!(output, @"
+     ≡1  ●1  ◐0  ○0  ✕0
+                             — ▾
+    project
+    ┃ ● claude
+    ╭ Activity │ Git ──────────╮
+    │10:00                 Read│
+    │  file.rs                 │
+    ╰──────────────────────────╯
+    ");
 }
 
 // ─── Right Border Integrity ──────────────────────────────────────
@@ -1078,6 +1301,7 @@ fn right_border_all_permission_modes_and_agents() {
     let modes_and_badges: &[(PermissionMode, &str)] = &[
         (PermissionMode::Default, ""),
         (PermissionMode::Auto, "auto"),
+        (PermissionMode::DontAsk, "dontAsk"),
         (PermissionMode::Plan, "plan"),
         (PermissionMode::AcceptEdits, "edit"),
         (PermissionMode::BypassPermissions, "!"),
@@ -1123,10 +1347,15 @@ fn snapshot_filter_bar_shows_counts() {
 
     let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane1, pane2])]);
     let output = render_to_string(&mut state, 30, 25);
-    assert!(output.contains("●1"), "should show 1 running");
-    assert!(output.contains("○1"), "should show 1 idle");
-    assert!(output.contains("◐0"), "should show 0 waiting");
-    assert!(output.contains("✕0"), "should show 0 error");
+    insta::assert_snapshot!(output, @"
+     ≡2  ●1  ◐0  ○1  ✕0
+                               — ▾
+    project
+    ┃ ● claude
+    ╭ Activity │ Git ────────────╮
+    │       No activity yet      │
+    ╰────────────────────────────╯
+    ");
 }
 
 #[test]
@@ -1141,10 +1370,17 @@ fn snapshot_filter_running_hides_idle() {
     };
 
     let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane1, pane2])]);
-    state.global.agent_filter = AgentFilter::Running;
+    state.global.status_filter = StatusFilter::Running;
     let output = render_to_string(&mut state, 30, 25);
-    assert!(output.contains("claude"), "running agent should appear");
-    assert!(!output.contains("codex"), "idle agent should be hidden");
+    insta::assert_snapshot!(output, @"
+     ≡2  ●1  ◐0  ○1  ✕0
+                               — ▾
+    project
+    ┃ ● claude
+    ╭ Activity │ Git ────────────╮
+    │       No activity yet      │
+    ╰────────────────────────────╯
+    ");
 }
 
 #[test]
@@ -1159,10 +1395,17 @@ fn snapshot_filter_idle_hides_running() {
     };
 
     let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane1, pane2])]);
-    state.global.agent_filter = AgentFilter::Idle;
+    state.global.status_filter = StatusFilter::Idle;
     let output = render_to_string(&mut state, 30, 25);
-    assert!(!output.contains("claude"), "running agent should be hidden");
-    assert!(output.contains("codex"), "idle agent should appear");
+    insta::assert_snapshot!(output, @"
+     ≡2  ●1  ◐0  ○1  ✕0
+                               — ▾
+      ○ codex
+        Waiting for prompt…
+    ╭ Activity │ Git ────────────╮
+    │       No activity yet      │
+    ╰────────────────────────────╯
+    ");
 }
 
 #[test]
@@ -1180,16 +1423,17 @@ fn snapshot_filter_hides_empty_groups() {
         make_repo_group("repo-a", vec![pane1]),
         make_repo_group("repo-b", vec![pane2]),
     ]);
-    state.global.agent_filter = AgentFilter::Running;
+    state.global.status_filter = StatusFilter::Running;
     let output = render_to_string(&mut state, 30, 25);
-    assert!(
-        output.contains("repo-a"),
-        "group with running should appear"
-    );
-    assert!(
-        !output.contains("repo-b"),
-        "group with only idle should be hidden"
-    );
+    insta::assert_snapshot!(output, @"
+     ≡2  ●1  ◐0  ○1  ✕0
+                               — ▾
+    repo-a
+    ┃ ● claude
+    ╭ Activity │ Git ────────────╮
+    │       No activity yet      │
+    ╰────────────────────────────╯
+    ");
 }
 
 #[test]
@@ -1204,43 +1448,36 @@ fn snapshot_filter_all_shows_everything() {
     };
 
     let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane1, pane2])]);
-    state.global.agent_filter = AgentFilter::All;
+    state.global.status_filter = StatusFilter::All;
     let output = render_to_string(&mut state, 30, 30);
-    assert!(output.contains("claude"), "running agent should appear");
-    assert!(output.contains("codex"), "idle agent should appear");
+    insta::assert_snapshot!(output, @"
+     ≡2  ●1  ◐0  ○1  ✕0
+                               — ▾
+    project
+    ┃ ● claude
+      ○ codex
+        Waiting for prompt…
+    ╭ Activity │ Git ────────────╮
+    │       No activity yet      │
+    ╰────────────────────────────╯
+    ");
 }
 
 #[test]
-fn snapshot_filter_bar_icon_colors() {
-    let pane = make_pane(AgentType::Claude, PaneStatus::Running);
-    let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
+fn snapshot_filter_bar_icons_use_selected_and_inactive_colors() {
+    let pane1 = make_pane(AgentType::Claude, PaneStatus::Running);
+    let pane2 = PaneInfo {
+        pane_id: "%2".into(),
+        pane_active: false,
+        status: PaneStatus::Idle,
+        agent: AgentType::Codex,
+        ..make_pane(AgentType::Codex, PaneStatus::Idle)
+    };
+    let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane1, pane2])]);
 
     let styled = render_to_styled_string(&mut state, 30, 25);
-    // Each filter icon should use its status color, even when the count is 0.
-    assert!(
-        styled.contains("fg:114"),
-        "running icon should use status_running color"
-    );
-    assert!(
-        styled.contains("fg:221"),
-        "waiting icon should use status_waiting color"
-    );
-    assert!(
-        styled.contains("fg:109"),
-        "idle icon should use status_idle color"
-    );
-    assert!(
-        styled.contains("fg:203"),
-        "error icon should use status_error color"
-    );
-    assert!(
-        styled.contains("fg:255"),
-        "non-zero filter counts should be white"
-    );
-    assert!(
-        styled.contains("fg:240"),
-        "zero filter counts should remain muted"
-    );
+    let line = styled.lines().next().unwrap();
+    insta::assert_snapshot!(line, @" ≡[fg:111]2[fg:255]  ●[fg:245]1[fg:255]  ◐[fg:245]0[fg:245]  ○[fg:245]1[fg:255]  ✕[fg:245]0[fg:245]");
 }
 
 #[test]
@@ -1255,63 +1492,38 @@ fn snapshot_filter_bar_stays_fixed_on_scroll() {
         })
         .collect();
     let mut state = make_state_with_groups(vec![make_repo_group("project", panes)]);
-    state.agents_scroll.offset = 3; // scroll down
+    state.panes_scroll.offset = 3; // scroll down
 
     let output = render_to_string(&mut state, 30, 15);
-    // Filter bar should always be the first line regardless of scroll
-    let first_line = output.lines().next().unwrap();
-    assert!(
-        first_line.contains("All"),
-        "filter bar should be visible after scroll"
-    );
-    assert!(
-        first_line.contains("●6"),
-        "filter bar should show correct count"
-    );
+    insta::assert_snapshot!(output, @"
+     ≡6  ●6  ◐0  ○0  ✕0
+    ╭ Activity │ Git ────────────╮
+    │       No activity yet      │
+    ╰────────────────────────────╯
+    ");
 }
 
 #[test]
-fn snapshot_filter_selected_has_underline() {
-    let pane = make_pane(AgentType::Claude, PaneStatus::Running);
-    let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
-    state.global.agent_filter = AgentFilter::Running;
-
-    let styled = render_to_styled_string(&mut state, 30, 25);
-    // Selected filter (Running) should have underline
-    assert!(
-        styled.contains("underline"),
-        "selected filter should be underlined"
-    );
-}
-
-#[test]
-fn snapshot_filter_selection_does_not_use_status_color() {
-    let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
-    let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
-    state.global.agent_filter = AgentFilter::Running;
+fn snapshot_filter_selected_icon_has_color_without_underline() {
+    let pane1 = make_pane(AgentType::Claude, PaneStatus::Running);
+    let pane2 = PaneInfo {
+        pane_id: "%2".into(),
+        pane_active: false,
+        status: PaneStatus::Idle,
+        agent: AgentType::Codex,
+        ..make_pane(AgentType::Codex, PaneStatus::Idle)
+    };
+    let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane1, pane2])]);
+    state.global.status_filter = StatusFilter::Running;
 
     let styled = render_to_styled_string(&mut state, 30, 25);
     assert!(
-        styled.contains("underline"),
-        "selected filter should still be visibly marked"
+        !styled.contains("underline"),
+        "selected filter should not be underlined"
     );
-    assert!(
-        styled.contains("fg:114"),
-        "selected filter should keep the running icon color"
-    );
-}
 
-#[test]
-fn snapshot_filter_selection_uses_visible_underline_color_when_count_is_zero() {
-    let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
-    let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
-    state.global.agent_filter = AgentFilter::Running;
-
-    let styled = render_to_styled_string(&mut state, 30, 25);
-    assert!(
-        styled.contains("ul:255"),
-        "selected filter should use the active underline color even when the text is muted"
-    );
+    let line = styled.lines().next().unwrap();
+    insta::assert_snapshot!(line, @" ≡[fg:245]2[fg:255]  ●[fg:114]1[fg:255]  ◐[fg:245]0[fg:245]  ○[fg:245]1[fg:255]  ✕[fg:245]0[fg:245]");
 }
 
 #[test]
@@ -1327,11 +1539,17 @@ fn snapshot_filter_error_shows_agents() {
     };
 
     let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane1, pane2])]);
-    state.global.agent_filter = AgentFilter::Error;
+    state.global.status_filter = StatusFilter::Error;
     let output = render_to_string(&mut state, 30, 25);
-    assert!(output.contains("claude"), "error agent should appear");
-    assert!(!output.contains("codex"), "running agent should be hidden");
-    assert!(output.contains("✕1"), "should show 1 error in filter bar");
+    insta::assert_snapshot!(output, @"
+     ≡2  ●1  ◐0  ○0  ✕1
+                               — ▾
+    ┃ ✕ claude
+        something broke
+    ╭ Activity │ Git ────────────╮
+    │       No activity yet      │
+    ╰────────────────────────────╯
+    ");
 }
 
 #[test]
@@ -1347,8 +1565,15 @@ fn snapshot_filter_waiting_shows_only_waiting() {
     };
 
     let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane1, pane2])]);
-    state.global.agent_filter = AgentFilter::Waiting;
+    state.global.status_filter = StatusFilter::Waiting;
     let output = render_to_string(&mut state, 30, 25);
-    assert!(output.contains("claude"), "waiting agent should appear");
-    assert!(!output.contains("codex"), "idle agent should be hidden");
+    insta::assert_snapshot!(output, @"
+     ≡2  ●0  ◐1  ○1  ✕0
+                               — ▾
+    ┃ ◐ claude
+        permission required
+    ╭ Activity │ Git ────────────╮
+    │       No activity yet      │
+    ╰────────────────────────────╯
+    ");
 }

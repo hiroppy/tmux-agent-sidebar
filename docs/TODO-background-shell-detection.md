@@ -44,7 +44,7 @@ stop → Idle (bg_shells=0)
 - **`UserPromptSubmit`**: `unset @pane_bg_shells`
 - **`clear_all_meta`**: `@pane_bg_shells` を追加
 
-### `src/ui/agents.rs`
+### `src/ui/panes.rs`
 - `running_icon_for`: `Background` → 固定アイコン `"◎"` + running 系の色（少し暗め）
 - 詳細表示: `"  Background tasks…"` テキスト
 - `is_active_status` に `Background` 追加
@@ -53,7 +53,7 @@ stop → Idle (bg_shells=0)
 - `status_color` に `Background` 追加
 
 ### `src/state.rs`
-- `AgentFilter::matches`: `Running` に `Background` もマッチ
+- `StatusFilter::matches`: `Running` に `Background` もマッチ
 - `status_counts`: `Background` を `running` にカウント
 
 ### テスト

@@ -138,6 +138,7 @@ mod tests {
             attention: false,
             agent: AgentType::Claude,
             path: "/tmp".into(),
+            current_command: String::new(),
             prompt: String::new(),
             prompt_is_response: false,
             started_at: None,

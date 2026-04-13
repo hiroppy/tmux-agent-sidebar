@@ -1,23 +1,59 @@
-use crate::event::{AgentEvent, EventAdapter};
+use crate::event::{AgentEvent, AgentEventKind, EventAdapter};
+use crate::tmux::CODEX_AGENT;
 use serde_json::Value;
 
-use super::json_str;
+use super::{HookRegistration, json_str};
 
 pub struct CodexAdapter;
+
+impl CodexAdapter {
+    /// Single source of truth for Codex CLI hook wiring. Verified against
+    /// Codex CLI's official hook event enum in
+    /// `openai/codex:codex-rs/hooks/src/engine/config.rs`, which currently
+    /// defines only: `PreToolUse`, `PostToolUse`, `SessionStart`,
+    /// `UserPromptSubmit`, `Stop`.
+    ///
+    /// Caveats:
+    /// - `PostToolUse` fires only for Bash (Codex's `PostToolUseToolInput`
+    ///   is a typed `{ command: String }` struct); the resulting activity
+    ///   log is Bash-only.
+    /// - `PreToolUse` is supported by Codex but not yet wired.
+    pub const HOOK_REGISTRATIONS: &'static [HookRegistration] = &[
+        HookRegistration {
+            trigger: "SessionStart",
+            matcher: Some("startup|resume"),
+            kind: AgentEventKind::SessionStart,
+        },
+        HookRegistration {
+            trigger: "UserPromptSubmit",
+            matcher: None,
+            kind: AgentEventKind::UserPromptSubmit,
+        },
+        HookRegistration {
+            trigger: "Stop",
+            matcher: None,
+            kind: AgentEventKind::Stop,
+        },
+        HookRegistration {
+            trigger: "PostToolUse",
+            matcher: None,
+            kind: AgentEventKind::ActivityLog,
+        },
+    ];
+}
 
 impl EventAdapter for CodexAdapter {
     fn parse(&self, event_name: &str, input: &Value) -> Option<AgentEvent> {
         match event_name {
             "session-start" => Some(AgentEvent::SessionStart {
-                agent: "codex".into(),
+                agent: CODEX_AGENT.into(),
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: json_str(input, "permission_mode").into(),
                 worktree: None,
                 agent_id: None,
             }),
-            "session-end" => Some(AgentEvent::SessionEnd),
             "user-prompt-submit" => Some(AgentEvent::UserPromptSubmit {
-                agent: "codex".into(),
+                agent: CODEX_AGENT.into(),
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: json_str(input, "permission_mode").into(),
                 prompt: json_str(input, "prompt").into(),
@@ -25,7 +61,7 @@ impl EventAdapter for CodexAdapter {
                 agent_id: None,
             }),
             "stop" => Some(AgentEvent::Stop {
-                agent: "codex".into(),
+                agent: CODEX_AGENT.into(),
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: json_str(input, "permission_mode").into(),
                 last_message: json_str(input, "last_assistant_message").into(),
@@ -33,6 +69,22 @@ impl EventAdapter for CodexAdapter {
                 worktree: None,
                 agent_id: None,
             }),
+            // Codex's PostToolUse currently fires only for Bash (tool_input is
+            // typed `{ command: String }`). Other tools do not emit the hook,
+            // so the resulting activity log is Bash-only.
+            "activity-log" => {
+                let tool_name = json_str(input, "tool_name");
+                if tool_name.is_empty() {
+                    return None;
+                }
+                let tool_input = input.get("tool_input").cloned().unwrap_or(Value::Null);
+                let tool_response = input.get("tool_response").cloned().unwrap_or(Value::Null);
+                Some(AgentEvent::ActivityLog {
+                    tool_name: tool_name.into(),
+                    tool_input,
+                    tool_response,
+                })
+            }
             _ => None,
         }
     }
@@ -44,6 +96,11 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn hook_registrations_match_parse_arms() {
+        super::super::assert_table_drift_free("codex", CodexAdapter::HOOK_REGISTRATIONS);
+    }
+
+    #[test]
     fn session_start() {
         let adapter = CodexAdapter;
         let input = json!({"cwd": "/home/user"});
@@ -51,7 +108,7 @@ mod tests {
         assert_eq!(
             event,
             AgentEvent::SessionStart {
-                agent: "codex".into(),
+                agent: CODEX_AGENT.into(),
                 cwd: "/home/user".into(),
                 permission_mode: "".into(),
                 worktree: None,
@@ -61,12 +118,10 @@ mod tests {
     }
 
     #[test]
-    fn session_end() {
-        let adapter = CodexAdapter;
-        assert_eq!(
-            adapter.parse("session-end", &json!({})).unwrap(),
-            AgentEvent::SessionEnd
-        );
+    fn session_end_not_supported() {
+        // Codex CLI does not fire SessionEnd (verified against
+        // openai/codex:codex-rs/hooks/src/engine/config.rs).
+        assert!(CodexAdapter.parse("session-end", &json!({})).is_none());
     }
 
     #[test]
@@ -77,7 +132,7 @@ mod tests {
         assert_eq!(
             event,
             AgentEvent::UserPromptSubmit {
-                agent: "codex".into(),
+                agent: CODEX_AGENT.into(),
                 cwd: "/tmp".into(),
                 permission_mode: "".into(),
                 prompt: "hello".into(),
@@ -95,7 +150,7 @@ mod tests {
         assert_eq!(
             event,
             AgentEvent::Stop {
-                agent: "codex".into(),
+                agent: CODEX_AGENT.into(),
                 cwd: "/tmp".into(),
                 permission_mode: "".into(),
                 last_message: "done".into(),
@@ -122,7 +177,32 @@ mod tests {
     }
 
     #[test]
-    fn activity_log_not_supported() {
+    fn activity_log_bash_command() {
+        let adapter = CodexAdapter;
+        let input = json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls -la"},
+            "tool_response": {"stdout": "file.txt\n"}
+        });
+        let event = adapter.parse("activity-log", &input).unwrap();
+        match event {
+            AgentEvent::ActivityLog {
+                tool_name,
+                tool_input,
+                ..
+            } => {
+                assert_eq!(tool_name, "Bash");
+                assert_eq!(
+                    tool_input.get("command").and_then(|v| v.as_str()),
+                    Some("ls -la")
+                );
+            }
+            other => panic!("expected ActivityLog, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn activity_log_empty_tool_name_rejected() {
         assert!(CodexAdapter.parse("activity-log", &json!({})).is_none());
     }
 

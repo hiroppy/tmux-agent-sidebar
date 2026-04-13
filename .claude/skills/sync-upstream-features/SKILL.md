@@ -1,24 +1,24 @@
 ---
 name: sync-upstream-features
-description: Claude Code / Codex CLI の最新 hook イベントや機能が、tmux-agent-sidebar の現在の実装でカバーされているか調査し、ギャップをレポートする。「upstream との差分を確認して」「新しい hook が追加されてないか調べて」「チェンジログを確認して未対応を洗い出して」といったリクエストで使う。実装はしない。
+description: Investigate whether the latest hook events and features from Claude Code / Codex CLI are covered by tmux-agent-sidebar's current implementation, and report gaps. Use on requests like "check diff with upstream", "look for new hooks", "check changelog for unsupported features". Does not implement anything.
 ---
 
 # Sync Upstream Features — Gap Reporter
 
-Claude Code と Codex CLI の最新ドキュメント・チェンジログを取得し、このプロジェクトの実装との差分をレポートするスキル。実装は行わず、ギャップの一覧を出力する。
+A skill that fetches the latest documentation and changelogs from Claude Code and Codex CLI, and reports gaps against this project's implementation. Does not implement anything — only outputs a gap list.
 
-## このプロジェクトの仕組み
+## How This Project Works
 
-レポート前に、このプロジェクト固有のアーキテクチャを理解しておく必要がある。
+Before reporting, you need to understand this project's architecture.
 
-### Hook イベントの受信方式
+### Hook Event Reception
 
-このプロジェクトは Claude Code / Codex の **settings.json hooks** を利用してイベントを受信する。`hook.sh` が stdin から JSON を受け取り、Rust バイナリの `hook` サブコマンドに渡す。
+This project uses Claude Code / Codex **settings.json hooks** to receive events. `hook.sh` receives JSON from stdin and passes it to the Rust binary's `hook` subcommand.
 
-上流の hook イベントと、このプロジェクトで使っている内部イベント名の対応：
+Mapping between upstream hook events and internal event names used by this project:
 
-| 上流 hook イベント | 内部イベント名 | 備考 |
-|-------------------|--------------|------|
+| Upstream Hook Event | Internal Event Name | Notes |
+|-------------------|-------------------|-------|
 | `SessionStart` | `session-start` | |
 | `SessionEnd` | `session-end` | |
 | `UserPromptSubmit` | `user-prompt-submit` | |
@@ -27,139 +27,148 @@ Claude Code と Codex CLI の最新ドキュメント・チェンジログを取
 | `StopFailure` | `stop-failure` | |
 | `SubagentStart` | `subagent-start` | |
 | `SubagentStop` | `subagent-stop` | |
-| `PostToolUse` | `activity-log` | **重要**: `PreToolUse`/`PostToolUse` は直接使わない。代わりに独自の `activity-log` イベントとして `PostToolUse` hook から `tool_name`, `tool_input`, `tool_response` を渡している |
+| `PostToolUse` | `activity-log` | **Important**: `PreToolUse`/`PostToolUse` are not used directly. Instead, a custom `activity-log` event passes `tool_name`, `tool_input`, `tool_response` from the `PostToolUse` hook |
 
-### レポート対象外にすべきもの
+### Items to Exclude from Report
 
-以下は sidebar の監視 TUI には関係ないため、ギャップとして報告しない：
+The following are unrelated to the sidebar monitoring TUI and should NOT be reported as gaps:
 
-- **`PreToolUse` / `PostToolUse` / `PostToolUseFailure`**: `activity-log` で代替済み。これらを直接ハンドルする必要はない
-- **`PermissionRequest`**: パーミッション UI の制御用。sidebar は表示するだけなので不要
-- **`PreCompact` / `PostCompact`**: コンパクションは sidebar に影響しない
-- **`InstructionsLoaded`**: CLAUDE.md の読み込みは sidebar に関係ない
-- **`ConfigChange`**: 設定変更の監視は sidebar のスコープ外
-- **`FileChanged`**: ファイル変更監視は sidebar のスコープ外
-- **`Elicitation` / `ElicitationResult`**: MCP elicitation は sidebar のスコープ外
-- **`session_id`**, **`transcript_path`** フィールド: sidebar で使わない情報
+- **`PreToolUse` / `PostToolUse` / `PostToolUseFailure`**: Already handled via `activity-log`. No need to handle these directly
+- **`PermissionRequest`**: For permission UI control. Sidebar only displays, doesn't need this
+- **`PreCompact` / `PostCompact`**: Compaction doesn't affect sidebar
+- **`InstructionsLoaded`**: CLAUDE.md loading is unrelated to sidebar
+- **`ConfigChange`**: Config change monitoring is outside sidebar scope
+- **`FileChanged`**: File change monitoring is outside sidebar scope
+- **`Elicitation` / `ElicitationResult`**: MCP elicitation is outside sidebar scope
+- **`session_id`**, **`transcript_path`** fields: Information not used by sidebar
 
-**注意**: `WorktreeCreate` / `WorktreeRemove` は除外しないこと。sidebar は worktree 情報を表示するため、これらのイベントは監視に有用。
+**Note**: Do NOT exclude `WorktreeCreate` / `WorktreeRemove`. The sidebar displays worktree information, so these events are useful for monitoring.
 
-### レポートすべきもの
+### Items to Report
 
-sidebar のエージェント監視に関係するギャップのみ報告する：
+Only report gaps relevant to sidebar agent monitoring:
 
-- **新しいステータス変化を起こすイベント**: エージェントの状態（running/waiting/idle/error）に影響するもの
-- **パーミッションモード**: `PermissionMode` enum に欠けているバリアント
-- **Notification タイプ**: 新しい通知種別で、ステータス表示に影響するもの
-- **ツール追跡**: `activity.rs` のカラーマッピングや `label.rs` のラベル抽出に不足があるもの
-- **Codex adapter**: Codex CLI で新しくサポートされたイベント（ただし Codex 側が実際にそのイベントを送信していることが確認できる場合のみ）
-- **JSON フィールド**: 既に対応済みイベントで、sidebar の表示改善に直結するフィールドの読み落とし
-- **新しい hook イベント**: エージェントのライフサイクルや状態追跡に関わるもの（例: `TaskCreated`, `TaskCompleted`, `PermissionDenied`, `TeammateIdle`）
+- **New status-changing events**: Events that affect agent state (running/waiting/idle/error)
+- **Permission modes**: Missing variants in `PermissionMode` enum
+- **Notification types**: New notification types that affect status display
+- **Tool tracking**: Missing entries in `activity.rs` color mapping or `label.rs` label extraction
+- **Codex adapter**: Newly supported events in Codex CLI (only if Codex actually sends the event)
+- **JSON fields**: Overlooked fields in already-handled events that directly improve sidebar display
+- **New hook events**: Events related to agent lifecycle or state tracking (e.g., `TaskCreated`, `TaskCompleted`, `PermissionDenied`, `TeammateIdle`)
 
-## 手順
+### Known Deferred Gaps
 
-### 1. 上流のドキュメントを取得
+These gaps are intentionally left unfixed. Report them only when the trigger condition is met — otherwise include them in the coverage table as `Partial (deferred)` with a one-line pointer to this section instead of repeating the full analysis.
 
-以下の URL から最新情報を取得する：
+- **`TaskCreated` extra fields (`teammate_name`, `team_name`, `task_description`)**
+  - **Current state**: `src/adapter/claude.rs` captures only `task_id` and `task_subject`. The `src/cli/hook.rs` handler for `AgentEvent::TaskCreated` is a no-op (`"Redundant with activity-log; TaskCreate tool use already recorded"`) because the `TaskCreate` tool's `PostToolUse` already writes the activity log entry via the `activity-log` path.
+  - **Why deferred**: With the handler doing nothing, capturing the extra fields would be dead code. The fields have no consumer today.
+  - **Trigger to revisit**: Claude Code **Agents Teams** feature becomes a target for the sidebar — e.g. showing per-teammate task assignment in the activity log or a new UI panel for team state. When that work starts, capture `teammate_name` / `team_name` / `task_description` and thread them into whichever layer needs them (likely `src/cli/label.rs` for a richer `TaskCreate` label, or a new field on `AgentEvent::TaskCreated` consumed by a new handler).
 
-| ソース | URL | 注目ポイント |
-|--------|-----|-------------|
-| Claude Code Changelog | `https://code.claude.com/docs/en/changelog` | 新しい hook イベント、パーミッションモード、ツール |
-| Claude Code Hooks Reference | `https://code.claude.com/docs/en/hooks` | 各 hook イベントの JSON スキーマ |
-| Codex CLI Features | `https://developers.openai.com/codex/cli/features` | 実行モード、フラグ |
-| Codex Releases | `https://github.com/openai/codex/releases` | 新機能、新イベント |
+## Procedure
 
-### 2. 現在の実装を読み取る
+### 1. Fetch Upstream Documentation
 
-以下のファイルから、対応済みの機能を把握する：
+Fetch latest information from the following URLs:
 
-| 確認項目 | ファイル | 見るべき箇所 |
-|---------|---------|-------------|
-| 対応済み hook イベント | `src/adapter/claude.rs` | `parse()` の match アーム |
-| Codex 対応イベント | `src/adapter/codex.rs` | `parse()` の match アーム |
-| 内部イベント定義 | `src/event.rs` | `AgentEvent` enum のバリアント |
-| パーミッションモード | `src/tmux.rs` | `PermissionMode` enum と `from_str()` |
-| 追跡中ツール | `src/activity.rs` | `tool_color_index()` の match アーム |
-| ラベル対応ツール | `src/cli/label.rs` | `extract_tool_label()` の match アーム |
-| イベントハンドラ | `src/cli/hook.rs` | `handle_event()` の match アーム |
+| Source | URL | Focus |
+|--------|-----|-------|
+| Claude Code Changelog | `https://code.claude.com/docs/en/changelog` | New hook events, permission modes, tools |
+| Claude Code Hooks Reference | `https://code.claude.com/docs/en/hooks` | JSON schema for each hook event |
+| Codex CLI Features | `https://developers.openai.com/codex/cli/features` | Execution modes, flags |
+| Codex Releases | `https://github.com/openai/codex/releases` | New features, new events |
 
-### 3. 差分をレポート
+### 2. Read Current Implementation
 
-「レポートすべきもの」に該当するギャップのみ、以下のカテゴリで報告する。「レポート対象外にすべきもの」に該当する項目は含めない。
+Identify supported features from the following files:
 
-#### カテゴリ
+| Check Item | File | What to Look For |
+|-----------|------|-----------------|
+| Supported hook events | `src/adapter/claude.rs` | `parse()` match arms |
+| Codex supported events | `src/adapter/codex.rs` | `parse()` match arms |
+| Internal event definitions | `src/event.rs` | `AgentEvent` enum variants |
+| Permission modes | `src/tmux.rs` | `PermissionMode` enum and `from_str()` |
+| Tracked tools | `src/activity.rs` | `tool_color_index()` match arms |
+| Labeled tools | `src/cli/label.rs` | `extract_tool_label()` match arms |
+| Event handlers | `src/cli/hook.rs` | `handle_event()` match arms |
 
-- **Hook イベント**: 上流にあって adapter にない、sidebar の監視に有用なイベント
-- **パーミッションモード**: `PermissionMode` enum に欠けているバリアント
-- **Notification タイプ**: 新しい通知種別
-- **JSON フィールド**: 対応済みイベントで、表示改善に使えるフィールドの読み落とし
-- **ツール**: `activity.rs` / `label.rs` で未対応のツール
-- **Codex 固有**: Codex adapter の不足（実際にイベントが送信されると確認できるもののみ）
+### 3. Report Gaps
 
-### 4. 優先度付け
+Report only gaps matching "Items to Report." Do NOT include items from "Items to Exclude from Report."
 
-各ギャップに優先度を付ける：
+#### Categories
 
-- **High**: ステータス表示が間違う・情報が欠落する（例: パーミッションモードの欠落、エラー種別の読み落とし）
-- **Medium**: 表示は正しいが追加情報があれば改善できる（例: 新しい hook イベント対応、新ツールの色）
-- **Low**: あれば良いが影響が小さい（例: ラベル抽出の追加、まだ普及していない機能）
+- **Hook Events**: Events present upstream but missing from adapter that would be useful for sidebar monitoring
+- **Permission Modes**: Missing variants in `PermissionMode` enum
+- **Notification Types**: New notification types
+- **JSON Fields**: Overlooked fields in already-handled events that could improve display
+- **Tools**: Tools not covered in `activity.rs` / `label.rs`
+- **Codex-specific**: Codex adapter gaps (only if the event is confirmed to be actually sent)
 
-### 5. 出力フォーマット
+### 4. Assign Priority
 
-レポートは以下の構成で出力する。
+Assign priority to each gap:
 
-#### 5.1 対応状況テーブル
+- **High**: Status display is wrong or information is missing (e.g., missing permission mode, overlooked error type)
+- **Medium**: Display is correct but additional information could improve it (e.g., new hook event support, new tool color)
+- **Low**: Nice to have but low impact (e.g., additional label extraction, features not yet widely adopted)
 
-まず、上流の全 hook イベントと、現在の対応状況を一覧テーブルで出力する。「レポート対象外」のイベントも含め、上流に存在する全イベントを網羅すること。
+### 5. Output Format
 
-フォーマット：
+Output the report in the following structure.
 
-| Hook イベント | 追加バージョン | 対応状況 | 備考 |
-|--------------|--------------|---------|------|
-| `SessionStart` | (初期) | 対応済み | |
-| `TaskCreated` | v2.1.84 | 未対応 | ... |
-| `PreToolUse` | (初期) | 対象外 | activity-log で代替 |
+#### 5.1 Coverage Table
 
-- **追加バージョン**: そのイベントが Claude Code に追加されたバージョン。changelog から特定する。初期から存在するものは `(初期)` と書く。特定できない場合は `不明` と書く。
-- **対応状況**: `対応済み` / `未対応` / `部分対応` / `対象外`
-  - `対応済み`: adapter の `parse()` に match アームが存在する
-  - `未対応`: adapter に match アームがなく、sidebar の監視に有用なイベント
-  - `部分対応`: match アームはあるが、フィールドの読み落としやフィールド名ずれがある
-  - `対象外`: sidebar の監視に関係ないためハンドル不要（「レポート対象外にすべきもの」に該当）
+First, output a table of all upstream hook events with current coverage status. Include ALL upstream events, including those in "Items to Exclude."
 
-同様に、以下のテーブルも出力する：
+Format:
 
-**パーミッションモード:**
+| Hook Event | Added in Version | Status | Notes |
+|-----------|-----------------|--------|-------|
+| `SessionStart` | (initial) | Covered | |
+| `TaskCreated` | v2.1.84 | Not covered | ... |
+| `PreToolUse` | (initial) | Out of scope | Handled via activity-log |
 
-| モード | 対応状況 | 備考 |
-|--------|---------|------|
-| `default` | 対応済み | |
-| `dontAsk` | 未対応 | Default にフォールバック |
+- **Added in Version**: The version when the event was added to Claude Code. Identify from changelog. Use `(initial)` for events present from the start. Use `Unknown` if unidentifiable.
+- **Status**: `Covered` / `Not covered` / `Partial` / `Out of scope`
+  - `Covered`: Match arm exists in adapter's `parse()`
+  - `Not covered`: No match arm in adapter, and the event is useful for sidebar monitoring
+  - `Partial`: Match arm exists but has field omissions or field name mismatches
+  - `Out of scope`: Not relevant to sidebar monitoring (matches "Items to Exclude")
 
-**ツール（カラーマッピング + ラベル抽出）:**
+Also output the following tables:
 
-未対応・部分対応のツールのみ表示する。
+**Permission Modes:**
 
-| ツール | 追加バージョン | カラー | ラベル | 備考 |
-|--------|--------------|--------|--------|------|
-| `PowerShell` | v2.1.84 | 未対応 | 未対応 | Windows 用 |
-| `TaskList` | (初期) | 対応済み | 未対応 | |
+| Mode | Status | Notes |
+|------|--------|-------|
+| `default` | Covered | |
+| `dontAsk` | Not covered | Falls back to Default |
 
-#### 5.2 ギャップ詳細
+**Tools (Color Mapping + Label Extraction):**
 
-対応状況テーブルで `未対応` / `部分対応` のもの（`対象外` を除く）について、優先度別に詳細を出力する。
+Show only not-covered / partial tools.
 
-各ギャップには以下を含める：
-- **項目名**
-- **追加バージョン**
-- **上流の仕様**: 簡潔な説明
-- **現在の状態**
-- **影響ファイル**
+| Tool | Added in Version | Color | Label | Notes |
+|------|-----------------|-------|-------|-------|
+| `PowerShell` | v2.1.84 | Not covered | Not covered | Windows only |
+| `TaskList` | (initial) | Covered | Not covered | |
 
-#### 5.3 サマリー
+#### 5.2 Gap Details
 
-対応状況テーブルの正確性に関するルール：
+For items marked `Not covered` / `Partial` in the coverage table (excluding `Out of scope`), output details by priority.
 
-1. **adapter の match アームを列挙してから書く**: テーブルを書く前に、`src/adapter/claude.rs` の `parse()` にある match アームの文字列リテラル（`"session-start"`, `"session-end"` 等）を全て列挙すること。この列挙にないイベントを「対応済み」にしてはならない。
-2. **テーブル間の整合性チェック**: 対応状況テーブルとギャップ詳細の間で矛盾がないか確認すること。
-3. **全カテゴリの漏れチェック**: パーミッションモードやツールのギャップが漏れていないか確認すること。
+Each gap should include:
+- **Item name**
+- **Added in version**
+- **Upstream spec**: Brief description
+- **Current state**
+- **Affected files**
+
+#### 5.3 Summary
+
+Rules for coverage table accuracy:
+
+1. **List adapter match arms before writing**: Before writing the table, enumerate ALL string literals in `src/adapter/claude.rs`'s `parse()` match arms (`"session-start"`, `"session-end"`, etc.). Do not mark an event as "Covered" unless it appears in this enumeration.
+2. **Cross-table consistency check**: Verify no contradictions between the coverage table and gap details.
+3. **All-category completeness check**: Verify no gaps are missing for permission modes and tools.

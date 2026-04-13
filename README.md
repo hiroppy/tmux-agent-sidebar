@@ -1,38 +1,81 @@
-# tmux-agent-sidebar
+<h1 align="center">tmux-agent-sidebar</h1>
 
-A tmux sidebar that monitors all AI coding agents (Claude Code, Codex) across every session and window — statuses, prompts, git info, activity logs, and more in one place.
+<p align="center">A tmux sidebar that monitors all AI coding agents (Claude Code, Codex) across all sessions and windows — statuses, prompts, Git info, activity logs, and more in one place.</p>
 
-![main](assets/main.png)
-
-<table>
-  <tr>
-    <td><img src="assets/category.png" alt="category view" /></td>
-    <td><img src="assets/filter-by-project.png" alt="filter by project" /></td>
-  </tr>
-  <tr>
-    <td align="center"><b>Category view</b></td>
-    <td align="center"><b>Filter by project</b></td>
-  </tr>
-</table>
+<p align="center"><img src="assets/main.png" alt="main" /></p>
 
 ## Features
 
-- **Cross-session monitoring** — Shows all agents across every tmux session and window in one sidebar
-- **Pane jump** — Select an agent and press Enter to jump to its pane, even across different windows
-- **Repository grouping** — Groups agents by the same repo, including worktrees, so related panes stay together
-- **Status filter** — Filters by Running / Waiting / Idle / Error with live counts per status
-- **Subagent tree** — Shows spawned subagents as a parent-child tree
-- **Task progress** — Displays task completion (e.g. `3/7`) synced from agent task lists
+- **Cross-session monitoring** — Shows all agents from every tmux session and window in one sidebar
 - **Activity log** — Streams each tool invocation (Read, Edit, Bash, etc.) per agent in real time
+- **Task & subagent tracking** — Displays task progress (e.g. `3/7`) and spawned subagents as a parent-child tree
 - **Git integration** — Shows branch name, ahead/behind counts, PR number (`gh`), and per-file diff stats
-- **Permission mode** — Shows `auto` / `plan` / `!` badge so you know each agent's permission level
+- **Worktree-aware grouping** — Groups agents by the same repo, including worktrees, so related panes stay together
+- **Pane metadata** — Shows listening localhost ports and execution command info for each pane
+
+## Agent Pane
+
+<table>
+  <tr>
+    <td width="55%"><img src="assets/agent-pane.png" alt="Agent pane" /></td>
+    <td valign="top">
+      <ul>
+        <li><b>Status icon</b>
+          <ul>
+            <li><code>●</code> running, <code>◐</code> waiting, <code>○</code> idle, <code>✕</code> error</li>
+          </ul>
+        </li>
+        <li><b>Agent color</b>
+          <ul>
+            <li>Claude (terracotta), Codex (purple)</li>
+          </ul>
+        </li>
+        <li><b>Permission badge</b>
+          <ul>
+            <li><code>plan</code>, <code>edit</code>, <code>auto</code>, <code>!</code></li>
+          </ul>
+        </li>
+        <li><b>Session name</b>
+          <ul><li>the tmux session the pane belongs to</li></ul>
+        </li>
+        <li><b>+ marker</b>
+          <ul><li>indicates a git worktree</li></ul>
+        </li>
+        <li><b>Branch</b>
+          <ul><li>the current Git branch for the pane's cwd</li></ul>
+        </li>
+        <li><b>Elapsed time</b>
+          <ul><li>time since the last user prompt</li></ul>
+        </li>
+        <li><b>Task progress</b>
+          <ul><li>e.g. <code>3/7</code>, synchronized from the agent's task list</li></ul>
+        </li>
+        <li><b>Subagent tree</b>
+          <ul><li>parent-child branches for spawned subagents</li></ul>
+        </li>
+        <li><b>Listening ports</b>
+          <ul><li>localhost ports the pane's process is listening on</li></ul>
+        </li>
+        <li><b>Response arrow (▶)</b>
+          <ul><li>preview of the latest agent response</li></ul>
+        </li>
+        <li><b>Prompt text</b>
+          <ul><li>latest user prompt</li></ul>
+        </li>
+        <li><b>Wait reason</b>
+          <ul><li>why the agent is waiting</li></ul>
+        </li>
+      </ul>
+    </td>
+  </tr>
+</table>
 
 ## Requirements
 
 - tmux 3.0+
 - [TPM](https://github.com/tmux-plugins/tpm) (recommended, for plugin installation)
 - [Rust](https://rustup.rs/) (only if building from source)
-- [GitHub CLI](https://cli.github.com/) (optional, for PR number display in Git tab)
+- [GitHub CLI](https://cli.github.com/) (optional, for displaying PR numbers in the Git tab)
 
 ## Setting Up
 
@@ -47,7 +90,9 @@ set -g @plugin 'hiroppy/tmux-agent-sidebar'
 run '~/.tmux/plugins/tpm/tpm'
 ```
 
-Press `prefix + I` to install. On first run, an install wizard will prompt you to download a pre-built binary or build from source.
+Press `prefix + I` to install. On the first run, an install wizard prompts you to download a pre-built binary or build from source.
+
+To update later, press `prefix + U` in TPM's plugin list and select `tmux-agent-sidebar`. The install wizard runs again if the bundled binary has changed.
 
 #### Manual
 
@@ -57,13 +102,13 @@ Press `prefix + I` to install. On first run, an install wizard will prompt you t
 git clone https://github.com/hiroppy/tmux-agent-sidebar.git ~/.tmux/plugins/tmux-agent-sidebar
 ```
 
-1. Add the plugin to your `tmux.conf`:
+2. Add the plugin to your `tmux.conf`:
 
 ```tmux
 run-shell ~/.tmux/plugins/tmux-agent-sidebar/tmux-agent-sidebar.tmux
 ```
 
-1. Install the binary using one of the following methods:
+3. Install the binary using one of the following methods:
 
    <details>
    <summary>Download pre-built binary</summary>
@@ -87,29 +132,59 @@ run-shell ~/.tmux/plugins/tmux-agent-sidebar/tmux-agent-sidebar.tmux
 
    </details>
 
-Reload tmux config with `prefix + r` after updating `tmux.conf`. This works for both TPM and manual installs.
+### 2. Reload tmux config
 
-### 2. Agent Hooks
+After updating `tmux.conf`, press `prefix + r` to reload the config.
 
-The sidebar receives status updates through agent hooks. Add the following hook configurations to your agent settings.
+### 3. Agent Hooks
 
-#### 2.1 Claude Code
+The sidebar receives status updates through agent hooks. Add the following hook definitions to your agent settings.
 
-Add to your Claude Code hooks configuration (e.g. `~/.claude/settings.json`):
+#### 3.1 Claude Code
+
+Create `~/.claude/settings.json` first.
+
+**Option A — Let an LLM wire it up (recommended).** Paste the following prompt into a Claude Code session:
+
+```
+Run ~/.tmux/plugins/tmux-agent-sidebar/target/release/tmux-agent-sidebar setup claude (fall back to ~/.tmux/plugins/tmux-agent-sidebar/bin/tmux-agent-sidebar if that path is missing). Add these hooks to ~/.claude/settings.json. If hooks already exist, merge them without making destructive changes.
+```
 
 <details>
-<summary>Claude Code hooks JSON</summary>
+<summary>Option B — Manual: copy-paste this JSON into <code>~/.claude/settings.json</code></summary>
 
 ```json
 {
   "hooks": {
-    "Notification": [
+    "SessionStart": [
       {
         "matcher": "",
         "hooks": [
           {
             "type": "command",
-            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude notification"
+            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude session-start"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude session-end"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude user-prompt-submit"
           }
         ]
       }
@@ -136,24 +211,13 @@ Add to your Claude Code hooks configuration (e.g. `~/.claude/settings.json`):
         ]
       }
     ],
-    "UserPromptSubmit": [
+    "Notification": [
       {
         "matcher": "",
         "hooks": [
           {
             "type": "command",
-            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude user-prompt-submit"
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude session-start"
+            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude notification"
           }
         ]
       }
@@ -169,13 +233,101 @@ Add to your Claude Code hooks configuration (e.g. `~/.claude/settings.json`):
         ]
       }
     ],
-    "SessionEnd": [
+    "PermissionDenied": [
       {
         "matcher": "",
         "hooks": [
           {
             "type": "command",
-            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude session-end"
+            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude permission-denied"
+          }
+        ]
+      }
+    ],
+    "CwdChanged": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude cwd-changed"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude subagent-start"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude subagent-stop"
+          }
+        ]
+      }
+    ],
+    "TaskCreated": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude task-created"
+          }
+        ]
+      }
+    ],
+    "TaskCompleted": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude task-completed"
+          }
+        ]
+      }
+    ],
+    "TeammateIdle": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude teammate-idle"
+          }
+        ]
+      }
+    ],
+    "WorktreeCreate": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude worktree-create"
+          }
+        ]
+      }
+    ],
+    "WorktreeRemove": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh claude worktree-remove"
           }
         ]
       }
@@ -186,12 +338,18 @@ Add to your Claude Code hooks configuration (e.g. `~/.claude/settings.json`):
 
 </details>
 
-#### 2.2 Codex
+#### 3.2 Codex
 
-Create or edit `~/.codex/hooks.json`:
+Create `~/.codex/hooks.json` first.
+
+**Option A — Let an LLM wire it up (recommended).** Paste the following prompt into a Codex session:
+
+```
+Run ~/.tmux/plugins/tmux-agent-sidebar/target/release/tmux-agent-sidebar setup codex (fall back to ~/.tmux/plugins/tmux-agent-sidebar/bin/tmux-agent-sidebar if that path is missing). Add these hooks to ~/.codex/hooks.json. If hooks already exist, merge them without making destructive changes.
+```
 
 <details>
-<summary>Codex hooks JSON</summary>
+<summary>Option B — Manual: copy-paste this JSON into <code>~/.codex/hooks.json</code></summary>
 
 ```json
 {
@@ -227,12 +385,12 @@ Create or edit `~/.codex/hooks.json`:
         ]
       }
     ],
-    "SessionEnd": [
+    "PostToolUse": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh codex session-end"
+            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh codex activity-log"
           }
         ]
       }
@@ -243,9 +401,7 @@ Create or edit `~/.codex/hooks.json`:
 
 </details>
 
-## Usage
-
-### Keybindings
+## Keybindings
 
 | Key | Action |
 |---|---|
@@ -253,43 +409,91 @@ Create or edit `~/.codex/hooks.json`:
 | `prefix + E` | Toggle sidebar in all windows (default, customizable) |
 | `j` / `Down` | Move selection down (filter → agents → bottom panel) |
 | `k` / `Up` | Move selection up |
-| `h` / `Left` | Previous filter (when on filter bar) |
-| `l` / `Right` | Next filter (when on filter bar) |
-| `Enter` | Jump to selected agent's pane |
+| `h` / `Left` | Previous status filter when the filter bar is focused |
+| `l` / `Right` | Next status filter when the filter bar is focused |
+| `r` | Open repo filter popup (filter bar only) |
+| `Enter` | Jump to the selected agent's pane / confirm the repo popup |
 | `Tab` | Cycle status filter (All → Running → Waiting → Idle → Error) |
 | `Shift+Tab` | Switch bottom panel tab (Activity / Git) |
-| `Esc` | Return focus to agents panel |
-| Mouse click | Click agent to jump to its pane, click filter to select |
+| `Esc` | Return focus to the agents panel / close the repo popup |
+| Mouse click | Jump to an agent's pane / filter by status / open the repo popup |
 
-### Status Icons
 
-| Icon | State | Description |
-|---|---|---|
-| `●` | Running | Agent is actively processing (pulsing animation) |
-| `◐` | Waiting | Agent needs user attention (e.g. permission approval) |
-| `○` | Idle | Agent is ready and waiting for input |
-| `✕` | Error | Agent encountered an error |
-
-### Feature Support by Agent
+## Feature Support by Agent
 
 | Feature | Claude Code | Codex | Notes |
 |---|---|---|---|
 | Status tracking (running / idle / error) | :white_check_mark: | :white_check_mark: | Driven by `SessionStart` / `UserPromptSubmit` / `Stop` |
 | Prompt text display | :white_check_mark: | :white_check_mark: | Saved from `UserPromptSubmit` |
 | Response text display (`▶ ...`) | :white_check_mark: | :white_check_mark: | Populated from `Stop` payload |
-| Waiting status + wait reason | :white_check_mark: | :x: | Codex has no `Notification` hook |
+| Waiting status + wait reason | :white_check_mark: | :x: | Populated from `Notification`, `PermissionDenied`, and `TeammateIdle` (all Claude-only) |
 | API failure reason display | :white_check_mark: | :x: | `StopFailure` is wired only for Claude |
-| Permission badge | :white_check_mark: (`plan` / `edit` / `auto` / `!`) | :white_check_mark: (`auto` / `!` only) | Codex badges are inferred from process args |
-| Git branch display | :white_check_mark: | :white_check_mark: | Uses the pane `cwd` |
+| Permission badge | :white_check_mark: (`plan` / `edit` / `auto` / `!`) | :white_check_mark: (`auto` / `!` only) | Codex badges are inferred from process arguments |
+| Git branch display | :white_check_mark: | :white_check_mark: | Uses the pane `cwd`; Claude updates dynamically via `CwdChanged` |
 | Elapsed time | :white_check_mark: | :white_check_mark: | Since the last prompt |
-| Task progress | :white_check_mark: | :x: | Requires `PostToolUse` |
+| Task progress | :white_check_mark: | :x: | Requires `PostToolUse`; Codex fires `PostToolUse` only for `Bash`, so task progress from tools is unavailable |
+| Task lifecycle notifications | :white_check_mark: | :x: | Requires `TaskCreated` / `TaskCompleted` |
 | Subagent display | :white_check_mark: | :x: | Requires `SubagentStart` / `SubagentStop` |
-| Activity log | :white_check_mark: | :x: | Requires `PostToolUse` |
+| Activity log | :white_check_mark: | :white_check_mark: (Bash only) | Codex's `PostToolUse` fires only for `Bash` tool calls; `Read`/`Edit`/`Write`/`Grep`/`Glob`/etc. are not reported |
+| Worktree lifecycle tracking | :white_check_mark: | :x: | Requires `WorktreeCreate` / `WorktreeRemove` |
 
 ### Known Limitations
 
-- **Waiting status (Claude Code)** — After approving a permission prompt, the status stays `waiting` until the next hook event fires. This is a limitation of the Claude Code hook system.
-- **Codex hook coverage** — Codex does not support `Notification` or `PostToolUse` hooks, so waiting status, activity log, and task progress are unavailable.
+- **Waiting status (Claude Code)** — After you approve a permission prompt, the status stays `waiting` until the next hook event fires. This is a limitation of the Claude Code hook system.
+- **Codex hook coverage** — Codex emits `SessionStart`, `UserPromptSubmit`, `Stop`, and `PostToolUse`. `PostToolUse` is limited to the `Bash` tool (Codex's schema types `tool_input` as `{ command: string }`), so the Codex activity log shows only Bash commands. Waiting status, task progress, subagent display, and worktree tracking remain unavailable.
+
+## Customization
+
+Most options can be set **before** loading the plugin in your `tmux.conf`:
+
+```tmux
+# Sidebar
+set -g @sidebar_key T                    # keybinding (default: e)
+set -g @sidebar_key_all Y                # keybinding for all windows (default: E)
+set -g @sidebar_width 32                 # width in columns or % (default: 15%)
+set -g @sidebar_bottom_height 20         # bottom panel height in lines (default: 20, 0 to hide)
+set -g @sidebar_auto_create off          # disable auto-create on new windows (default: on)
+
+# Colors (256-color palette numbers) — all defaults live in src/ui/colors.rs
+set -g @sidebar_color_all 111            # selected "all" filter icon (default: 111 sky blue)
+set -g @sidebar_color_running 114        # selected running filter icon and running pane status (default: 114 green)
+set -g @sidebar_color_waiting 221        # selected waiting filter icon, waiting pane status, version banner (default: 221 yellow)
+set -g @sidebar_color_idle 110           # selected idle filter icon and idle pane status (default: 110 soft blue)
+set -g @sidebar_color_error 203          # selected error filter icon and error pane status (default: 203 red)
+set -g @sidebar_color_filter_inactive 245 # unselected status filter icons and zero counts (default: 245 mid gray)
+set -g @sidebar_color_border 240         # unfocused panel borders and tab separators (default: 240 dark gray)
+set -g @sidebar_color_accent 153         # active pane marker, focused repo header, focused bottom panel border, repo popup border (default: 153 pale sky blue)
+set -g @sidebar_color_session 39         # session name (default: 39 blue)
+set -g @sidebar_color_agent_claude 174   # Claude brand color (default: 174 terracotta)
+set -g @sidebar_color_agent_codex 141    # Codex brand color (default: 141 purple)
+set -g @sidebar_color_text_active 255    # primary text (active rows, counts, filtered repo label) (default: 255 white)
+set -g @sidebar_color_text_muted 252     # secondary text (tree branches, empty-state messages, inactive bottom tabs, activity log labels) (default: 252 light gray)
+set -g @sidebar_color_text_inactive 244  # body text of unfocused pane rows (prompt/response, idle hint) (default: 244 mid gray)
+set -g @sidebar_color_port 246           # port numbers (default: 246 light gray)
+set -g @sidebar_color_wait_reason 221    # wait reason text (default: 221 yellow)
+set -g @sidebar_color_selection 237      # selected row background (default: 237 dark gray)
+set -g @sidebar_color_branch 109         # git branch name (default: 109 teal)
+set -g @sidebar_color_task_progress 223   # task progress summary (default: 223 pale yellow)
+set -g @sidebar_color_subagent 73         # subagent tree (default: 73 green)
+set -g @sidebar_color_commit_hash 221     # commit hash (default: 221 yellow)
+set -g @sidebar_color_diff_added 114      # added diff lines (default: 114 green)
+set -g @sidebar_color_diff_deleted 174    # deleted diff lines (default: 174 terracotta)
+set -g @sidebar_color_file_change 221     # file change stats (default: 221 yellow)
+set -g @sidebar_color_pr_link 117         # PR link / number (default: 117 blue)
+set -g @sidebar_color_section_title 109   # section titles (default: 109 teal)
+set -g @sidebar_color_activity_timestamp 109 # activity timestamps (default: 109 teal)
+set -g @sidebar_color_response_arrow 74   # response arrow (default: 74 cyan)
+
+# Icons (Unicode glyphs; defaults keep the current look)
+set -g @sidebar_icon_all ≡               # status filter bar "all" icon
+set -g @sidebar_icon_running ●           # running status icon
+set -g @sidebar_icon_waiting ◐           # waiting status icon
+set -g @sidebar_icon_idle ○              # idle status icon
+set -g @sidebar_icon_error ✕             # error status icon
+set -g @sidebar_icon_unknown ·           # unknown status icon
+
+run-shell ~/.tmux/plugins/tmux-agent-sidebar/tmux-agent-sidebar.tmux
+```
 
 ## Accessing Agent Status from Scripts
 
@@ -306,38 +510,6 @@ tmux show -t "$pane_id" -pv @pane_agent
 ```
 
 This is useful for integrating agent status into your tmux status bar, custom scripts, or notifications.
-
-## Customization
-
-All options can be set **before** loading the plugin in your `tmux.conf`:
-
-```tmux
-# Sidebar
-set -g @sidebar_key T                    # keybinding (default: e)
-set -g @sidebar_key_all Y                # keybinding for all windows (default: E)
-set -g @sidebar_width 32                 # width in columns or % (default: 15%)
-
-# Colors (256-color palette numbers)
-set -g @sidebar_color_running 82         # running icon (default: green)
-set -g @sidebar_color_waiting 221        # waiting icon (default: yellow)
-set -g @sidebar_color_idle 250           # idle icon (default: light gray)
-set -g @sidebar_color_error 203         # error icon (default: red)
-set -g @sidebar_color_border 240         # box border (default: dark gray)
-set -g @sidebar_color_border_active 117  # active group border (default: cyan)
-set -g @sidebar_color_session 39         # session name (default: blue)
-set -g @sidebar_color_agent_claude 174   # Claude brand color (default: terracotta)
-set -g @sidebar_color_agent_codex 141    # Codex brand color (default: purple)
-set -g @sidebar_color_text_active 255    # text for running/waiting (default: white)
-set -g @sidebar_color_text_muted 250     # text for idle (default: light gray)
-set -g @sidebar_color_wait_reason 221    # wait reason text (default: yellow)
-set -g @sidebar_color_path 255           # directory path (default: white)
-set -g @sidebar_color_selection 239      # selected row background (default: dark gray)
-set -g @sidebar_color_branch 109        # git branch name (default: teal)
-set -g @sidebar_prompt_lines 3           # max prompt display lines (default: 3)
-set -g @sidebar_activity_lines 8         # max activity log entries (default: 8)
-
-run-shell ~/.tmux/plugins/tmux-agent-sidebar/tmux-agent-sidebar.tmux
-```
 
 ## Uninstalling
 

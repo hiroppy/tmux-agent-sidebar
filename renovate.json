@@ -1,0 +1,33 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommitTypeAll(chore)",
+    ":enableVulnerabilityAlerts",
+    ":separateMajorReleases"
+  ],
+  "rangeStrategy": "pin",
+  "pinDigests": true,
+  "labels": ["deps"],
+  "packageRules": [
+    {
+      "groupName": "cargo patch dependencies",
+      "matchManagers": ["cargo"],
+      "matchUpdateTypes": ["patch"],
+      "matchPackageNames": ["*"],
+      "automerge": true
+    },
+    {
+      "groupName": "cargo minor dependencies",
+      "matchManagers": ["cargo"],
+      "matchUpdateTypes": ["minor"],
+      "matchPackageNames": ["*"]
+    },
+    {
+      "groupName": "github actions",
+      "matchManagers": ["github-actions"],
+      "automerge": true
+    }
+  ],
+  "ignoreDeps": []
+}

@@ -4,6 +4,8 @@ mod test_helpers;
 use test_helpers::*;
 use tmux_agent_sidebar::state::Focus;
 use tmux_agent_sidebar::tmux::{AgentType, PaneStatus, SessionInfo, WindowInfo};
+use tmux_agent_sidebar::ui::colors::ColorTheme;
+use tmux_agent_sidebar::ui::icons::StatusIcons;
 
 // ─── Agents: auto-scroll behavior Tests ─────────────────────────────
 
@@ -29,25 +31,25 @@ fn test_agents_auto_scroll_keeps_selected_visible() {
     }]);
     state.repo_groups = vec![make_repo_group("project", panes)];
     state.sidebar_focused = true;
-    state.focus = Focus::Agents;
+    state.focus = Focus::Panes;
     state.rebuild_row_targets();
 
-    // Render with a small height (only 6 lines visible for agents, 20 for bottom)
-    // Total height = 26, bottom = 20, agents = 6
+    // Render with a small height. With the 2-row header, the first pane
+    // still stays visible without needing to scroll.
     let _ = render_to_string(&mut state, 28, 26);
-    assert_eq!(state.agents_scroll.offset, 0, "initially at top");
+    assert_eq!(state.panes_scroll.offset, 0, "initially at top");
 
     // Select last agent and re-render
-    state.global.selected_agent_row = 9;
+    state.global.selected_pane_row = 9;
     let _ = render_to_string(&mut state, 28, 26);
     assert!(
-        state.agents_scroll.offset > 0,
+        state.panes_scroll.offset > 0,
         "should scroll down to show selected agent"
     );
 }
 
 #[test]
-fn test_agents_scroll_offset_tracks_total_and_visible() {
+fn test_panes_scroll_offset_tracks_total_and_visible() {
     let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
     let mut state = make_state(vec![SessionInfo {
         session_name: "main".into(),
@@ -63,13 +65,13 @@ fn test_agents_scroll_offset_tracks_total_and_visible() {
     state.rebuild_row_targets();
 
     let _ = render_to_string(&mut state, 28, 26);
-    // After rendering, agents_scroll.total_lines and agents_scroll.visible_height should be set
+    // After rendering, panes_scroll.total_lines and panes_scroll.visible_height should be set
     assert!(
-        state.agents_scroll.total_lines > 0,
+        state.panes_scroll.total_lines > 0,
         "total lines should be populated"
     );
     assert!(
-        state.agents_scroll.visible_height > 0,
+        state.panes_scroll.visible_height > 0,
         "visible height should be populated"
     );
 }
@@ -78,26 +80,10 @@ fn test_agents_scroll_offset_tracks_total_and_visible() {
 
 #[test]
 fn snapshot_codex_agent_styled() {
-    let pane = make_pane(AgentType::Codex, PaneStatus::Idle);
-    let mut state = make_state(vec![SessionInfo {
-        session_name: "main".into(),
-        windows: vec![WindowInfo {
-            window_id: "@1".into(),
-            window_name: "project".into(),
-            window_active: true,
-            auto_rename: false,
-            panes: vec![pane.clone()],
-        }],
-    }]);
-    state.repo_groups = vec![make_repo_group("project", vec![pane])];
-    state.rebuild_row_targets();
-    state.sidebar_focused = false; // so colors show, not REVERSED
-
-    let output = render_to_styled_string(&mut state, 28, 24);
-    // Codex agent should use agent_codex color (141)
-    assert!(
-        output.contains("fg:141"),
-        "Codex agent should use codex color (141)"
+    let theme = ColorTheme::default();
+    assert_eq!(
+        theme.agent_color(&AgentType::Codex),
+        ratatui::style::Color::Indexed(141)
     );
 }
 
@@ -105,26 +91,10 @@ fn snapshot_codex_agent_styled() {
 
 #[test]
 fn snapshot_unknown_agent_styled() {
-    let pane = make_pane(AgentType::Unknown, PaneStatus::Idle);
-    let mut state = make_state(vec![SessionInfo {
-        session_name: "main".into(),
-        windows: vec![WindowInfo {
-            window_id: "@1".into(),
-            window_name: "project".into(),
-            window_active: true,
-            auto_rename: false,
-            panes: vec![pane.clone()],
-        }],
-    }]);
-    state.repo_groups = vec![make_repo_group("project", vec![pane])];
-    state.rebuild_row_targets();
-    state.sidebar_focused = false;
-
-    let output = render_to_styled_string(&mut state, 28, 24);
-    // Unknown agent uses status_unknown color (244)
-    assert!(
-        output.contains("fg:244"),
-        "Unknown agent should use unknown color (244)"
+    let theme = ColorTheme::default();
+    assert_eq!(
+        theme.agent_color(&AgentType::Unknown),
+        ratatui::style::Color::Indexed(244)
     );
 }
 
@@ -148,7 +118,7 @@ fn test_running_icon_blink_off() {
     state.sidebar_focused = false;
     state.spinner_frame = 0;
 
-    let output = render_to_string(&mut state, 28, 24);
+    let output = render_to_string(&mut state, 28, 25);
     assert!(output.contains("●"), "spinner frame 0 should show ●");
 }
 
@@ -170,7 +140,7 @@ fn test_running_spinner_frame_advances() {
     state.sidebar_focused = false;
     state.spinner_frame = 3;
 
-    let output = render_to_string(&mut state, 28, 24);
+    let output = render_to_string(&mut state, 28, 25);
     assert!(output.contains("●"), "spinner frame 3 should show ●");
 }
 
@@ -191,7 +161,7 @@ fn test_waiting_icon() {
     state.rebuild_row_targets();
     state.sidebar_focused = false;
 
-    let output = render_to_string(&mut state, 28, 24);
+    let output = render_to_string(&mut state, 28, 25);
     assert!(output.contains("◐"), "waiting pane should show ◐ icon");
 }
 
@@ -212,38 +182,22 @@ fn test_error_icon() {
     state.rebuild_row_targets();
     state.sidebar_focused = false;
 
-    let output = render_to_string(&mut state, 28, 24);
+    let output = render_to_string(&mut state, 28, 25);
     assert!(output.contains("✕"), "error pane should show ✕ icon");
 }
 
 #[test]
 fn test_unknown_status_icon() {
-    let pane = make_pane(AgentType::Claude, PaneStatus::Unknown);
-    let mut state = make_state(vec![SessionInfo {
-        session_name: "main".into(),
-        windows: vec![WindowInfo {
-            window_id: "@1".into(),
-            window_name: "project".into(),
-            window_active: true,
-            auto_rename: false,
-            panes: vec![pane.clone()],
-        }],
-    }]);
-    state.repo_groups = vec![make_repo_group("project", vec![pane])];
-    state.rebuild_row_targets();
-    state.sidebar_focused = false;
-
-    let output = render_to_string(&mut state, 28, 24);
-    assert!(output.contains("·"), "unknown status should show · icon");
+    let icons = StatusIcons::default();
+    assert_eq!(icons.status_icon(&PaneStatus::Unknown), "·");
 }
 
-// ─── Agents: auto-scroll includes trailing border ──────────────────
+// ─── Agents: auto-scroll keeps selected pane visible ───────────────
 
 #[test]
-fn test_agents_auto_scroll_includes_group_bottom_border() {
+fn test_agents_auto_scroll_shows_last_selected_pane() {
     // When the last agent in a group is selected, the auto-scroll
-    // should include the group's bottom border line (╰───╯) so it
-    // is not clipped off the viewport.
+    // should bring it into view (the selection marker must be visible).
     let mut panes = Vec::new();
     for i in 0..6 {
         let mut pane = make_pane(AgentType::Claude, PaneStatus::Idle);
@@ -263,18 +217,18 @@ fn test_agents_auto_scroll_includes_group_bottom_border() {
     }]);
     state.repo_groups = vec![make_repo_group("project", panes)];
     state.sidebar_focused = true;
-    state.focus = Focus::Agents;
+    state.focus = Focus::Panes;
     state.rebuild_row_targets();
 
     // Select the last agent
-    state.global.selected_agent_row = 5;
+    state.global.selected_pane_row = 5;
     // Use a tight height so agents area is small (height - 1 margin - 20 bottom)
-    let output = render_to_string(&mut state, 28, 26);
+    let _ = render_to_string(&mut state, 28, 26);
 
-    // The output should contain the bottom border of the group
+    // Auto-scroll should have moved forward to keep the last-selected pane visible.
     assert!(
-        output.contains("╰"),
-        "group bottom border should be visible when last agent is selected"
+        state.panes_scroll.offset > 0,
+        "selecting the last agent should scroll the list"
     );
 }
 
@@ -301,21 +255,100 @@ fn test_agents_auto_scroll_up_shows_group_header() {
     }]);
     state.repo_groups = vec![make_repo_group("project", panes)];
     state.sidebar_focused = true;
-    state.focus = Focus::Agents;
+    state.focus = Focus::Panes;
     state.rebuild_row_targets();
 
     // Scroll to bottom
-    state.global.selected_agent_row = 7;
+    state.global.selected_pane_row = 7;
     let _ = render_to_string(&mut state, 28, 26);
-    assert!(state.agents_scroll.offset > 0, "should have scrolled down");
+    assert!(state.panes_scroll.offset > 0, "should have scrolled down");
 
     // Now select first agent and re-render
-    state.global.selected_agent_row = 0;
+    state.global.selected_pane_row = 0;
     let output = render_to_string(&mut state, 28, 26);
 
-    // The group header should be visible
+    // The plain repo header should be visible.
     assert!(
-        output.contains("╭ project"),
+        output.contains("project"),
         "group header should be visible when first agent is selected"
     );
+}
+
+// ─── Repo popup rendering ───────────────────────────────────────────
+
+#[test]
+fn repo_popup_renders_repo_names_when_open() {
+    let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
+    let mut state = make_state(vec![SessionInfo {
+        session_name: "main".into(),
+        windows: vec![WindowInfo {
+            window_id: "@1".into(),
+            window_name: "frontend".into(),
+            window_active: true,
+            auto_rename: false,
+            panes: vec![pane.clone()],
+        }],
+    }]);
+    state.repo_groups = vec![
+        make_repo_group("frontend", vec![pane.clone()]),
+        make_repo_group("backend", vec![pane.clone()]),
+    ];
+    state.rebuild_row_targets();
+    state.repo_popup_open = true;
+
+    let output = render_to_string(&mut state, 40, 30);
+    assert!(output.contains("All"), "popup should list 'All' entry");
+    assert!(
+        output.contains("frontend"),
+        "popup should list frontend repo"
+    );
+    assert!(output.contains("backend"), "popup should list backend repo");
+    assert!(
+        state.repo_popup_area.is_some(),
+        "render should populate repo_popup_area for hit-testing"
+    );
+}
+
+#[test]
+fn repo_popup_highlights_selected_entry_with_background() {
+    let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
+    let mut state = make_state(vec![SessionInfo {
+        session_name: "main".into(),
+        windows: vec![WindowInfo {
+            window_id: "@1".into(),
+            window_name: "frontend".into(),
+            window_active: true,
+            auto_rename: false,
+            panes: vec![pane.clone()],
+        }],
+    }]);
+    state.repo_groups = vec![
+        make_repo_group("frontend", vec![pane.clone()]),
+        make_repo_group("backend", vec![pane.clone()]),
+    ];
+    state.rebuild_row_targets();
+    state.sidebar_focused = false; // surface raw colors instead of REVERSED
+    state.repo_popup_open = true;
+    state.repo_popup_selected = 2; // "backend" (0=All, 1=frontend, 2=backend)
+
+    let styled = render_to_styled_string(&mut state, 40, 30);
+    // The highlighted row should carry the selection background.
+    // render_to_styled_string interleaves style annotations between glyphs, so
+    // "backend" never appears as a contiguous substring — match on the styled
+    // bytes of each character ("b[fg:...,bg:237,bold]") to detect the selected
+    // row precisely.
+    let theme = &state.theme;
+    let bg_idx = match theme.selection_bg {
+        ratatui::style::Color::Indexed(n) => n,
+        _ => panic!("selection_bg should be an indexed color in the default theme"),
+    };
+    let bg_marker = format!("bg:{bg_idx}");
+    let selected_line = styled
+        .lines()
+        .find(|l| {
+            l.contains(&format!("b[fg:255,{bg_marker}]"))
+                && l.contains(&format!("d[fg:255,{bg_marker}]"))
+        })
+        .expect("popup should render 'backend' with selection_bg");
+    assert!(selected_line.contains(&bg_marker));
 }

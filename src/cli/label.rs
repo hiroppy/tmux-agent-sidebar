@@ -24,7 +24,29 @@ pub(crate) fn extract_tool_label(
         }
         "Bash" | "PowerShell" => input_str("command"),
         "Glob" | "Grep" => input_str("pattern"),
-        "Agent" => input_str("description"),
+        "Agent" => {
+            // Prefer the subagent's response text (tool_response.content[0].text)
+            // so the Activity tab shows what came back, not just what the
+            // parent asked for. Fall back to description when the response
+            // field is missing (e.g. error cases) so the entry is never blank.
+            let response_text = tool_response
+                .get("content")
+                .and_then(|c| c.as_array())
+                .and_then(|arr| {
+                    arr.iter()
+                        .find(|block| block.get("type").and_then(|t| t.as_str()) == Some("text"))
+                })
+                .and_then(|block| block.get("text"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if response_text.is_empty() {
+                input_str("description")
+            } else {
+                response_text
+            }
+        }
         "WebFetch" => {
             let url = input_str("url");
             url.trim_start_matches("https://")
@@ -157,11 +179,83 @@ mod tests {
     }
 
     #[test]
-    fn label_agent_extracts_description() {
+    fn label_agent_prefers_response_text_over_description() {
+        let input = json!({"description": "Search codebase"});
+        let response = json!({
+            "content": [
+                {"type": "text", "text": "Found the bug at main.rs:42"}
+            ],
+            "status": "completed"
+        });
+        assert_eq!(
+            extract_tool_label("Agent", &input, &response),
+            "Found the bug at main.rs:42"
+        );
+    }
+
+    #[test]
+    fn label_agent_falls_back_to_description_when_no_response() {
         let input = json!({"description": "Search codebase"});
         assert_eq!(
             extract_tool_label("Agent", &input, &json!(null)),
             "Search codebase"
+        );
+    }
+
+    #[test]
+    fn label_agent_falls_back_to_description_when_response_has_no_text_block() {
+        // tool_response exists but lacks a text content block.
+        let input = json!({"description": "Deploy to staging"});
+        let response = json!({"status": "completed"});
+        assert_eq!(
+            extract_tool_label("Agent", &input, &response),
+            "Deploy to staging"
+        );
+    }
+
+    #[test]
+    fn label_agent_falls_back_to_description_when_text_is_empty() {
+        let input = json!({"description": "Explore repo"});
+        let response = json!({
+            "content": [
+                {"type": "text", "text": "   "}
+            ]
+        });
+        assert_eq!(
+            extract_tool_label("Agent", &input, &response),
+            "Explore repo"
+        );
+    }
+
+    #[test]
+    fn label_agent_picks_text_block_among_mixed_types() {
+        // Response can contain multiple content blocks; pick the first text one.
+        let input = json!({"description": "Audit config"});
+        let response = json!({
+            "content": [
+                {"type": "tool_use", "id": "x"},
+                {"type": "text", "text": "No drift detected"}
+            ]
+        });
+        assert_eq!(
+            extract_tool_label("Agent", &input, &response),
+            "No drift detected"
+        );
+    }
+
+    #[test]
+    fn label_agent_preserves_multiline_response() {
+        // Multi-line responses are kept as-is; sanitization happens later in
+        // hook.rs::write_activity_entry.
+        let input = json!({"description": "List files"});
+        let response = json!({
+            "content": [
+                {"type": "text", "text": "main.rs\nlib.rs\ntmux.rs"}
+            ]
+        });
+        assert_eq!(
+            extract_tool_label("Agent", &input, &response),
+            "main.rs\nlib.rs\ntmux.rs"
         );
     }
 

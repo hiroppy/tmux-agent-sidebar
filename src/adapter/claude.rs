@@ -1,7 +1,8 @@
-use crate::event::{AgentEvent, EventAdapter, WorktreeInfo};
+use crate::event::{AgentEvent, AgentEventKind, EventAdapter, WorktreeInfo};
+use crate::tmux::CLAUDE_AGENT;
 use serde_json::Value;
 
-use super::json_str;
+use super::{HookRegistration, json_str};
 
 /// Parse optional worktree object from hook payload.
 /// Returns None if the "worktree" field is missing or not an object.
@@ -48,11 +49,105 @@ fn parse_json_field(input: &Value, field: &str) -> Value {
 
 pub struct ClaudeAdapter;
 
+impl ClaudeAdapter {
+    /// Single source of truth for Claude Code hook wiring. Each entry pairs
+    /// a real Claude Code trigger (verified against the official hooks
+    /// reference at code.claude.com/docs/en/hooks) with the internal
+    /// `AgentEventKind` the sidebar produces. Drift against `parse()` is
+    /// caught by `hook_registrations_match_parse_arms` below.
+    ///
+    /// Note: `PostToolUse` maps to `AgentEventKind::ActivityLog` — the only
+    /// entry where the upstream trigger and the internal kind have
+    /// different names.
+    pub const HOOK_REGISTRATIONS: &'static [HookRegistration] = &[
+        HookRegistration {
+            trigger: "SessionStart",
+            matcher: None,
+            kind: AgentEventKind::SessionStart,
+        },
+        HookRegistration {
+            trigger: "SessionEnd",
+            matcher: None,
+            kind: AgentEventKind::SessionEnd,
+        },
+        HookRegistration {
+            trigger: "UserPromptSubmit",
+            matcher: None,
+            kind: AgentEventKind::UserPromptSubmit,
+        },
+        HookRegistration {
+            trigger: "Notification",
+            matcher: None,
+            kind: AgentEventKind::Notification,
+        },
+        HookRegistration {
+            trigger: "Stop",
+            matcher: None,
+            kind: AgentEventKind::Stop,
+        },
+        HookRegistration {
+            trigger: "StopFailure",
+            matcher: None,
+            kind: AgentEventKind::StopFailure,
+        },
+        HookRegistration {
+            trigger: "PermissionDenied",
+            matcher: None,
+            kind: AgentEventKind::PermissionDenied,
+        },
+        HookRegistration {
+            trigger: "CwdChanged",
+            matcher: None,
+            kind: AgentEventKind::CwdChanged,
+        },
+        HookRegistration {
+            trigger: "SubagentStart",
+            matcher: None,
+            kind: AgentEventKind::SubagentStart,
+        },
+        HookRegistration {
+            trigger: "SubagentStop",
+            matcher: None,
+            kind: AgentEventKind::SubagentStop,
+        },
+        HookRegistration {
+            trigger: "PostToolUse",
+            matcher: None,
+            kind: AgentEventKind::ActivityLog,
+        },
+        HookRegistration {
+            trigger: "TaskCreated",
+            matcher: None,
+            kind: AgentEventKind::TaskCreated,
+        },
+        HookRegistration {
+            trigger: "TaskCompleted",
+            matcher: None,
+            kind: AgentEventKind::TaskCompleted,
+        },
+        HookRegistration {
+            trigger: "TeammateIdle",
+            matcher: None,
+            kind: AgentEventKind::TeammateIdle,
+        },
+        HookRegistration {
+            trigger: "WorktreeCreate",
+            matcher: None,
+            kind: AgentEventKind::WorktreeCreate,
+        },
+        HookRegistration {
+            trigger: "WorktreeRemove",
+            matcher: None,
+            kind: AgentEventKind::WorktreeRemove,
+        },
+    ];
+}
+
 impl EventAdapter for ClaudeAdapter {
     fn parse(&self, event_name: &str, input: &Value) -> Option<AgentEvent> {
         match event_name {
             "session-start" => Some(AgentEvent::SessionStart {
-                agent: "claude".into(),
+                agent: CLAUDE_AGENT.into(),
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: json_str(input, "permission_mode").into(),
                 worktree: parse_worktree(input),
@@ -60,7 +155,7 @@ impl EventAdapter for ClaudeAdapter {
             }),
             "session-end" => Some(AgentEvent::SessionEnd),
             "user-prompt-submit" => Some(AgentEvent::UserPromptSubmit {
-                agent: "claude".into(),
+                agent: CLAUDE_AGENT.into(),
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: json_str(input, "permission_mode").into(),
                 prompt: json_str(input, "prompt").into(),
@@ -71,7 +166,7 @@ impl EventAdapter for ClaudeAdapter {
                 let wait_reason = json_str(input, "notification_type");
                 let meta_only = wait_reason == "idle_prompt";
                 Some(AgentEvent::Notification {
-                    agent: "claude".into(),
+                    agent: CLAUDE_AGENT.into(),
                     cwd: json_str(input, "cwd").into(),
                     permission_mode: json_str(input, "permission_mode").into(),
                     wait_reason: wait_reason.into(),
@@ -81,7 +176,7 @@ impl EventAdapter for ClaudeAdapter {
                 })
             }
             "stop" => Some(AgentEvent::Stop {
-                agent: "claude".into(),
+                agent: CLAUDE_AGENT.into(),
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: json_str(input, "permission_mode").into(),
                 last_message: json_str(input, "last_assistant_message").into(),
@@ -106,7 +201,7 @@ impl EventAdapter for ClaudeAdapter {
                     error_details
                 };
                 Some(AgentEvent::StopFailure {
-                    agent: "claude".into(),
+                    agent: CLAUDE_AGENT.into(),
                     cwd: json_str(input, "cwd").into(),
                     permission_mode: json_str(input, "permission_mode").into(),
                     error: error.into(),
@@ -115,7 +210,7 @@ impl EventAdapter for ClaudeAdapter {
                 })
             }
             "permission-denied" => Some(AgentEvent::PermissionDenied {
-                agent: "claude".into(),
+                agent: CLAUDE_AGENT.into(),
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: json_str(input, "permission_mode").into(),
                 worktree: parse_worktree(input),
@@ -133,6 +228,7 @@ impl EventAdapter for ClaudeAdapter {
                 }
                 Some(AgentEvent::SubagentStart {
                     agent_type: agent_type.into(),
+                    agent_id: parse_agent_id(input),
                 })
             }
             "subagent-stop" => {
@@ -142,6 +238,9 @@ impl EventAdapter for ClaudeAdapter {
                 }
                 Some(AgentEvent::SubagentStop {
                     agent_type: agent_type.into(),
+                    agent_id: parse_agent_id(input),
+                    last_message: json_str(input, "last_assistant_message").into(),
+                    transcript_path: json_str(input, "agent_transcript_path").into(),
                 })
             }
             "activity-log" => {
@@ -180,6 +279,11 @@ impl EventAdapter for ClaudeAdapter {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn hook_registrations_match_parse_arms() {
+        super::super::assert_table_drift_free("claude", ClaudeAdapter::HOOK_REGISTRATIONS);
+    }
 
     #[test]
     fn session_start() {
@@ -363,7 +467,21 @@ mod tests {
         assert_eq!(
             adapter.parse("subagent-start", &input).unwrap(),
             AgentEvent::SubagentStart {
-                agent_type: "Explore".into()
+                agent_type: "Explore".into(),
+                agent_id: None,
+            }
+        );
+    }
+
+    #[test]
+    fn subagent_start_captures_agent_id() {
+        let adapter = ClaudeAdapter;
+        let input = json!({"agent_type": "Explore", "agent_id": "sub-42"});
+        assert_eq!(
+            adapter.parse("subagent-start", &input).unwrap(),
+            AgentEvent::SubagentStart {
+                agent_type: "Explore".into(),
+                agent_id: Some("sub-42".into()),
             }
         );
     }
@@ -381,7 +499,30 @@ mod tests {
         assert_eq!(
             adapter.parse("subagent-stop", &input).unwrap(),
             AgentEvent::SubagentStop {
-                agent_type: "Plan".into()
+                agent_type: "Plan".into(),
+                agent_id: None,
+                last_message: "".into(),
+                transcript_path: "".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn subagent_stop_captures_full_payload() {
+        let adapter = ClaudeAdapter;
+        let input = json!({
+            "agent_type": "Explore",
+            "agent_id": "sub-42",
+            "last_assistant_message": "Found the bug at main.rs:42",
+            "agent_transcript_path": "/tmp/sub-transcript.json"
+        });
+        assert_eq!(
+            adapter.parse("subagent-stop", &input).unwrap(),
+            AgentEvent::SubagentStop {
+                agent_type: "Explore".into(),
+                agent_id: Some("sub-42".into()),
+                last_message: "Found the bug at main.rs:42".into(),
+                transcript_path: "/tmp/sub-transcript.json".into(),
             }
         );
     }

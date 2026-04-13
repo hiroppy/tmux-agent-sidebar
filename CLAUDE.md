@@ -20,6 +20,8 @@ cargo fmt --check              # Check formatting (used in CI)
 
 CI runs `cargo test`, `cargo clippy`, and `cargo fmt --check` on every push/PR.
 
+After implementation is complete, run `cargo build --release`. The plugin directory is usually a symlink to this repo, so the binary is picked up automatically; only a worktree build needs a manual copy (see "Debugging" section below).
+
 ## Architecture
 
 ### Entry Points
@@ -46,12 +48,12 @@ TUI event loop (main.rs) → AppState::sync_global_state() → reads tmux panes 
 - **`git.rs`** — Git operations (branch, ahead/behind, PR numbers via `gh` CLI, diff stats). Runs in a background polling thread.
 - **`activity.rs`** — Parses `/tmp/tmux-agent-activity*.log` files, maps tool types to colors.
 - **`group.rs`** — Groups panes by repository path.
-- **`ui/`** — Rendering layer: `agents.rs` (agent list), `bottom.rs` (activity/git tabs), `colors.rs` (256-color theme), `text.rs` (text formatting/truncation).
+- **`ui/`** — Rendering layer: `panes.rs` (agent list + repo filter), `bottom.rs` (activity/git tabs), `colors.rs` (256-color theme), `text.rs` (text formatting/truncation).
 
 ### State Management
 
-- `Focus` enum: Filter, Agents, ActivityLog — controls keyboard input routing
-- `AgentFilter`: All, Running, Waiting, Idle, Error
+- `Focus` enum: Filter, Panes, ActivityLog — controls keyboard input routing
+- `StatusFilter`: All, Running, Waiting, Idle, Error
 - `BottomTab`: Activity, GitStatus
 - SIGUSR1 signal triggers instant refresh on tmux pane focus change
 
@@ -61,15 +63,14 @@ Tests are in `/tests/` using Ratatui's `TestBackend` for UI rendering assertions
 
 ## Debugging (Local tmux Plugin)
 
-ローカルでデバッグするには、release ビルド後にビルド成果物を tmux plugin ディレクトリへコピーし、サイドバーを再起動する。
+`~/.tmux/plugins/tmux-agent-sidebar` is typically a symlink to this repository, so `cargo build --release` alone updates the binary tmux loads. Just restart the sidebar (toggle off → on via the tmux keybinding) to pick up the new build.
 
 ```bash
 cargo build --release
-cp target/release/tmux-agent-sidebar ~/.tmux/plugins/tmux-agent-sidebar/target/release/tmux-agent-sidebar
-# サイドバーを再起動（tmux のキーバインドで toggle off → on）
+# Restart sidebar (toggle off → on via tmux keybinding)
 ```
 
-**worktree で作業する場合**: worktree 内でビルドすると成果物は worktree 側の `target/release/` に出力される。コピー先は同じ。
+**When working in a worktree**: Worktrees build into their own `target/release/`, which is not what the plugin directory points at, so the artifact must be copied manually.
 
 ```bash
 cp <worktree-path>/target/release/tmux-agent-sidebar ~/.tmux/plugins/tmux-agent-sidebar/target/release/tmux-agent-sidebar
@@ -78,3 +79,7 @@ cp <worktree-path>/target/release/tmux-agent-sidebar ~/.tmux/plugins/tmux-agent-
 ## Rust Edition
 
 This project uses Rust edition 2024 (`Cargo.toml`).
+
+## Writing Guidelines
+
+- All documentation under `docs/` and all skill files under `.claude/skills/` must be written in English.

@@ -72,6 +72,7 @@ pub fn fetch_git_data(path: &str) -> GitData {
     // Spawn `gh` with a timeout to avoid blocking the git thread indefinitely
     // (e.g. network issues, auth prompts).
     if let Ok(mut child) = Command::new("gh")
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .args(["pr", "view", "--json", "number", "-q", ".number"])
         .current_dir(path)
         .stdout(std::process::Stdio::piped())
@@ -204,7 +205,11 @@ fn parse_numstat(text: &str) -> std::collections::HashMap<&str, (usize, usize)> 
 pub(crate) fn run_git(path: &str, args: &[&str]) -> Option<String> {
     let mut cmd_args = vec!["-C", path];
     cmd_args.extend_from_slice(args);
-    let output = Command::new("git").args(&cmd_args).output().ok()?;
+    let output = Command::new("git")
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .args(&cmd_args)
+        .output()
+        .ok()?;
     if output.status.success() {
         let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if s.is_empty() { None } else { Some(s) }

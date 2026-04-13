@@ -1,8 +1,10 @@
 use std::collections::HashMap;
+use std::time::Instant;
 
 use crate::activity::{ActivityEntry, TaskProgress};
 use crate::tmux::{self, SessionInfo};
 use crate::ui::colors::ColorTheme;
+use crate::ui::icons::StatusIcons;
 
 mod refresh;
 mod tab;
@@ -12,12 +14,12 @@ pub(crate) use refresh::{TaskProgressDecision, classify_task_progress};
 #[derive(Debug, Clone, PartialEq)]
 pub enum Focus {
     Filter,
-    Agents,
+    Panes,
     ActivityLog,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum AgentFilter {
+pub enum StatusFilter {
     All,
     Running,
     Waiting,
@@ -25,29 +27,30 @@ pub enum AgentFilter {
     Error,
 }
 
-impl AgentFilter {
-    pub const VARIANTS: [AgentFilter; 5] = [
-        AgentFilter::All,
-        AgentFilter::Running,
-        AgentFilter::Waiting,
-        AgentFilter::Idle,
-        AgentFilter::Error,
+impl StatusFilter {
+    pub const VARIANTS: [StatusFilter; 5] = [
+        StatusFilter::All,
+        StatusFilter::Running,
+        StatusFilter::Waiting,
+        StatusFilter::Idle,
+        StatusFilter::Error,
     ];
 
     pub fn next(self) -> Self {
-        let idx = AgentFilter::VARIANTS
+        let idx = StatusFilter::VARIANTS
             .iter()
             .position(|v| *v == self)
             .unwrap_or(0);
-        AgentFilter::VARIANTS[(idx + 1) % AgentFilter::VARIANTS.len()]
+        StatusFilter::VARIANTS[(idx + 1) % StatusFilter::VARIANTS.len()]
     }
 
     pub fn prev(self) -> Self {
-        let idx = AgentFilter::VARIANTS
+        let idx = StatusFilter::VARIANTS
             .iter()
             .position(|v| *v == self)
             .unwrap_or(0);
-        AgentFilter::VARIANTS[(idx + AgentFilter::VARIANTS.len() - 1) % AgentFilter::VARIANTS.len()]
+        StatusFilter::VARIANTS
+            [(idx + StatusFilter::VARIANTS.len() - 1) % StatusFilter::VARIANTS.len()]
     }
 
     pub fn as_str(self) -> &'static str {
@@ -72,11 +75,11 @@ impl AgentFilter {
 
     pub fn matches(self, status: &crate::tmux::PaneStatus) -> bool {
         match self {
-            AgentFilter::All => true,
-            AgentFilter::Running => *status == crate::tmux::PaneStatus::Running,
-            AgentFilter::Waiting => *status == crate::tmux::PaneStatus::Waiting,
-            AgentFilter::Idle => *status == crate::tmux::PaneStatus::Idle,
-            AgentFilter::Error => *status == crate::tmux::PaneStatus::Error,
+            StatusFilter::All => true,
+            StatusFilter::Running => *status == crate::tmux::PaneStatus::Running,
+            StatusFilter::Waiting => *status == crate::tmux::PaneStatus::Waiting,
+            StatusFilter::Idle => *status == crate::tmux::PaneStatus::Idle,
+            StatusFilter::Error => *status == crate::tmux::PaneStatus::Error,
         }
     }
 }
@@ -116,6 +119,16 @@ pub enum BottomTab {
     GitStatus,
 }
 
+/// Per-pane runtime state that should vanish together with the pane.
+#[derive(Debug, Clone, Default)]
+pub struct PaneRuntimeState {
+    pub ports: Vec<u16>,
+    pub command: Option<String>,
+    pub task_progress: Option<TaskProgress>,
+    pub task_dismissed_total: Option<usize>,
+    pub inactive_since: Option<u64>,
+}
+
 #[derive(Debug, Clone)]
 pub struct RowTarget {
     pub pane_id: String,
@@ -139,11 +152,11 @@ impl ScrollState {
 /// State shared across all sidebar instances via tmux global variables.
 /// Synced from tmux at startup and on pane focus change (SIGUSR1).
 pub struct GlobalState {
-    pub agent_filter: AgentFilter,
-    pub selected_agent_row: usize,
+    pub status_filter: StatusFilter,
+    pub selected_pane_row: usize,
     pub repo_filter: RepoFilter,
     /// Last filter value successfully written to tmux.
-    last_saved_filter: AgentFilter,
+    last_saved_filter: StatusFilter,
     /// Last cursor value successfully written to tmux.
     last_saved_cursor: usize,
     /// Last repo filter value successfully written to tmux.
@@ -153,10 +166,10 @@ pub struct GlobalState {
 impl GlobalState {
     pub fn new() -> Self {
         Self {
-            agent_filter: AgentFilter::All,
-            selected_agent_row: 0,
+            status_filter: StatusFilter::All,
+            selected_pane_row: 0,
             repo_filter: RepoFilter::All,
-            last_saved_filter: AgentFilter::All,
+            last_saved_filter: StatusFilter::All,
             last_saved_cursor: 0,
             last_saved_repo_filter: RepoFilter::All,
         }
@@ -166,8 +179,9 @@ impl GlobalState {
     /// Only updates `last_saved_filter` on success so that a failed write
     /// does not cause sync to overwrite the user's choice.
     pub fn save_filter(&mut self) {
-        if tmux::run_tmux(&["set", "-g", "@sidebar_filter", self.agent_filter.as_str()]).is_some() {
-            self.last_saved_filter = self.agent_filter;
+        if tmux::run_tmux(&["set", "-g", "@sidebar_filter", self.status_filter.as_str()]).is_some()
+        {
+            self.last_saved_filter = self.status_filter;
         }
     }
 
@@ -177,11 +191,11 @@ impl GlobalState {
             "set",
             "-g",
             "@sidebar_cursor",
-            &self.selected_agent_row.to_string(),
+            &self.selected_pane_row.to_string(),
         ])
         .is_some()
         {
-            self.last_saved_cursor = self.selected_agent_row;
+            self.last_saved_cursor = self.selected_pane_row;
         }
     }
 
@@ -209,9 +223,9 @@ impl GlobalState {
     /// Apply all global options from tmux (filter, cursor, repo filter).
     pub fn apply_all(&mut self, opts: &HashMap<String, String>) {
         if let Some(filter_str) = opts.get("@sidebar_filter") {
-            let tmux_filter = AgentFilter::from_str(filter_str);
+            let tmux_filter = StatusFilter::from_str(filter_str);
             if tmux_filter != self.last_saved_filter {
-                self.agent_filter = tmux_filter;
+                self.status_filter = tmux_filter;
                 self.last_saved_filter = tmux_filter;
             }
         }
@@ -219,7 +233,7 @@ impl GlobalState {
             && let Ok(n) = cursor_str.parse::<usize>()
             && n != self.last_saved_cursor
         {
-            self.selected_agent_row = n;
+            self.selected_pane_row = n;
             self.last_saved_cursor = n;
         }
         if let Some(repo_str) = opts.get("@sidebar_repo_filter") {
@@ -239,22 +253,20 @@ pub struct AppState {
     pub sidebar_focused: bool,
     pub focus: Focus,
     pub spinner_frame: usize,
-    pub agent_row_targets: Vec<RowTarget>,
+    pub pane_row_targets: Vec<RowTarget>,
     pub activity_entries: Vec<ActivityEntry>,
     pub activity_scroll: ScrollState,
     pub focused_pane_id: Option<String>,
     pub tmux_pane: String,
     pub activity_max_entries: usize,
     pub line_to_row: Vec<Option<usize>>,
-    pub agents_scroll: ScrollState,
+    pub panes_scroll: ScrollState,
     pub theme: ColorTheme,
+    pub icons: StatusIcons,
     pub bottom_tab: BottomTab,
     pub git: crate::git::GitData,
     pub git_scroll: ScrollState,
-    pub pane_task_progress: HashMap<String, TaskProgress>,
-    pub pane_task_dismissed: HashMap<String, usize>,
-    /// Tracks when each pane first became inactive (epoch seconds).
-    pub pane_inactive_since: HashMap<String, u64>,
+    pub pane_states: HashMap<String, PaneRuntimeState>,
     /// Agent pane IDs that have already been seen.
     pub seen_agent_panes: std::collections::HashSet<String>,
     /// Per-pane bottom tab preference.
@@ -266,19 +278,18 @@ pub struct AppState {
     pub repo_popup_open: bool,
     pub repo_popup_selected: usize,
     pub repo_popup_area: Option<ratatui::layout::Rect>,
-    pub repo_button_col: u16,
-    pub cat_state: crate::ui::cat::CatState,
-    /// Cat animation X position (character offset from left of bottom panel).
-    pub cat_x: u16,
-    /// Cat animation frame index (0 = sitting, 1-2 = running).
-    pub cat_frame: usize,
-    pub cat_bob_timer: usize,
+    pub repo_button_col: Option<u16>,
     /// Update notice shown when a newer GitHub release is available.
     pub version_notice: Option<crate::version::UpdateNotice>,
     /// Shared state across sidebar instances, persisted to tmux global variables.
     pub global: GlobalState,
     /// Hyperlink overlays to be written after frame render (OSC 8).
     pub hyperlink_overlays: Vec<HyperlinkOverlay>,
+    pub port_scan_initialized: bool,
+    pub last_port_refresh: Instant,
+    /// Height of the bottom panel in lines. Loaded once at startup from
+    /// the `@sidebar_bottom_height` tmux option. A value of 0 hides the panel.
+    pub bottom_panel_height: u16,
 }
 
 /// Screen-positioned hyperlink overlay for OSC 8 terminal hyperlinks.
@@ -297,23 +308,22 @@ impl AppState {
             sessions: vec![],
             repo_groups: vec![],
             sidebar_focused: false,
-            focus: Focus::Agents,
+            focus: Focus::Panes,
             spinner_frame: 0,
-            agent_row_targets: vec![],
+            pane_row_targets: vec![],
             activity_entries: vec![],
             activity_scroll: ScrollState::default(),
             focused_pane_id: None,
             tmux_pane,
             activity_max_entries: 50,
             line_to_row: vec![],
-            agents_scroll: ScrollState::default(),
+            panes_scroll: ScrollState::default(),
             theme: ColorTheme::default(),
+            icons: StatusIcons::default(),
             bottom_tab: BottomTab::Activity,
             git: crate::git::GitData::default(),
             git_scroll: ScrollState::default(),
-            pane_task_progress: HashMap::new(),
-            pane_task_dismissed: HashMap::new(),
-            pane_inactive_since: HashMap::new(),
+            pane_states: HashMap::new(),
             seen_agent_panes: std::collections::HashSet::new(),
             pane_tab_prefs: HashMap::new(),
             prev_focused_pane_id: None,
@@ -321,15 +331,79 @@ impl AppState {
             repo_popup_open: false,
             repo_popup_selected: 0,
             repo_popup_area: None,
-            repo_button_col: u16::MAX,
-            cat_state: crate::ui::cat::CatState::Idle,
-            cat_x: crate::ui::cat::CAT_HOME_X,
-            cat_frame: 0,
-            cat_bob_timer: 0,
+            repo_button_col: None,
             version_notice: None,
             global: GlobalState::new(),
             hyperlink_overlays: vec![],
+            port_scan_initialized: false,
+            last_port_refresh: Instant::now(),
+            bottom_panel_height: crate::ui::BOTTOM_PANEL_HEIGHT,
         }
+    }
+
+    pub fn pane_state_mut(&mut self, pane_id: &str) -> &mut PaneRuntimeState {
+        self.pane_states.entry(pane_id.to_string()).or_default()
+    }
+
+    pub fn pane_state(&self, pane_id: &str) -> Option<&PaneRuntimeState> {
+        self.pane_states.get(pane_id)
+    }
+
+    pub fn set_pane_ports(&mut self, pane_id: &str, ports: Vec<u16>) {
+        self.pane_state_mut(pane_id).ports = ports;
+    }
+
+    pub fn pane_ports(&self, pane_id: &str) -> Option<&[u16]> {
+        self.pane_state(pane_id).map(|s| s.ports.as_slice())
+    }
+
+    pub fn set_pane_command(&mut self, pane_id: &str, command: Option<String>) {
+        self.pane_state_mut(pane_id).command = command;
+    }
+
+    pub fn pane_command(&self, pane_id: &str) -> Option<&str> {
+        self.pane_state(pane_id).and_then(|s| s.command.as_deref())
+    }
+
+    pub fn set_pane_task_progress(&mut self, pane_id: &str, progress: Option<TaskProgress>) {
+        self.pane_state_mut(pane_id).task_progress = progress;
+    }
+
+    pub fn pane_task_progress(&self, pane_id: &str) -> Option<&TaskProgress> {
+        self.pane_state(pane_id)
+            .and_then(|s| s.task_progress.as_ref())
+    }
+
+    pub fn set_pane_task_dismissed_total(&mut self, pane_id: &str, total: Option<usize>) {
+        self.pane_state_mut(pane_id).task_dismissed_total = total;
+    }
+
+    pub fn pane_task_dismissed_total(&self, pane_id: &str) -> Option<usize> {
+        self.pane_state(pane_id)
+            .and_then(|s| s.task_dismissed_total)
+    }
+
+    pub fn set_pane_inactive_since(&mut self, pane_id: &str, since: Option<u64>) {
+        self.pane_state_mut(pane_id).inactive_since = since;
+    }
+
+    pub fn pane_inactive_since(&self, pane_id: &str) -> Option<u64> {
+        self.pane_state(pane_id).and_then(|s| s.inactive_since)
+    }
+
+    pub fn clear_pane_state(&mut self, pane_id: &str) {
+        self.pane_states.remove(pane_id);
+    }
+
+    pub fn prune_pane_states_to_current_panes(&mut self) {
+        let mut active_ids = std::collections::HashSet::new();
+        for group in &self.repo_groups {
+            for (pane, _) in &group.panes {
+                active_ids.insert(pane.pane_id.clone());
+            }
+        }
+        self.pane_states
+            .retain(|pane_id, _| active_ids.contains(pane_id));
     }
 
     pub fn rebuild_row_targets(&mut self) {
@@ -340,23 +414,23 @@ impl AppState {
             }
         }
 
-        self.agent_row_targets.clear();
+        self.pane_row_targets.clear();
         for group in &self.repo_groups {
             if !self.global.repo_filter.matches_group(&group.name) {
                 continue;
             }
             for (pane, _) in &group.panes {
-                if self.global.agent_filter.matches(&pane.status) {
-                    self.agent_row_targets.push(RowTarget {
+                if self.global.status_filter.matches(&pane.status) {
+                    self.pane_row_targets.push(RowTarget {
                         pane_id: pane.pane_id.clone(),
                     });
                 }
             }
         }
-        if self.global.selected_agent_row >= self.agent_row_targets.len()
-            && !self.agent_row_targets.is_empty()
+        if self.global.selected_pane_row >= self.pane_row_targets.len()
+            && !self.pane_row_targets.is_empty()
         {
-            self.global.selected_agent_row = self.agent_row_targets.len() - 1;
+            self.global.selected_pane_row = self.pane_row_targets.len() - 1;
         }
     }
 
@@ -372,22 +446,22 @@ impl AppState {
     }
 
     /// Move agent selection. Returns true if moved, false if at boundary.
-    pub fn move_agent_selection(&mut self, delta: isize) -> bool {
-        if self.agent_row_targets.is_empty() {
+    pub fn move_pane_selection(&mut self, delta: isize) -> bool {
+        if self.pane_row_targets.is_empty() {
             return false;
         }
-        let len = self.agent_row_targets.len() as isize;
-        let next = self.global.selected_agent_row as isize + delta;
+        let len = self.pane_row_targets.len() as isize;
+        let next = self.global.selected_pane_row as isize + delta;
         if next >= 0 && next < len {
-            self.global.selected_agent_row = next as usize;
+            self.global.selected_pane_row = next as usize;
             true
         } else {
             false
         }
     }
 
-    pub fn activate_selection(&self) {
-        if let Some(target) = self.agent_row_targets.get(self.global.selected_agent_row) {
+    pub fn activate_selected_pane(&self) {
+        if let Some(target) = self.pane_row_targets.get(self.global.selected_pane_row) {
             tmux::select_pane(&target.pane_id);
         }
     }
@@ -433,7 +507,7 @@ impl AppState {
         if row >= bottom_start {
             self.scroll_bottom(delta);
         } else {
-            self.agents_scroll.scroll(delta);
+            self.panes_scroll.scroll(delta);
         }
     }
 
@@ -449,34 +523,41 @@ impl AppState {
         }
         self.last_filter_click = now;
 
-        let (_, running, waiting, idle, error) = self.status_counts();
-        // Layout: " All  ●N  ◐N  ○N  ✕N"
-        // Calculate x ranges for each filter item
+        let (all, running, waiting, idle, error) = self.status_counts();
+        // Layout: " ∑N  ●N  ◐N  ○N  ✕N"
+        // Each filter item renders as `icon(1) + count`, so the clickable
+        // width is `1 + digits(count)`.
         let mut x = 1usize; // leading space
-        let items: Vec<(AgentFilter, usize)> = vec![
-            (AgentFilter::All, 3),                                  // "All"
-            (AgentFilter::Running, 1 + format!("{running}").len()), // icon + count
-            (AgentFilter::Waiting, 1 + format!("{waiting}").len()),
-            (AgentFilter::Idle, 1 + format!("{idle}").len()),
-            (AgentFilter::Error, 1 + format!("{error}").len()),
+        let items: Vec<(StatusFilter, usize)> = vec![
+            (StatusFilter::All, 1 + format!("{all}").len()),
+            (StatusFilter::Running, 1 + format!("{running}").len()),
+            (StatusFilter::Waiting, 1 + format!("{waiting}").len()),
+            (StatusFilter::Idle, 1 + format!("{idle}").len()),
+            (StatusFilter::Error, 1 + format!("{error}").len()),
         ];
         let col = col as usize;
-        // Check if click is on repo button (right side)
-        if col >= self.repo_button_col as usize {
-            self.toggle_repo_popup();
-            return;
-        }
         for (i, (filter, width)) in items.iter().enumerate() {
             if i > 0 {
                 x += 2; // "  " separator
             }
             if col >= x && col < x + width {
-                self.global.agent_filter = *filter;
+                self.global.status_filter = *filter;
                 self.global.save_filter();
                 self.rebuild_row_targets();
                 return;
             }
             x += width;
+        }
+    }
+
+    /// Handle mouse click on the secondary header row (row 1).
+    /// The repo filter button lives on the far right of this row.
+    pub fn handle_secondary_header_click(&mut self, col: u16) {
+        if self
+            .repo_button_col
+            .is_some_and(|repo_button_col| col >= repo_button_col)
+        {
+            self.toggle_repo_popup();
         }
     }
 
@@ -511,11 +592,15 @@ impl AppState {
             self.handle_filter_click(col);
             return;
         }
-        let line_index = (row as usize - 1) + self.agents_scroll.offset;
+        if row == 1 {
+            self.handle_secondary_header_click(col);
+            return;
+        }
+        let line_index = (row as usize - 2) + self.panes_scroll.offset;
         if let Some(Some(agent_row)) = self.line_to_row.get(line_index) {
-            self.global.selected_agent_row = *agent_row;
+            self.global.selected_pane_row = *agent_row;
             self.global.save_cursor();
-            self.activate_selection();
+            self.activate_selected_pane();
         }
     }
 
@@ -582,58 +667,6 @@ impl AppState {
     pub fn close_repo_popup(&mut self) {
         self.repo_popup_open = false;
     }
-
-    /// Advance cat animation state. Called every spinner tick (200ms).
-    pub fn tick_cat(&mut self, panel_width: u16) {
-        let running_count = self
-            .repo_groups
-            .iter()
-            .flat_map(|g| &g.panes)
-            .filter(|(p, _)| p.status == crate::tmux::PaneStatus::Running)
-            .count();
-
-        let desk_x = panel_width.saturating_sub(
-            crate::ui::cat::DESK_OFFSET + crate::ui::cat::DESK_WIDTH + crate::ui::cat::CAT_WIDTH,
-        );
-
-        match self.cat_state {
-            crate::ui::cat::CatState::Idle => {
-                if running_count > 0 {
-                    self.cat_state = crate::ui::cat::CatState::WalkRight;
-                    self.cat_frame = 0;
-                    self.cat_x = self.cat_x.saturating_add(1);
-                } else {
-                    self.cat_bob_timer = (self.cat_bob_timer + 1) % crate::ui::cat::BOB_INTERVAL;
-                }
-            }
-            crate::ui::cat::CatState::WalkRight => {
-                self.cat_x = self.cat_x.saturating_add(1);
-                self.cat_frame = if self.cat_frame == 1 { 2 } else { 1 };
-                if self.cat_x >= desk_x {
-                    self.cat_x = desk_x;
-                    self.cat_state = crate::ui::cat::CatState::Working;
-                    self.cat_frame = 0;
-                }
-            }
-            crate::ui::cat::CatState::Working => {
-                self.cat_frame = if self.cat_frame == 1 { 2 } else { 1 };
-                if running_count == 0 {
-                    self.cat_state = crate::ui::cat::CatState::WalkLeft;
-                    self.cat_frame = 0;
-                }
-            }
-            crate::ui::cat::CatState::WalkLeft => {
-                self.cat_x = self.cat_x.saturating_sub(1);
-                self.cat_frame = if self.cat_frame == 1 { 2 } else { 1 };
-                if self.cat_x <= crate::ui::cat::CAT_HOME_X {
-                    self.cat_x = crate::ui::cat::CAT_HOME_X;
-                    self.cat_state = crate::ui::cat::CatState::Idle;
-                    self.cat_frame = 0;
-                    self.cat_bob_timer = 0;
-                }
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -657,6 +690,7 @@ mod tests {
             attention: false,
             agent: AgentType::Claude,
             path: "/tmp".into(),
+            current_command: String::new(),
             prompt: String::new(),
             prompt_is_response: false,
             started_at: None,
@@ -695,10 +729,10 @@ mod tests {
         ];
         state.rebuild_row_targets();
 
-        assert_eq!(state.agent_row_targets.len(), 3);
-        assert_eq!(state.agent_row_targets[0].pane_id, "%1");
-        assert_eq!(state.agent_row_targets[1].pane_id, "%2");
-        assert_eq!(state.agent_row_targets[2].pane_id, "%3");
+        assert_eq!(state.pane_row_targets.len(), 3);
+        assert_eq!(state.pane_row_targets[0].pane_id, "%1");
+        assert_eq!(state.pane_row_targets[1].pane_id, "%2");
+        assert_eq!(state.pane_row_targets[2].pane_id, "%3");
     }
 
     #[test]
@@ -719,13 +753,13 @@ mod tests {
         state.rebuild_row_targets();
 
         // Start at first group
-        assert_eq!(state.global.selected_agent_row, 0);
-        assert_eq!(state.agent_row_targets[0].pane_id, "%1");
+        assert_eq!(state.global.selected_pane_row, 0);
+        assert_eq!(state.pane_row_targets[0].pane_id, "%1");
 
         // Move to second group
-        assert!(state.move_agent_selection(1));
-        assert_eq!(state.global.selected_agent_row, 1);
-        assert_eq!(state.agent_row_targets[1].pane_id, "%5");
+        assert!(state.move_pane_selection(1));
+        assert_eq!(state.global.selected_pane_row, 1);
+        assert_eq!(state.pane_row_targets[1].pane_id, "%5");
     }
 
     #[test]
@@ -748,13 +782,13 @@ mod tests {
         state.refresh_task_progress();
 
         // All completed → hidden immediately
-        assert!(state.pane_task_progress.get(&pane_id).is_none());
+        assert!(state.pane_task_progress(&pane_id).is_none());
         // Dismissed count should be recorded
-        assert_eq!(state.pane_task_dismissed.get(&pane_id), Some(&2));
+        assert_eq!(state.pane_task_dismissed_total(&pane_id), Some(2));
 
         // Calling refresh again should still be hidden (no flicker)
         state.refresh_task_progress();
-        assert!(state.pane_task_progress.get(&pane_id).is_none());
+        assert!(state.pane_task_progress(&pane_id).is_none());
 
         fs::remove_file(&log_path).ok();
     }
@@ -778,7 +812,7 @@ mod tests {
         )
         .unwrap();
         state.refresh_task_progress();
-        assert!(state.pane_task_progress.get(&pane_id).is_none());
+        assert!(state.pane_task_progress(&pane_id).is_none());
 
         // Now add a new in-progress task → should re-show
         fs::write(
@@ -786,7 +820,7 @@ mod tests {
             "10:00|TaskCreate|#1 A\n10:01|TaskUpdate|completed #1\n10:02|TaskCreate|#2 B\n10:03|TaskUpdate|in_progress #2\n",
         ).unwrap();
         state.refresh_task_progress();
-        assert!(state.pane_task_progress.get(&pane_id).is_some());
+        assert!(state.pane_task_progress(&pane_id).is_some());
 
         fs::remove_file(&log_path).ok();
     }
@@ -896,18 +930,18 @@ mod tests {
             has_focus: true,
             panes: vec![(test_pane(&pane_id), PaneGitInfo::default())],
         }];
-        state.pane_task_progress.insert(
-            pane_id.clone(),
-            TaskProgress {
+        state.set_pane_task_progress(
+            &pane_id,
+            Some(TaskProgress {
                 tasks: vec![("stale".into(), TaskStatus::InProgress)],
-            },
+            }),
         );
-        state.pane_task_dismissed.insert(pane_id.clone(), 1);
+        state.set_pane_task_dismissed_total(&pane_id, Some(1));
 
         state.refresh_task_progress();
 
-        assert!(state.pane_task_progress.is_empty());
-        assert!(state.pane_task_dismissed.is_empty());
+        assert!(state.pane_task_progress(&pane_id).is_none());
+        assert_eq!(state.pane_task_dismissed_total(&pane_id), None);
     }
 
     #[test]
@@ -919,7 +953,7 @@ mod tests {
             has_focus: true,
             panes: vec![(test_pane(&pane_id), PaneGitInfo::default())],
         }];
-        state.pane_task_dismissed.insert(pane_id.clone(), 1);
+        state.set_pane_task_dismissed_total(&pane_id, Some(1));
         let log_path = write_activity_log(
             &pane_id,
             "10:00|TaskCreate|#1 A\n10:01|TaskUpdate|in_progress #1\n",
@@ -927,9 +961,9 @@ mod tests {
 
         state.refresh_task_progress();
 
-        assert_eq!(state.pane_task_dismissed.get(&pane_id), None);
+        assert_eq!(state.pane_task_dismissed_total(&pane_id), None);
         assert_eq!(
-            state.pane_task_progress.get(&pane_id).map(|p| p.total()),
+            state.pane_task_progress(&pane_id).map(|p| p.total()),
             Some(1)
         );
         fs::remove_file(&log_path).ok();
@@ -951,8 +985,8 @@ mod tests {
 
         state.refresh_task_progress();
 
-        assert!(state.pane_task_progress.get(&pane_id).is_none());
-        assert_eq!(state.pane_task_dismissed.get(&pane_id), Some(&1));
+        assert!(state.pane_task_progress(&pane_id).is_none());
+        assert_eq!(state.pane_task_dismissed_total(&pane_id), Some(1));
         fs::remove_file(&log_path).ok();
     }
 
@@ -971,12 +1005,12 @@ mod tests {
         );
 
         state.refresh_task_progress();
-        assert_eq!(state.pane_task_dismissed.get(&pane_id), Some(&1));
-        assert!(state.pane_task_progress.get(&pane_id).is_none());
+        assert_eq!(state.pane_task_dismissed_total(&pane_id), Some(1));
+        assert!(state.pane_task_progress(&pane_id).is_none());
 
         state.refresh_task_progress();
-        assert_eq!(state.pane_task_dismissed.get(&pane_id), Some(&1));
-        assert!(state.pane_task_progress.get(&pane_id).is_none());
+        assert_eq!(state.pane_task_dismissed_total(&pane_id), Some(1));
+        assert!(state.pane_task_progress(&pane_id).is_none());
         fs::remove_file(&log_path).ok();
     }
 
@@ -994,16 +1028,64 @@ mod tests {
             "10:00|TaskCreate|#1 A\n10:01|TaskUpdate|completed #1\n",
         );
         state.refresh_task_progress();
-        assert_eq!(state.pane_task_dismissed.get(&pane_id), Some(&1));
+        assert_eq!(state.pane_task_dismissed_total(&pane_id), Some(1));
 
         // Pane removed — both dismissed and inactive_since should be cleaned up
         state.repo_groups.clear();
-        state.pane_inactive_since.insert(pane_id.clone(), 100);
+        state.set_pane_inactive_since(&pane_id, Some(100));
         state.refresh_task_progress();
 
-        assert!(state.pane_task_dismissed.is_empty());
-        assert!(state.pane_inactive_since.is_empty());
+        assert!(state.pane_state(&pane_id).is_none());
         fs::remove_file(&log_path).ok();
+    }
+
+    #[test]
+    fn pane_runtime_state_accessors_round_trip() {
+        let mut state = AppState::new("%99".into());
+        let pane_id = "%213";
+
+        state.set_pane_ports(pane_id, vec![3000, 5173]);
+        state.set_pane_command(pane_id, Some("npm run dev".into()));
+        state.set_pane_task_progress(
+            pane_id,
+            Some(TaskProgress {
+                tasks: vec![("A".into(), TaskStatus::InProgress)],
+            }),
+        );
+        state.set_pane_task_dismissed_total(pane_id, Some(4));
+        state.set_pane_inactive_since(pane_id, Some(123));
+
+        assert_eq!(state.pane_ports(pane_id), Some(&[3000, 5173][..]));
+        assert_eq!(state.pane_command(pane_id), Some("npm run dev"));
+        assert_eq!(
+            state.pane_task_progress(pane_id).map(|p| p.total()),
+            Some(1)
+        );
+        assert_eq!(state.pane_task_dismissed_total(pane_id), Some(4));
+        assert_eq!(state.pane_inactive_since(pane_id), Some(123));
+
+        state.clear_pane_state(pane_id);
+        assert!(state.pane_state(pane_id).is_none());
+    }
+
+    #[test]
+    fn prune_pane_states_to_current_panes_drops_stale_entries() {
+        let mut state = AppState::new("%99".into());
+        state.repo_groups = vec![RepoGroup {
+            name: "test".into(),
+            has_focus: true,
+            panes: vec![(test_pane("%1"), PaneGitInfo::default())],
+        }];
+        state.set_pane_ports("%1", vec![3000]);
+        state.set_pane_command("%1", Some("npm run dev".into()));
+        state.set_pane_ports("%2", vec![5173]);
+        state.set_pane_task_dismissed_total("%2", Some(2));
+
+        state.prune_pane_states_to_current_panes();
+
+        assert_eq!(state.pane_ports("%1"), Some(&[3000][..]));
+        assert_eq!(state.pane_command("%1"), Some("npm run dev"));
+        assert!(state.pane_state("%2").is_none());
     }
 
     #[test]
@@ -1026,14 +1108,14 @@ mod tests {
         // First refresh: grace period starts, tasks still shown (not dismissed yet)
         state.now = 100;
         state.refresh_task_progress();
-        assert!(state.pane_task_progress.get(&pane_id).is_some());
-        assert!(state.pane_inactive_since.contains_key(&pane_id));
+        assert!(state.pane_task_progress(&pane_id).is_some());
+        assert!(state.pane_inactive_since(&pane_id).is_some());
 
         // After grace period (3s): should be dismissed
         state.now = 104;
         state.refresh_task_progress();
-        assert!(state.pane_task_progress.get(&pane_id).is_none());
-        assert_eq!(state.pane_task_dismissed.get(&pane_id), Some(&6));
+        assert!(state.pane_task_progress(&pane_id).is_none());
+        assert_eq!(state.pane_task_dismissed_total(&pane_id), Some(6));
         fs::remove_file(&log_path).ok();
     }
 
@@ -1055,9 +1137,9 @@ mod tests {
         state.refresh_task_progress();
 
         // Agent is running, so incomplete tasks should still be shown
-        assert!(state.pane_task_progress.get(&pane_id).is_some());
+        assert!(state.pane_task_progress(&pane_id).is_some());
         assert_eq!(
-            state.pane_task_progress.get(&pane_id).map(|p| p.total()),
+            state.pane_task_progress(&pane_id).map(|p| p.total()),
             Some(2)
         );
         fs::remove_file(&log_path).ok();
@@ -1082,13 +1164,13 @@ mod tests {
         // First refresh: grace period starts, tasks still shown
         state.now = 100;
         state.refresh_task_progress();
-        assert!(state.pane_task_progress.get(&pane_id).is_some());
+        assert!(state.pane_task_progress(&pane_id).is_some());
 
         // After grace period: agent errored out — dismiss incomplete tasks
         state.now = 104;
         state.refresh_task_progress();
-        assert!(state.pane_task_progress.get(&pane_id).is_none());
-        assert_eq!(state.pane_task_dismissed.get(&pane_id), Some(&1));
+        assert!(state.pane_task_progress(&pane_id).is_none());
+        assert_eq!(state.pane_task_dismissed_total(&pane_id), Some(1));
         fs::remove_file(&log_path).ok();
     }
 
@@ -1113,8 +1195,8 @@ mod tests {
         // Agent is idle — grace timer starts, tasks still shown
         state.now = 100;
         state.refresh_task_progress();
-        assert!(state.pane_task_progress.get(&pane_id).is_some());
-        assert!(state.pane_inactive_since.contains_key(&pane_id));
+        assert!(state.pane_task_progress(&pane_id).is_some());
+        assert!(state.pane_inactive_since(&pane_id).is_some());
 
         // Agent returns to running before grace expires — timer resets
         let mut pane = test_pane(&pane_id);
@@ -1126,8 +1208,8 @@ mod tests {
         }];
         state.now = 102;
         state.refresh_task_progress();
-        assert!(state.pane_task_progress.get(&pane_id).is_some());
-        assert!(!state.pane_inactive_since.contains_key(&pane_id));
+        assert!(state.pane_task_progress(&pane_id).is_some());
+        assert!(state.pane_inactive_since(&pane_id).is_none());
 
         fs::remove_file(&log_path).ok();
     }
@@ -1153,18 +1235,18 @@ mod tests {
         // t=100: grace timer starts
         state.now = 100;
         state.refresh_task_progress();
-        assert!(state.pane_task_progress.get(&pane_id).is_some());
+        assert!(state.pane_task_progress(&pane_id).is_some());
 
         // t=102 (2s elapsed): still within grace period — tasks shown
         state.now = 102;
         state.refresh_task_progress();
-        assert!(state.pane_task_progress.get(&pane_id).is_some());
+        assert!(state.pane_task_progress(&pane_id).is_some());
 
         // t=103 (exactly 3s): grace expired (>= 3) — dismissed
         state.now = 103;
         state.refresh_task_progress();
-        assert!(state.pane_task_progress.get(&pane_id).is_none());
-        assert_eq!(state.pane_task_dismissed.get(&pane_id), Some(&1));
+        assert!(state.pane_task_progress(&pane_id).is_none());
+        assert_eq!(state.pane_task_dismissed_total(&pane_id), Some(1));
 
         fs::remove_file(&log_path).ok();
     }
@@ -1190,8 +1272,8 @@ mod tests {
         state.refresh_task_progress();
 
         // Tasks shown and no inactive timer started
-        assert!(state.pane_task_progress.get(&pane_id).is_some());
-        assert!(!state.pane_inactive_since.contains_key(&pane_id));
+        assert!(state.pane_task_progress(&pane_id).is_some());
+        assert!(state.pane_inactive_since(&pane_id).is_none());
 
         fs::remove_file(&log_path).ok();
     }
@@ -1316,7 +1398,7 @@ mod tests {
     #[test]
     fn apply_session_snapshot_rebuilds_derived_state() {
         let mut state = AppState::new("%99".into());
-        state.global.selected_agent_row = 3;
+        state.global.selected_pane_row = 3;
 
         let pane = test_pane("%1");
         let sessions = vec![SessionInfo {
@@ -1335,8 +1417,8 @@ mod tests {
         assert!(state.sidebar_focused);
         assert_eq!(state.sessions.len(), 1);
         assert_eq!(state.repo_groups.len(), 1);
-        assert_eq!(state.agent_row_targets.len(), 1);
-        assert_eq!(state.global.selected_agent_row, 0);
+        assert_eq!(state.pane_row_targets.len(), 1);
+        assert_eq!(state.global.selected_pane_row, 0);
         // focused_pane_id is set by find_focused_pane() which queries tmux
         // directly, so we don't assert it here (tmux not available in tests).
     }
@@ -1400,13 +1482,13 @@ mod tests {
         // mouse at row 35 → in bottom panel
         state.handle_mouse_scroll(35, 50, 20, 3);
         assert_eq!(state.activity_scroll.offset, 3);
-        assert_eq!(state.agents_scroll.offset, 0);
+        assert_eq!(state.panes_scroll.offset, 0);
     }
 
     #[test]
     fn mouse_scroll_in_agents_panel_scrolls_agents() {
         let mut state = AppState::new("%99".into());
-        state.agents_scroll = ScrollState {
+        state.panes_scroll = ScrollState {
             offset: 0,
             total_lines: 40,
             visible_height: 20,
@@ -1414,20 +1496,20 @@ mod tests {
         // term_height=50, bottom_panel=20 → bottom starts at row 30
         // mouse at row 10 → in agents panel
         state.handle_mouse_scroll(10, 50, 20, 3);
-        assert_eq!(state.agents_scroll.offset, 3);
+        assert_eq!(state.panes_scroll.offset, 3);
         assert_eq!(state.activity_scroll.offset, 0);
     }
 
     #[test]
     fn mouse_scroll_up_in_agents_panel() {
         let mut state = AppState::new("%99".into());
-        state.agents_scroll = ScrollState {
+        state.panes_scroll = ScrollState {
             offset: 5,
             total_lines: 40,
             visible_height: 20,
         };
         state.handle_mouse_scroll(10, 50, 20, -3);
-        assert_eq!(state.agents_scroll.offset, 2);
+        assert_eq!(state.panes_scroll.offset, 2);
     }
 
     #[test]
@@ -1443,36 +1525,36 @@ mod tests {
         // mouse at exactly row 30 → in bottom panel
         state.handle_mouse_scroll(30, 50, 20, 3);
         assert_eq!(state.git_scroll.offset, 3);
-        assert_eq!(state.agents_scroll.offset, 0);
+        assert_eq!(state.panes_scroll.offset, 0);
     }
 
     #[test]
     fn mouse_scroll_just_above_boundary_goes_to_agents() {
         let mut state = AppState::new("%99".into());
-        state.agents_scroll = ScrollState {
+        state.panes_scroll = ScrollState {
             offset: 0,
             total_lines: 40,
             visible_height: 20,
         };
         // row 29, just above bottom_start=30
         state.handle_mouse_scroll(29, 50, 20, 3);
-        assert_eq!(state.agents_scroll.offset, 3);
+        assert_eq!(state.panes_scroll.offset, 3);
         assert_eq!(state.activity_scroll.offset, 0);
     }
 
-    // ─── move_agent_selection edge cases ─────────────────────────────
+    // ─── move_pane_selection edge cases ─────────────────────────────
 
     #[test]
-    fn move_agent_selection_returns_false_when_empty() {
+    fn move_pane_selection_returns_false_when_empty() {
         let mut state = AppState::new("%99".into());
-        assert!(!state.move_agent_selection(1));
-        assert!(!state.move_agent_selection(-1));
+        assert!(!state.move_pane_selection(1));
+        assert!(!state.move_pane_selection(-1));
     }
 
     #[test]
-    fn move_agent_selection_boundary_returns() {
+    fn move_pane_selection_boundary_returns() {
         let mut state = AppState::new("%99".into());
-        state.agent_row_targets = vec![
+        state.pane_row_targets = vec![
             RowTarget {
                 pane_id: "%1".into(),
             },
@@ -1483,13 +1565,13 @@ mod tests {
                 pane_id: "%3".into(),
             },
         ];
-        state.global.selected_agent_row = 0;
+        state.global.selected_pane_row = 0;
 
-        assert!(!state.move_agent_selection(-1), "can't go below 0");
-        assert!(state.move_agent_selection(1));
-        assert!(state.move_agent_selection(1));
-        assert_eq!(state.global.selected_agent_row, 2);
-        assert!(!state.move_agent_selection(1), "can't go past end");
+        assert!(!state.move_pane_selection(-1), "can't go below 0");
+        assert!(state.move_pane_selection(1));
+        assert!(state.move_pane_selection(1));
+        assert_eq!(state.global.selected_pane_row, 2);
+        assert!(!state.move_pane_selection(1), "can't go past end");
     }
 
     // ─── rebuild_row_targets clamp tests ────────────────────────────
@@ -1506,15 +1588,15 @@ mod tests {
                 (test_pane("%3"), PaneGitInfo::default()),
             ],
         }];
-        state.global.selected_agent_row = 2;
+        state.global.selected_pane_row = 2;
         state.rebuild_row_targets();
-        assert_eq!(state.global.selected_agent_row, 2);
+        assert_eq!(state.global.selected_pane_row, 2);
 
         // Shrink to 1 pane
         state.repo_groups[0].panes = vec![(test_pane("%1"), PaneGitInfo::default())];
         state.rebuild_row_targets();
         assert_eq!(
-            state.global.selected_agent_row, 0,
+            state.global.selected_pane_row, 0,
             "should clamp to last valid index"
         );
     }
@@ -1522,12 +1604,12 @@ mod tests {
     #[test]
     fn rebuild_row_targets_empty_groups() {
         let mut state = AppState::new("%99".into());
-        state.global.selected_agent_row = 5;
+        state.global.selected_pane_row = 5;
         state.repo_groups = vec![];
         state.rebuild_row_targets();
-        assert!(state.agent_row_targets.is_empty());
-        // selected_agent_row stays as-is when targets empty (no clamp needed)
-        assert_eq!(state.global.selected_agent_row, 5);
+        assert!(state.pane_row_targets.is_empty());
+        // selected_pane_row stays as-is when targets empty (no clamp needed)
+        assert_eq!(state.global.selected_pane_row, 5);
     }
 
     #[test]
@@ -1551,27 +1633,27 @@ mod tests {
         }];
 
         // All filter: all 3 panes
-        state.global.agent_filter = AgentFilter::All;
+        state.global.status_filter = StatusFilter::All;
         state.rebuild_row_targets();
-        assert_eq!(state.agent_row_targets.len(), 3);
+        assert_eq!(state.pane_row_targets.len(), 3);
 
         // Running filter: only 2 panes
-        state.global.agent_filter = AgentFilter::Running;
+        state.global.status_filter = StatusFilter::Running;
         state.rebuild_row_targets();
-        assert_eq!(state.agent_row_targets.len(), 2);
-        assert_eq!(state.agent_row_targets[0].pane_id, "%1");
-        assert_eq!(state.agent_row_targets[1].pane_id, "%3");
+        assert_eq!(state.pane_row_targets.len(), 2);
+        assert_eq!(state.pane_row_targets[0].pane_id, "%1");
+        assert_eq!(state.pane_row_targets[1].pane_id, "%3");
 
         // Idle filter: only 1 pane
-        state.global.agent_filter = AgentFilter::Idle;
+        state.global.status_filter = StatusFilter::Idle;
         state.rebuild_row_targets();
-        assert_eq!(state.agent_row_targets.len(), 1);
-        assert_eq!(state.agent_row_targets[0].pane_id, "%2");
+        assert_eq!(state.pane_row_targets.len(), 1);
+        assert_eq!(state.pane_row_targets[0].pane_id, "%2");
 
         // Error filter: no panes
-        state.global.agent_filter = AgentFilter::Error;
+        state.global.status_filter = StatusFilter::Error;
         state.rebuild_row_targets();
-        assert!(state.agent_row_targets.is_empty());
+        assert!(state.pane_row_targets.is_empty());
     }
 
     #[test]
@@ -1595,15 +1677,15 @@ mod tests {
         }];
 
         // Select last agent in All view
-        state.global.agent_filter = AgentFilter::All;
+        state.global.status_filter = StatusFilter::All;
         state.rebuild_row_targets();
-        state.global.selected_agent_row = 2;
+        state.global.selected_pane_row = 2;
 
         // Switch to Running filter (only 1 pane) — cursor should clamp
-        state.global.agent_filter = AgentFilter::Running;
+        state.global.status_filter = StatusFilter::Running;
         state.rebuild_row_targets();
-        assert_eq!(state.global.selected_agent_row, 0);
-        assert_eq!(state.agent_row_targets[0].pane_id, "%1");
+        assert_eq!(state.global.selected_pane_row, 0);
+        assert_eq!(state.pane_row_targets[0].pane_id, "%1");
     }
 
     // ─── handle_mouse_click tests ────────────────────────────────────
@@ -1611,7 +1693,7 @@ mod tests {
     #[test]
     fn mouse_click_selects_agent_row() {
         let mut state = AppState::new("%99".into());
-        state.agent_row_targets = vec![
+        state.pane_row_targets = vec![
             RowTarget {
                 pane_id: "%1".into(),
             },
@@ -1621,44 +1703,68 @@ mod tests {
         ];
         // line_to_row: line 0 = group header (None), line 1 = agent 0, line 2 = agent 1
         state.line_to_row = vec![None, Some(0), Some(1)];
-        state.agents_scroll.offset = 0;
+        state.panes_scroll.offset = 0;
 
-        // row 0 = filter bar (skipped), row 1 = first agent list row
-        state.handle_mouse_click(2, 5); // row 2 → line_index = (2-1) = 1 → agent row 0
-        assert_eq!(state.global.selected_agent_row, 0);
+        // row 0 = filter bar, row 1 = secondary header, row 2+ = agent list rows
+        state.handle_mouse_click(3, 5); // row 3 → line_index = (3-2) = 1 → agent row 0
+        assert_eq!(state.global.selected_pane_row, 0);
 
-        state.handle_mouse_click(3, 5); // row 3 → line_index = (3-1) = 2 → agent row 1
-        assert_eq!(state.global.selected_agent_row, 1);
+        state.handle_mouse_click(4, 5); // row 4 → line_index = (4-2) = 2 → agent row 1
+        assert_eq!(state.global.selected_pane_row, 1);
     }
 
     #[test]
     fn mouse_click_on_filter_bar_changes_filter() {
         let mut state = AppState::new("%99".into());
-        state.agent_row_targets = vec![RowTarget {
+        state.pane_row_targets = vec![RowTarget {
             pane_id: "%1".into(),
         }];
         state.line_to_row = vec![None, Some(0)];
-        state.global.selected_agent_row = 0;
-        state.global.agent_filter = AgentFilter::All;
+        state.global.selected_pane_row = 0;
+        state.global.status_filter = StatusFilter::All;
 
         // Click on "All" (x=1..3) should keep All
         reset_filter_debounce(&mut state);
         state.handle_mouse_click(0, 1);
-        assert_eq!(state.global.agent_filter, AgentFilter::All);
+        assert_eq!(state.global.status_filter, StatusFilter::All);
 
         // Click on Running icon area (x=6..) should switch to Running
         reset_filter_debounce(&mut state);
         state.handle_mouse_click(0, 6);
-        assert_eq!(state.global.agent_filter, AgentFilter::Running);
+        assert_eq!(state.global.status_filter, StatusFilter::Running);
 
         // agent selection unchanged
-        assert_eq!(state.global.selected_agent_row, 0);
+        assert_eq!(state.global.selected_pane_row, 0);
+    }
+
+    #[test]
+    fn mouse_click_on_secondary_header_toggles_repo_popup() {
+        let mut state = AppState::new("%99".into());
+        state.repo_groups = vec![
+            RepoGroup {
+                name: "alpha".into(),
+                has_focus: true,
+                panes: vec![(test_pane("%1"), PaneGitInfo::default())],
+            },
+            RepoGroup {
+                name: "beta".into(),
+                has_focus: false,
+                panes: vec![(test_pane("%2"), PaneGitInfo::default())],
+            },
+        ];
+        state.repo_button_col = Some(20);
+
+        state.handle_mouse_click(1, 19);
+        assert!(!state.repo_popup_open);
+
+        state.handle_mouse_click(1, 20);
+        assert!(state.repo_popup_open);
     }
 
     #[test]
     fn mouse_click_with_scroll_offset() {
         let mut state = AppState::new("%99".into());
-        state.agent_row_targets = vec![
+        state.pane_row_targets = vec![
             RowTarget {
                 pane_id: "%1".into(),
             },
@@ -1668,66 +1774,66 @@ mod tests {
         ];
         // 5 lines total, scrolled down by 2
         state.line_to_row = vec![None, Some(0), Some(0), None, Some(1)];
-        state.agents_scroll.offset = 2;
+        state.panes_scroll.offset = 2;
 
-        // row 3 → line_index = (3-1) + 2 = 4 → agent row 1
-        state.handle_mouse_click(3, 5);
-        assert_eq!(state.global.selected_agent_row, 1);
+        // row 4 → line_index = (4-2) + 2 = 4 → agent row 1
+        state.handle_mouse_click(4, 5);
+        assert_eq!(state.global.selected_pane_row, 1);
     }
 
     #[test]
     fn mouse_click_out_of_bounds() {
         let mut state = AppState::new("%99".into());
-        state.agent_row_targets = vec![RowTarget {
+        state.pane_row_targets = vec![RowTarget {
             pane_id: "%1".into(),
         }];
         state.line_to_row = vec![None, Some(0)];
-        state.global.selected_agent_row = 0;
+        state.global.selected_pane_row = 0;
 
         state.handle_mouse_click(50, 5); // way beyond line_to_row
-        assert_eq!(state.global.selected_agent_row, 0); // unchanged
+        assert_eq!(state.global.selected_pane_row, 0); // unchanged
     }
 
-    // ─── AgentFilter tests ───────────────────────────────────────────
+    // ─── StatusFilter tests ───────────────────────────────────────────
 
     #[test]
-    fn agent_filter_next_cycles() {
-        assert_eq!(AgentFilter::All.next(), AgentFilter::Running);
-        assert_eq!(AgentFilter::Running.next(), AgentFilter::Waiting);
-        assert_eq!(AgentFilter::Waiting.next(), AgentFilter::Idle);
-        assert_eq!(AgentFilter::Idle.next(), AgentFilter::Error);
-        assert_eq!(AgentFilter::Error.next(), AgentFilter::All);
-    }
-
-    #[test]
-    fn agent_filter_prev_cycles() {
-        assert_eq!(AgentFilter::All.prev(), AgentFilter::Error);
-        assert_eq!(AgentFilter::Error.prev(), AgentFilter::Idle);
-        assert_eq!(AgentFilter::Idle.prev(), AgentFilter::Waiting);
-        assert_eq!(AgentFilter::Waiting.prev(), AgentFilter::Running);
-        assert_eq!(AgentFilter::Running.prev(), AgentFilter::All);
+    fn status_filter_next_cycles() {
+        assert_eq!(StatusFilter::All.next(), StatusFilter::Running);
+        assert_eq!(StatusFilter::Running.next(), StatusFilter::Waiting);
+        assert_eq!(StatusFilter::Waiting.next(), StatusFilter::Idle);
+        assert_eq!(StatusFilter::Idle.next(), StatusFilter::Error);
+        assert_eq!(StatusFilter::Error.next(), StatusFilter::All);
     }
 
     #[test]
-    fn agent_filter_matches_status() {
-        assert!(AgentFilter::All.matches(&PaneStatus::Running));
-        assert!(AgentFilter::All.matches(&PaneStatus::Idle));
-        assert!(AgentFilter::All.matches(&PaneStatus::Waiting));
-        assert!(AgentFilter::All.matches(&PaneStatus::Error));
+    fn status_filter_prev_cycles() {
+        assert_eq!(StatusFilter::All.prev(), StatusFilter::Error);
+        assert_eq!(StatusFilter::Error.prev(), StatusFilter::Idle);
+        assert_eq!(StatusFilter::Idle.prev(), StatusFilter::Waiting);
+        assert_eq!(StatusFilter::Waiting.prev(), StatusFilter::Running);
+        assert_eq!(StatusFilter::Running.prev(), StatusFilter::All);
+    }
 
-        assert!(AgentFilter::Running.matches(&PaneStatus::Running));
-        assert!(!AgentFilter::Running.matches(&PaneStatus::Idle));
-        assert!(!AgentFilter::Running.matches(&PaneStatus::Waiting));
-        assert!(!AgentFilter::Running.matches(&PaneStatus::Error));
+    #[test]
+    fn status_filter_matches_status() {
+        assert!(StatusFilter::All.matches(&PaneStatus::Running));
+        assert!(StatusFilter::All.matches(&PaneStatus::Idle));
+        assert!(StatusFilter::All.matches(&PaneStatus::Waiting));
+        assert!(StatusFilter::All.matches(&PaneStatus::Error));
 
-        assert!(AgentFilter::Waiting.matches(&PaneStatus::Waiting));
-        assert!(!AgentFilter::Waiting.matches(&PaneStatus::Running));
+        assert!(StatusFilter::Running.matches(&PaneStatus::Running));
+        assert!(!StatusFilter::Running.matches(&PaneStatus::Idle));
+        assert!(!StatusFilter::Running.matches(&PaneStatus::Waiting));
+        assert!(!StatusFilter::Running.matches(&PaneStatus::Error));
 
-        assert!(AgentFilter::Idle.matches(&PaneStatus::Idle));
-        assert!(!AgentFilter::Idle.matches(&PaneStatus::Running));
+        assert!(StatusFilter::Waiting.matches(&PaneStatus::Waiting));
+        assert!(!StatusFilter::Waiting.matches(&PaneStatus::Running));
 
-        assert!(AgentFilter::Error.matches(&PaneStatus::Error));
-        assert!(!AgentFilter::Error.matches(&PaneStatus::Idle));
+        assert!(StatusFilter::Idle.matches(&PaneStatus::Idle));
+        assert!(!StatusFilter::Idle.matches(&PaneStatus::Running));
+
+        assert!(StatusFilter::Error.matches(&PaneStatus::Error));
+        assert!(!StatusFilter::Error.matches(&PaneStatus::Idle));
     }
 
     // ─── status_counts tests ─────────────────────────────────────────
@@ -1776,70 +1882,70 @@ mod tests {
         //                                              0123456789...
 
         // "All" at x=1..3
-        state.global.agent_filter = AgentFilter::Running;
+        state.global.status_filter = StatusFilter::Running;
         reset_filter_debounce(&mut state);
         state.handle_filter_click(1);
-        assert_eq!(state.global.agent_filter, AgentFilter::All);
+        assert_eq!(state.global.status_filter, StatusFilter::All);
 
         reset_filter_debounce(&mut state);
         state.handle_filter_click(3);
-        assert_eq!(state.global.agent_filter, AgentFilter::All);
+        assert_eq!(state.global.status_filter, StatusFilter::All);
 
         // "●0" at x=6..7
         reset_filter_debounce(&mut state);
         state.handle_filter_click(6);
-        assert_eq!(state.global.agent_filter, AgentFilter::Running);
+        assert_eq!(state.global.status_filter, StatusFilter::Running);
 
         // "◐0" at x=10..11
         reset_filter_debounce(&mut state);
         state.handle_filter_click(10);
-        assert_eq!(state.global.agent_filter, AgentFilter::Waiting);
+        assert_eq!(state.global.status_filter, StatusFilter::Waiting);
 
         // "○0" at x=14..15
         reset_filter_debounce(&mut state);
         state.handle_filter_click(14);
-        assert_eq!(state.global.agent_filter, AgentFilter::Idle);
+        assert_eq!(state.global.status_filter, StatusFilter::Idle);
 
         // "✕0" at x=18..19
         reset_filter_debounce(&mut state);
         state.handle_filter_click(18);
-        assert_eq!(state.global.agent_filter, AgentFilter::Error);
+        assert_eq!(state.global.status_filter, StatusFilter::Error);
     }
 
     #[test]
     fn filter_click_gap_does_nothing() {
         let mut state = AppState::new("%99".into());
-        state.global.agent_filter = AgentFilter::All;
+        state.global.status_filter = StatusFilter::All;
 
         // x=0 is leading space, x=4 and x=5 are separator
         state.handle_filter_click(0);
-        assert_eq!(state.global.agent_filter, AgentFilter::All);
+        assert_eq!(state.global.status_filter, StatusFilter::All);
 
         state.handle_filter_click(4);
-        assert_eq!(state.global.agent_filter, AgentFilter::All);
+        assert_eq!(state.global.status_filter, StatusFilter::All);
 
         state.handle_filter_click(5);
-        assert_eq!(state.global.agent_filter, AgentFilter::All);
+        assert_eq!(state.global.status_filter, StatusFilter::All);
     }
 
     #[test]
     fn filter_click_debounce_ignores_rapid_clicks() {
         let mut state = AppState::new("%99".into());
-        state.global.agent_filter = AgentFilter::All;
+        state.global.status_filter = StatusFilter::All;
 
         // First click within debounce window should be ignored
         // (AppState::new sets last_filter_click to now)
         state.handle_filter_click(6); // would be Running
-        assert_eq!(state.global.agent_filter, AgentFilter::All); // unchanged due to debounce
+        assert_eq!(state.global.status_filter, StatusFilter::All); // unchanged due to debounce
 
         // After resetting debounce, click should work
         reset_filter_debounce(&mut state);
         state.handle_filter_click(6);
-        assert_eq!(state.global.agent_filter, AgentFilter::Running);
+        assert_eq!(state.global.status_filter, StatusFilter::Running);
 
         // Immediate second click should be debounced
         state.handle_filter_click(1); // would be All
-        assert_eq!(state.global.agent_filter, AgentFilter::Running); // unchanged
+        assert_eq!(state.global.status_filter, StatusFilter::Running); // unchanged
     }
 
     #[test]
@@ -1863,15 +1969,15 @@ mod tests {
         // "●10" at x=6..8 (icon + "10")
         reset_filter_debounce(&mut state);
         state.handle_filter_click(6);
-        assert_eq!(state.global.agent_filter, AgentFilter::Running);
+        assert_eq!(state.global.status_filter, StatusFilter::Running);
         reset_filter_debounce(&mut state);
         state.handle_filter_click(8);
-        assert_eq!(state.global.agent_filter, AgentFilter::Running);
+        assert_eq!(state.global.status_filter, StatusFilter::Running);
 
         // "◐0" shifts to x=11..12
         reset_filter_debounce(&mut state);
         state.handle_filter_click(11);
-        assert_eq!(state.global.agent_filter, AgentFilter::Waiting);
+        assert_eq!(state.global.status_filter, StatusFilter::Waiting);
     }
 
     #[test]
@@ -1892,59 +1998,59 @@ mod tests {
                 (p3, PaneGitInfo::default()),
             ],
         }];
-        state.global.agent_filter = AgentFilter::All;
+        state.global.status_filter = StatusFilter::All;
         state.rebuild_row_targets();
-        assert_eq!(state.agent_row_targets.len(), 3);
+        assert_eq!(state.pane_row_targets.len(), 3);
 
         // Click Running filter — row_targets should update immediately
         // Layout: " All  ●2  ◐0  ○1  ✕0" → Running at x=6
         reset_filter_debounce(&mut state);
         state.handle_filter_click(6);
-        assert_eq!(state.global.agent_filter, AgentFilter::Running);
-        assert_eq!(state.agent_row_targets.len(), 2);
-        assert_eq!(state.agent_row_targets[0].pane_id, "%1");
-        assert_eq!(state.agent_row_targets[1].pane_id, "%3");
+        assert_eq!(state.global.status_filter, StatusFilter::Running);
+        assert_eq!(state.pane_row_targets.len(), 2);
+        assert_eq!(state.pane_row_targets[0].pane_id, "%1");
+        assert_eq!(state.pane_row_targets[1].pane_id, "%3");
 
         // Click Idle filter — row_targets should update again
         // Layout: " All  ●2  ◐0  ○1  ✕0" → Idle at x=14
         reset_filter_debounce(&mut state);
         state.handle_filter_click(14);
-        assert_eq!(state.global.agent_filter, AgentFilter::Idle);
-        assert_eq!(state.agent_row_targets.len(), 1);
-        assert_eq!(state.agent_row_targets[0].pane_id, "%2");
+        assert_eq!(state.global.status_filter, StatusFilter::Idle);
+        assert_eq!(state.pane_row_targets.len(), 1);
+        assert_eq!(state.pane_row_targets[0].pane_id, "%2");
     }
 
-    // ─── AgentFilter as_str / from_str tests ─────────────────────────
+    // ─── StatusFilter as_str / from_str tests ─────────────────────────
 
     #[test]
-    fn agent_filter_as_str_all_variants() {
-        assert_eq!(AgentFilter::All.as_str(), "all");
-        assert_eq!(AgentFilter::Running.as_str(), "running");
-        assert_eq!(AgentFilter::Waiting.as_str(), "waiting");
-        assert_eq!(AgentFilter::Idle.as_str(), "idle");
-        assert_eq!(AgentFilter::Error.as_str(), "error");
-    }
-
-    #[test]
-    fn agent_filter_from_str_all_variants() {
-        assert_eq!(AgentFilter::from_str("all"), AgentFilter::All);
-        assert_eq!(AgentFilter::from_str("running"), AgentFilter::Running);
-        assert_eq!(AgentFilter::from_str("waiting"), AgentFilter::Waiting);
-        assert_eq!(AgentFilter::from_str("idle"), AgentFilter::Idle);
-        assert_eq!(AgentFilter::from_str("error"), AgentFilter::Error);
+    fn status_filter_as_str_all_variants() {
+        assert_eq!(StatusFilter::All.as_str(), "all");
+        assert_eq!(StatusFilter::Running.as_str(), "running");
+        assert_eq!(StatusFilter::Waiting.as_str(), "waiting");
+        assert_eq!(StatusFilter::Idle.as_str(), "idle");
+        assert_eq!(StatusFilter::Error.as_str(), "error");
     }
 
     #[test]
-    fn agent_filter_from_str_unknown_defaults_to_all() {
-        assert_eq!(AgentFilter::from_str(""), AgentFilter::All);
-        assert_eq!(AgentFilter::from_str("unknown"), AgentFilter::All);
-        assert_eq!(AgentFilter::from_str("Running"), AgentFilter::All); // case-sensitive
+    fn status_filter_from_str_all_variants() {
+        assert_eq!(StatusFilter::from_str("all"), StatusFilter::All);
+        assert_eq!(StatusFilter::from_str("running"), StatusFilter::Running);
+        assert_eq!(StatusFilter::from_str("waiting"), StatusFilter::Waiting);
+        assert_eq!(StatusFilter::from_str("idle"), StatusFilter::Idle);
+        assert_eq!(StatusFilter::from_str("error"), StatusFilter::Error);
     }
 
     #[test]
-    fn agent_filter_roundtrip() {
-        for filter in AgentFilter::VARIANTS {
-            assert_eq!(AgentFilter::from_str(filter.as_str()), filter);
+    fn status_filter_from_str_unknown_defaults_to_all() {
+        assert_eq!(StatusFilter::from_str(""), StatusFilter::All);
+        assert_eq!(StatusFilter::from_str("unknown"), StatusFilter::All);
+        assert_eq!(StatusFilter::from_str("Running"), StatusFilter::All); // case-sensitive
+    }
+
+    #[test]
+    fn status_filter_roundtrip() {
+        for filter in StatusFilter::VARIANTS {
+            assert_eq!(StatusFilter::from_str(filter.as_str()), filter);
         }
     }
 
@@ -1987,7 +2093,7 @@ mod tests {
         state.global.repo_filter = RepoFilter::All;
         state.rebuild_row_targets();
 
-        assert_eq!(state.agent_row_targets.len(), 2);
+        assert_eq!(state.pane_row_targets.len(), 2);
     }
 
     #[test]
@@ -2008,8 +2114,8 @@ mod tests {
         state.global.repo_filter = RepoFilter::Repo("app".into());
         state.rebuild_row_targets();
 
-        assert_eq!(state.agent_row_targets.len(), 1);
-        assert_eq!(state.agent_row_targets[0].pane_id, "%2");
+        assert_eq!(state.pane_row_targets.len(), 1);
+        assert_eq!(state.pane_row_targets[0].pane_id, "%2");
     }
 
     #[test]
@@ -2033,12 +2139,12 @@ mod tests {
             },
         ];
         state.global.repo_filter = RepoFilter::Repo("app".into());
-        state.global.agent_filter = AgentFilter::Running;
+        state.global.status_filter = StatusFilter::Running;
         state.rebuild_row_targets();
 
         // Only Running panes in "app" group
-        assert_eq!(state.agent_row_targets.len(), 1);
-        assert_eq!(state.agent_row_targets[0].pane_id, "%1");
+        assert_eq!(state.pane_row_targets.len(), 1);
+        assert_eq!(state.pane_row_targets[0].pane_id, "%1");
     }
 
     #[test]
@@ -2053,7 +2159,7 @@ mod tests {
         state.rebuild_row_targets();
 
         assert_eq!(state.global.repo_filter, RepoFilter::All);
-        assert_eq!(state.agent_row_targets.len(), 1);
+        assert_eq!(state.pane_row_targets.len(), 1);
     }
 
     #[test]
@@ -2123,8 +2229,8 @@ mod tests {
 
         assert_eq!(state.global.repo_filter, RepoFilter::Repo("beta".into()));
         assert!(!state.repo_popup_open);
-        assert_eq!(state.agent_row_targets.len(), 1);
-        assert_eq!(state.agent_row_targets[0].pane_id, "%2");
+        assert_eq!(state.pane_row_targets.len(), 1);
+        assert_eq!(state.pane_row_targets[0].pane_id, "%2");
     }
 
     #[test]
@@ -2174,91 +2280,5 @@ mod tests {
         assert_eq!(all, 1);
         assert_eq!(running, 1);
         assert_eq!(idle, 0);
-    }
-
-    #[test]
-    fn cat_state_defaults() {
-        let state = AppState::new("%0".into());
-        assert!(matches!(state.cat_state, crate::ui::cat::CatState::Idle));
-        assert_eq!(state.cat_x, crate::ui::cat::CAT_HOME_X);
-        assert_eq!(state.cat_frame, 0);
-        assert_eq!(state.cat_bob_timer, 0);
-    }
-
-    #[test]
-    fn tick_cat_idle_to_walk_right_on_running() {
-        let mut state = AppState::new("%0".into());
-        let mut pane = test_pane("1");
-        pane.status = PaneStatus::Running;
-        state.repo_groups = vec![crate::group::RepoGroup {
-            name: "repo".into(),
-            has_focus: false,
-            panes: vec![(pane, PaneGitInfo::default())],
-        }];
-        state.tick_cat(60);
-        assert!(matches!(
-            state.cat_state,
-            crate::ui::cat::CatState::WalkRight
-        ));
-        assert!(state.cat_x > crate::ui::cat::CAT_HOME_X);
-    }
-
-    #[test]
-    fn tick_cat_walk_right_to_working_at_desk() {
-        let mut state = AppState::new("%0".into());
-        let mut pane = test_pane("1");
-        pane.status = PaneStatus::Running;
-        state.repo_groups = vec![crate::group::RepoGroup {
-            name: "repo".into(),
-            has_focus: false,
-            panes: vec![(pane, PaneGitInfo::default())],
-        }];
-        let panel_width = 60u16;
-        let desk_x = panel_width.saturating_sub(
-            crate::ui::cat::DESK_OFFSET + crate::ui::cat::DESK_WIDTH + crate::ui::cat::CAT_WIDTH,
-        );
-        state.cat_state = crate::ui::cat::CatState::WalkRight;
-        state.cat_x = desk_x - 1;
-        state.tick_cat(panel_width);
-        assert!(matches!(state.cat_state, crate::ui::cat::CatState::Working));
-    }
-
-    #[test]
-    fn tick_cat_working_to_walk_left_when_no_running() {
-        let mut state = AppState::new("%0".into());
-        let mut pane = test_pane("1");
-        pane.status = PaneStatus::Idle;
-        state.repo_groups = vec![crate::group::RepoGroup {
-            name: "repo".into(),
-            has_focus: false,
-            panes: vec![(pane, PaneGitInfo::default())],
-        }];
-        state.cat_state = crate::ui::cat::CatState::Working;
-        state.cat_x = 40;
-        state.tick_cat(60);
-        assert!(matches!(
-            state.cat_state,
-            crate::ui::cat::CatState::WalkLeft
-        ));
-    }
-
-    #[test]
-    fn tick_cat_walk_left_to_idle_at_home() {
-        let mut state = AppState::new("%0".into());
-        state.cat_state = crate::ui::cat::CatState::WalkLeft;
-        state.cat_x = crate::ui::cat::CAT_HOME_X + 1;
-        state.tick_cat(60);
-        assert_eq!(state.cat_x, crate::ui::cat::CAT_HOME_X);
-        state.tick_cat(60);
-        assert!(matches!(state.cat_state, crate::ui::cat::CatState::Idle));
-    }
-
-    #[test]
-    fn tick_cat_idle_bob() {
-        let mut state = AppState::new("%0".into());
-        for _ in 0..crate::ui::cat::BOB_INTERVAL {
-            state.tick_cat(60);
-        }
-        assert_eq!(state.cat_bob_timer, 0);
     }
 }

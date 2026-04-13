@@ -1,6 +1,7 @@
 use serde_json::Value;
 
 use crate::adapter;
+use crate::tmux::{CLAUDE_AGENT, CODEX_AGENT};
 
 /// Worktree metadata from Claude Code hook payloads.
 /// Present only when the agent is running in a worktree; `None` otherwise.
@@ -63,9 +64,13 @@ pub enum AgentEvent {
     },
     SubagentStart {
         agent_type: String,
+        agent_id: Option<String>,
     },
     SubagentStop {
         agent_type: String,
+        agent_id: Option<String>,
+        last_message: String,
+        transcript_path: String,
     },
     ActivityLog {
         tool_name: String,
@@ -102,6 +107,109 @@ pub enum AgentEvent {
     },
 }
 
+/// Discriminant of `AgentEvent`. The single compile-time-enforced source of
+/// truth for the mapping between internal events and their external
+/// (string) names. `HookRegistration` tables and drift tests are keyed on
+/// this enum — not on bare strings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AgentEventKind {
+    SessionStart,
+    SessionEnd,
+    UserPromptSubmit,
+    Notification,
+    Stop,
+    StopFailure,
+    PermissionDenied,
+    CwdChanged,
+    SubagentStart,
+    SubagentStop,
+    ActivityLog,
+    TaskCreated,
+    TaskCompleted,
+    TeammateIdle,
+    WorktreeCreate,
+    WorktreeRemove,
+}
+
+impl AgentEventKind {
+    /// Every variant, in a stable order suitable for iteration. Adding a new
+    /// variant without extending this list fails the
+    /// `all_contains_every_variant` test below.
+    pub const ALL: &'static [Self] = &[
+        Self::SessionStart,
+        Self::SessionEnd,
+        Self::UserPromptSubmit,
+        Self::Notification,
+        Self::Stop,
+        Self::StopFailure,
+        Self::PermissionDenied,
+        Self::CwdChanged,
+        Self::SubagentStart,
+        Self::SubagentStop,
+        Self::ActivityLog,
+        Self::TaskCreated,
+        Self::TaskCompleted,
+        Self::TeammateIdle,
+        Self::WorktreeCreate,
+        Self::WorktreeRemove,
+    ];
+
+    /// Normalized external event name passed to
+    /// `tmux-agent-sidebar hook <agent> <event>`. Exhaustive match — adding
+    /// a variant without assigning a name is a compile error.
+    pub const fn external_name(self) -> &'static str {
+        match self {
+            Self::SessionStart => "session-start",
+            Self::SessionEnd => "session-end",
+            Self::UserPromptSubmit => "user-prompt-submit",
+            Self::Notification => "notification",
+            Self::Stop => "stop",
+            Self::StopFailure => "stop-failure",
+            Self::PermissionDenied => "permission-denied",
+            Self::CwdChanged => "cwd-changed",
+            Self::SubagentStart => "subagent-start",
+            Self::SubagentStop => "subagent-stop",
+            Self::ActivityLog => "activity-log",
+            Self::TaskCreated => "task-created",
+            Self::TaskCompleted => "task-completed",
+            Self::TeammateIdle => "teammate-idle",
+            Self::WorktreeCreate => "worktree-create",
+            Self::WorktreeRemove => "worktree-remove",
+        }
+    }
+
+    pub fn from_external_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|k| k.external_name() == name)
+    }
+}
+
+impl AgentEvent {
+    /// Project an `AgentEvent` down to its `AgentEventKind` discriminant.
+    pub fn kind(&self) -> AgentEventKind {
+        match self {
+            Self::SessionStart { .. } => AgentEventKind::SessionStart,
+            Self::SessionEnd => AgentEventKind::SessionEnd,
+            Self::UserPromptSubmit { .. } => AgentEventKind::UserPromptSubmit,
+            Self::Notification { .. } => AgentEventKind::Notification,
+            Self::Stop { .. } => AgentEventKind::Stop,
+            Self::StopFailure { .. } => AgentEventKind::StopFailure,
+            Self::SubagentStart { .. } => AgentEventKind::SubagentStart,
+            Self::SubagentStop { .. } => AgentEventKind::SubagentStop,
+            Self::ActivityLog { .. } => AgentEventKind::ActivityLog,
+            Self::PermissionDenied { .. } => AgentEventKind::PermissionDenied,
+            Self::CwdChanged { .. } => AgentEventKind::CwdChanged,
+            Self::TaskCreated { .. } => AgentEventKind::TaskCreated,
+            Self::TaskCompleted { .. } => AgentEventKind::TaskCompleted,
+            Self::TeammateIdle { .. } => AgentEventKind::TeammateIdle,
+            Self::WorktreeCreate => AgentEventKind::WorktreeCreate,
+            Self::WorktreeRemove { .. } => AgentEventKind::WorktreeRemove,
+        }
+    }
+}
+
 /// Adapter that converts external agent events into internal `AgentEvent`.
 pub trait EventAdapter {
     fn parse(&self, event_name: &str, input: &Value) -> Option<AgentEvent>;
@@ -109,8 +217,8 @@ pub trait EventAdapter {
 
 pub fn resolve_adapter(agent_name: &str) -> Option<Box<dyn EventAdapter>> {
     match agent_name {
-        "claude" => Some(Box::new(adapter::claude::ClaudeAdapter)),
-        "codex" => Some(Box::new(adapter::codex::CodexAdapter)),
+        CLAUDE_AGENT => Some(Box::new(adapter::claude::ClaudeAdapter)),
+        CODEX_AGENT => Some(Box::new(adapter::codex::CodexAdapter)),
         _ => None,
     }
 }
@@ -119,6 +227,57 @@ pub fn resolve_adapter(agent_name: &str) -> Option<Box<dyn EventAdapter>> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn all_contains_every_variant() {
+        // This match is intentionally exhaustive: adding a new variant to
+        // `AgentEventKind` fails compilation here until the new variant is
+        // also added to `AgentEventKind::ALL` and the length assertion below.
+        for kind in AgentEventKind::ALL {
+            match kind {
+                AgentEventKind::SessionStart
+                | AgentEventKind::SessionEnd
+                | AgentEventKind::UserPromptSubmit
+                | AgentEventKind::Notification
+                | AgentEventKind::Stop
+                | AgentEventKind::StopFailure
+                | AgentEventKind::PermissionDenied
+                | AgentEventKind::CwdChanged
+                | AgentEventKind::SubagentStart
+                | AgentEventKind::SubagentStop
+                | AgentEventKind::ActivityLog
+                | AgentEventKind::TaskCreated
+                | AgentEventKind::TaskCompleted
+                | AgentEventKind::TeammateIdle
+                | AgentEventKind::WorktreeCreate
+                | AgentEventKind::WorktreeRemove => {}
+            }
+        }
+        assert_eq!(AgentEventKind::ALL.len(), 16);
+    }
+
+    #[test]
+    fn external_names_are_unique() {
+        let mut names: Vec<&str> = AgentEventKind::ALL
+            .iter()
+            .map(|k| k.external_name())
+            .collect();
+        names.sort();
+        let len_before = names.len();
+        names.dedup();
+        assert_eq!(names.len(), len_before, "duplicate external_name() values");
+    }
+
+    #[test]
+    fn from_external_name_round_trip() {
+        for kind in AgentEventKind::ALL {
+            assert_eq!(
+                AgentEventKind::from_external_name(kind.external_name()),
+                Some(*kind)
+            );
+        }
+        assert_eq!(AgentEventKind::from_external_name("not-a-real-event"), None);
+    }
 
     #[test]
     fn resolve_claude() {
@@ -201,11 +360,6 @@ mod tests {
         assert!(
             adapter
                 .parse("subagent-stop", &json!({"agent_type": "X"}))
-                .is_none()
-        );
-        assert!(
-            adapter
-                .parse("activity-log", &json!({"tool_name": "Read"}))
                 .is_none()
         );
     }
@@ -296,19 +450,26 @@ mod tests {
     }
 
     #[test]
-    fn both_adapters_handle_session_lifecycle() {
+    fn both_adapters_handle_session_start() {
         for agent_name in &["claude", "codex"] {
             let adapter = resolve_adapter(agent_name).unwrap();
             assert!(
                 adapter.parse("session-start", &json!({})).is_some(),
                 "{agent_name} should handle session-start"
             );
-            assert_eq!(
-                adapter.parse("session-end", &json!({})),
-                Some(AgentEvent::SessionEnd),
-                "{agent_name} should handle session-end"
-            );
         }
+        // Codex does not fire SessionEnd, so only Claude handles it.
+        let claude = resolve_adapter("claude").unwrap();
+        assert_eq!(
+            claude.parse("session-end", &json!({})),
+            Some(AgentEvent::SessionEnd),
+        );
+        assert!(
+            resolve_adapter("codex")
+                .unwrap()
+                .parse("session-end", &json!({}))
+                .is_none()
+        );
     }
 
     #[test]

@@ -79,7 +79,8 @@ pub fn resolve_pane_git_info(path: &str) -> PaneGitInfo {
 }
 
 /// Group all panes across all sessions by repo root.
-/// Returns groups in insertion order (first-seen repo first).
+/// Returns groups sorted alphabetically by display name (case-insensitive),
+/// so the order is stable regardless of which pane is encountered first.
 pub fn group_panes_by_repo(sessions: &[crate::tmux::SessionInfo]) -> Vec<RepoGroup> {
     let mut groups: IndexMap<String, RepoGroup> = IndexMap::new();
     let mut git_cache: std::collections::HashMap<String, PaneGitInfo> =
@@ -132,7 +133,9 @@ pub fn group_panes_by_repo(sessions: &[crate::tmux::SessionInfo]) -> Vec<RepoGro
         }
     }
 
-    groups.into_values().collect()
+    let mut result: Vec<RepoGroup> = groups.into_values().collect();
+    result.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    result
 }
 
 /// Resolve a possibly-relative git path to an absolute canonical path.
@@ -208,6 +211,7 @@ mod tests {
             attention: false,
             agent: crate::tmux::AgentType::Claude,
             path: path.into(),
+            current_command: String::new(),
             prompt: String::new(),
             prompt_is_response: false,
             started_at: None,
@@ -350,21 +354,23 @@ mod tests {
     }
 
     #[test]
-    fn group_panes_preserves_insertion_order() {
-        // First-seen repo should appear first
-        let pane1 = test_pane("%1", "/tmp/aaa");
-        let pane2 = test_pane("%2", "/tmp/zzz");
-        let pane3 = test_pane("%3", "/tmp/aaa");
+    fn group_panes_sorted_by_name_case_insensitive() {
+        // Groups should be sorted alphabetically regardless of encounter order
+        let pane1 = test_pane("%1", "/tmp/zzz");
+        let pane2 = test_pane("%2", "/tmp/Aaa");
+        let pane3 = test_pane("%3", "/tmp/mmm");
+        let pane4 = test_pane("%4", "/tmp/zzz");
 
         let sessions = vec![test_session(vec![test_window(
-            vec![pane1, pane2, pane3],
+            vec![pane1, pane2, pane3, pane4],
             true,
         )])];
         let groups = group_panes_by_repo(&sessions);
 
-        assert_eq!(groups.len(), 2);
-        assert_eq!(groups[0].name, "aaa", "first-seen group should be first");
-        assert_eq!(groups[1].name, "zzz");
-        assert_eq!(groups[0].panes.len(), 2, "aaa should have 2 panes");
+        assert_eq!(groups.len(), 3);
+        assert_eq!(groups[0].name, "Aaa");
+        assert_eq!(groups[1].name, "mmm");
+        assert_eq!(groups[2].name, "zzz");
+        assert_eq!(groups[2].panes.len(), 2, "zzz should have 2 panes");
     }
 }
