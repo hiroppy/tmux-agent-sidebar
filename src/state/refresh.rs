@@ -121,6 +121,7 @@ impl AppState {
             self.apply_session_snapshot(focused, sessions);
         }
         self.refresh_activity_data();
+        self.refresh_notices();
         window_active
     }
 

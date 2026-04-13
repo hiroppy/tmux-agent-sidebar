@@ -1,6 +1,6 @@
 mod hook;
 mod label;
-mod setup;
+pub(crate) mod setup;
 mod toggle;
 
 use std::io::Read;

@@ -1,6 +1,7 @@
 pub mod bottom;
 pub mod colors;
 pub mod icons;
+pub mod notices;
 pub mod panes;
 pub mod text;
 

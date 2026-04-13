@@ -200,7 +200,7 @@ fn test_line_to_row_with_version_banner() {
     });
     state.rebuild_row_targets();
     let _ = render_to_string(&mut state, 28, 10);
-    // version banner only appears in the secondary header, not in the scrollable list
+    // version banner should still stay out of the scrollable list
     assert_eq!(state.line_to_row.len(), 3);
     assert_eq!(state.line_to_row[0], None); // repo header
     assert_eq!(state.line_to_row[1], Some(0)); // agent status line
@@ -208,7 +208,7 @@ fn test_line_to_row_with_version_banner() {
 }
 
 #[test]
-fn test_secondary_header_click_ignored_when_version_banner_is_visible() {
+fn test_secondary_header_click_on_i_opens_notices_popup_even_without_missing_hooks() {
     let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
     let mut state = make_state(vec![SessionInfo {
         session_name: "main".into(),
@@ -226,11 +226,12 @@ fn test_secondary_header_click_ignored_when_version_banner_is_visible() {
         latest_version: "0.2.7".into(),
     });
     state.rebuild_row_targets();
+    let _ = render_to_string(&mut state, 28, 10);
 
-    state.handle_mouse_click(1, 100);
+    state.handle_mouse_click(1, 0);
     assert!(
-        !state.repo_popup_open,
-        "repo popup should stay closed while the version banner replaces the secondary header"
+        state.notices_popup_open,
+        "i should stay clickable even when there are no missing hooks"
     );
 }
 

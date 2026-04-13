@@ -111,7 +111,7 @@ fn snapshot_git_status_tab_ui() {
     let output = render_to_string(&mut state, 28, 24);
     insta::assert_snapshot!(output, @"
      ≡1  ●1  ◐0  ○0  ✕0
-                             — ▾
+    ⓘ                        — ▾
     project
     ╭ Activity │ Git ──────────╮
     │ feature/sidebar     ↑2↓1 │
@@ -150,7 +150,7 @@ fn snapshot_git_clean_ui() {
     let output = render_to_string(&mut state, 28, 24);
     insta::assert_snapshot!(output, @"
      ≡1  ●1  ◐0  ○0  ✕0
-                             — ▾
+    ⓘ                        — ▾
     project
     ╭ Activity │ Git ──────────╮
     │    Working tree clean    │
@@ -186,7 +186,7 @@ fn snapshot_activity_tab_active_ui() {
     let output = render_to_string(&mut state, 28, 24);
     insta::assert_snapshot!(output, @"
      ≡1  ●1  ◐0  ○0  ✕0
-                             — ▾
+    ⓘ                        — ▾
     project
     ╭ Activity │ Git ──────────╮
     │10:32                 Edit│
@@ -271,7 +271,7 @@ fn snapshot_git_full_info_ui() {
     let output = render_to_string(&mut state, 28, 24);
     insta::assert_snapshot!(output, @"
      ≡1  ●1  ◐0  ○0  ✕0
-                             — ▾
+    ⓘ                        — ▾
     project
     ╭ Activity │ Git ──────────╮
     │ main                     │
@@ -325,7 +325,7 @@ fn snapshot_git_long_filename_truncated_ui() {
     let plain = render_to_string(&mut state, 28, 24);
     insta::assert_snapshot!(plain, @"
      ≡1  ●1  ◐0  ○0  ✕0
-                             — ▾
+    ⓘ                        — ▾
     project
     ╭ Activity │ Git ──────────╮
     │ main                     │
@@ -407,7 +407,7 @@ fn snapshot_git_more_than_5_files() {
     let plain = render_to_string(&mut state, 28, 40);
     insta::assert_snapshot!(plain, @"
      ≡1  ●1  ◐0  ○0  ✕0
-                             — ▾
+    ⓘ                        — ▾
     project
     ┃ ● claude
     ╭ Activity │ Git ──────────╮
@@ -429,7 +429,7 @@ fn snapshot_git_more_than_5_files() {
     let scrolled = render_to_string(&mut state, 28, 40);
     insta::assert_snapshot!(scrolled, @"
      ≡1  ●1  ◐0  ○0  ✕0
-                             — ▾
+    ⓘ                        — ▾
     project
     ┃ ● claude
     ╭ Activity │ Git ──────────╮
@@ -586,7 +586,7 @@ fn snapshot_subagents_tree_ui() {
     let output = render_to_string(&mut state, 40, 28);
     insta::assert_snapshot!(output, @"
      ≡1  ●1  ◐0  ○0  ✕0
-                                         — ▾
+    ⓘ                                    — ▾
     project
     ┃ ● claude
         ├ Explore #1
@@ -623,7 +623,7 @@ fn snapshot_subagent_long_name_truncated_ui() {
     let output = render_to_string(&mut state, 28, 27);
     insta::assert_snapshot!(output, @"
      ≡1  ●1  ◐0  ○0  ✕0
-                             — ▾
+    ⓘ                        — ▾
     project
     ┃ ● claude
         ├ superpowers:code-revi…
@@ -659,7 +659,7 @@ fn snapshot_activity_empty_centered_ui() {
     let output = render_to_string(&mut state, 28, 26);
     insta::assert_snapshot!(output, @"
      ≡1  ●0  ◐0  ○1  ✕0
-                             — ▾
+    ⓘ                        — ▾
     project
     ┃ ○ claude
         Waiting for prompt…
@@ -690,7 +690,7 @@ fn snapshot_git_clean_centered_ui() {
     let output = render_to_string(&mut state, 28, 26);
     insta::assert_snapshot!(output, @"
      ≡1  ●0  ◐0  ○1  ✕0
-                             — ▾
+    ⓘ                        — ▾
     project
     ┃ ○ claude
         Waiting for prompt…
@@ -730,7 +730,7 @@ fn snapshot_git_branch_loaded_no_changes_shows_inline_clean() {
     let plain = render_to_string(&mut state, 28, 24);
     insta::assert_snapshot!(plain, @"
      ≡1  ●1  ◐0  ○0  ✕0
-                             — ▾
+    ⓘ                        — ▾
     project
     ╭ Activity │ Git ──────────╮
     │ main                     │
@@ -765,7 +765,7 @@ fn snapshot_git_no_data_shows_centered_clean() {
     let output = render_to_string(&mut state, 28, 24);
     insta::assert_snapshot!(output, @"
      ≡1  ●1  ◐0  ○0  ✕0
-                             — ▾
+    ⓘ                        — ▾
     project
     ╭ Activity │ Git ──────────╮
     │    Working tree clean    │
@@ -943,7 +943,7 @@ fn snapshot_branch_truncated_ui() {
     let plain = render_to_string(&mut state, 28, 30);
     insta::assert_snapshot!(plain, @"
      ≡1  ●1  ◐0  ○0  ✕0
-                             — ▾
+    ⓘ                        — ▾
     dotfiles
     ┃ ● claude
     ┃   feature/tmux-sidebar-da…
@@ -1000,7 +1000,7 @@ fn snapshot_git_staged_unstaged_untracked_ui() {
     let output = render_to_string(&mut state, 28, 30);
     insta::assert_snapshot!(output, @"
      ≡1  ●1  ◐0  ○0  ✕0
-                             — ▾
+    ⓘ                        — ▾
     project
     ┃ ● claude
     ╭ Activity │ Git ──────────╮
@@ -1050,7 +1050,7 @@ fn snapshot_git_long_branch_with_pr_ui() {
     let output = render_to_string(&mut state, 28, 24);
     insta::assert_snapshot!(output, @"
      ≡1  ●1  ◐0  ○0  ✕0
-                             — ▾
+    ⓘ                        — ▾
     project
     ╭ Activity │ Git ──────────╮
     │ feature/very-long-… #123 │
@@ -1094,7 +1094,7 @@ fn snapshot_git_staged_only_ui() {
     let output = render_to_string(&mut state, 28, 24);
     insta::assert_snapshot!(output, @"
      ≡1  ●1  ◐0  ○0  ✕0
-                             — ▾
+    ⓘ                        — ▾
     project
     ╭ Activity │ Git ──────────╮
     │ main                     │
@@ -1138,7 +1138,7 @@ fn snapshot_git_many_files_more_indicator_ui() {
     let output = render_to_string(&mut state, 28, 30);
     insta::assert_snapshot!(output, @"
      ≡1  ●1  ◐0  ○0  ✕0
-                             — ▾
+    ⓘ                        — ▾
     project
     ┃ ● claude
     ╭ Activity │ Git ──────────╮

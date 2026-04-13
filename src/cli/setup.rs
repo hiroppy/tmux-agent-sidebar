@@ -3,6 +3,8 @@
 //! reads only the adapter `HOOK_REGISTRATIONS` tables, never the user's
 //! config files.
 
+use std::path::PathBuf;
+
 use crate::adapter::HookRegistration;
 use crate::adapter::claude::ClaudeAdapter;
 use crate::adapter::codex::CodexAdapter;
@@ -140,9 +142,13 @@ fn collect_hook_specs(config: &serde_json::Value) -> Vec<HookSpec> {
 /// Return the trigger names that are required by `agent` but missing from
 /// `current_config`.
 ///
-/// The comparison uses the same hook shape that `setup` emits: `trigger`,
-/// `matcher`, and the command string. `matcher` normalizes `null`, missing,
-/// and `""` to the same empty matcher.
+/// Comparison uses `trigger`, `matcher`, and the canonicalized hook command.
+/// The command path is resolved through `std::fs::canonicalize` so a
+/// symlinked plugin directory (`~/.tmux/plugins/tmux-agent-sidebar/hook.sh`
+/// → `~/Programming/tmux-agent-sidebar/hook.sh`) still compares equal, while
+/// configs pointing at a stale or renamed checkout canonicalize to a
+/// different real path (or fail to canonicalize at all) and are flagged as
+/// missing.
 #[allow(dead_code)]
 pub(crate) fn missing_hooks(
     agent: &str,
@@ -154,18 +160,63 @@ pub(crate) fn missing_hooks(
     };
 
     let expected = collect_hook_specs(&expected);
-    let actual = collect_hook_specs(current_config);
-    let actual: std::collections::HashSet<HookSpec> = actual.into_iter().collect();
+    let actual: std::collections::HashSet<HookSpec> = collect_hook_specs(current_config)
+        .into_iter()
+        .map(normalize_hook_spec)
+        .collect();
 
     let mut missing = Vec::new();
     let mut seen_triggers = std::collections::BTreeSet::new();
     for spec in expected {
-        if actual.contains(&spec) || !seen_triggers.insert(spec.trigger.clone()) {
+        let key = normalize_hook_spec(spec.clone());
+        if actual.contains(&key) || !seen_triggers.insert(spec.trigger.clone()) {
             continue;
         }
         missing.push(spec.trigger);
     }
     missing
+}
+
+/// Normalize a hook spec so path drift that still points at the same file
+/// (e.g. via a plugin-dir symlink) compares equal, while a broken or stale
+/// path stays distinct.
+fn normalize_hook_spec(mut spec: HookSpec) -> HookSpec {
+    spec.command = normalize_hook_command(&spec.command);
+    spec
+}
+
+/// Canonicalize the script path inside a `bash <path> <args...>` command.
+/// Paths that fail to canonicalize (missing file, unresolved `~`) are
+/// returned with tilde expansion only, so a stale config does not collapse
+/// onto the expected command by accident.
+fn normalize_hook_command(cmd: &str) -> String {
+    let mut parts = cmd.splitn(3, ' ');
+    let (Some(head), Some(script)) = (parts.next(), parts.next()) else {
+        return cmd.to_string();
+    };
+    let tail = parts.next();
+    let expanded = expand_home_tilde(script);
+    let resolved = std::fs::canonicalize(&expanded)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or(expanded);
+    match tail {
+        Some(tail) if !tail.is_empty() => format!("{} {} {}", head, resolved, tail),
+        _ => format!("{} {}", head, resolved),
+    }
+}
+
+/// Minimal `~/`-to-`$HOME` expansion so we can normalize config commands
+/// without pulling in a shellexpand dep.
+fn expand_home_tilde(path: &str) -> String {
+    let Some(rest) = path.strip_prefix("~/") else {
+        return path.to_string();
+    };
+    let Some(home) = std::env::var_os("HOME") else {
+        return path.to_string();
+    };
+    let mut p = std::path::PathBuf::from(home);
+    p.push(rest);
+    p.to_string_lossy().into_owned()
 }
 
 #[allow(dead_code)]
@@ -266,7 +317,7 @@ const FALLBACK_HOOK_SCRIPT: &str = "~/.tmux/plugins/tmux-agent-sidebar/hook.sh";
 /// When step 1 or 2 succeeds, `detected = true`. When step 3 kicks in,
 /// `detected = false` and `cmd_setup` surfaces a stderr warning. Never
 /// panics.
-fn resolve_hook_script() -> ResolvedHookScript {
+pub(crate) fn resolve_hook_script() -> ResolvedHookScript {
     fn fallback() -> ResolvedHookScript {
         ResolvedHookScript {
             path: FALLBACK_HOOK_SCRIPT.to_string(),
@@ -294,6 +345,34 @@ fn resolve_hook_script() -> ResolvedHookScript {
         }
     }
     fallback()
+}
+
+/// Return the default config path for `agent` under the current user's home.
+#[allow(dead_code)]
+pub(crate) fn config_path_for_agent(agent: &str) -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    let home = PathBuf::from(home);
+    match agent {
+        "claude" => Some(home.join(".claude/settings.json")),
+        "codex" => Some(home.join(".codex/hooks.json")),
+        _ => None,
+    }
+}
+
+/// Load the current config for `agent`.
+///
+/// Missing files, unreadable files, or invalid JSON all map to `Value::Null`
+/// so callers can still use `missing_hooks()` and surface the full expected
+/// hook set.
+#[allow(dead_code)]
+pub(crate) fn load_current_config(agent: &str) -> serde_json::Value {
+    let Some(path) = config_path_for_agent(agent) else {
+        return serde_json::Value::Null;
+    };
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return serde_json::Value::Null;
+    };
+    serde_json::from_str(&text).unwrap_or(serde_json::Value::Null)
 }
 
 /// Pure dispatch core. Returns the exit code and the JSON to print
@@ -564,7 +643,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_hooks_treats_matcher_and_command_changes_as_missing() {
+    fn missing_hooks_reports_matcher_mismatch() {
         let mut config = build_agent_snippet("codex", FAKE_HOOK).unwrap();
         let hooks = config
             .get_mut("hooks")
@@ -583,7 +662,13 @@ mod tests {
             missing_hooks("codex", &config, FAKE_HOOK),
             vec!["SessionStart".to_string()]
         );
+    }
 
+    #[test]
+    fn missing_hooks_reports_stale_command_path() {
+        // A config that still lists the right trigger / matcher but points
+        // at a non-existent hook.sh must be flagged — otherwise we would
+        // silently lose hook delivery after a checkout move or rename.
         let mut config = build_agent_snippet("claude", FAKE_HOOK).unwrap();
         let hooks = config
             .get_mut("hooks")
@@ -600,15 +685,74 @@ mod tests {
             .get_mut("hooks")
             .and_then(Value::as_array_mut)
             .expect("inner hooks array");
-        let command = actions[0]
-            .as_object_mut()
-            .expect("command hook object");
-        command.insert("command".to_string(), json!("bash /wrong/hook.sh claude session-start"));
+        let command = actions[0].as_object_mut().expect("command hook object");
+        command.insert(
+            "command".to_string(),
+            json!("bash /definitely/not/here/hook.sh claude session-start"),
+        );
 
         assert_eq!(
             missing_hooks("claude", &config, FAKE_HOOK),
             vec!["SessionStart".to_string()]
         );
+    }
+
+    #[test]
+    fn missing_hooks_accepts_symlinked_command_path() {
+        // If the config command resolves (via canonicalize) to the same
+        // real file as the expected command, it must be treated as a match
+        // even if the literal strings differ. We use /tmp + a temp symlink
+        // for a hermetic filesystem fixture.
+        use std::io::Write;
+        let tmp = std::env::temp_dir();
+        let real_script = tmp.join(format!("mh-real-{}.sh", std::process::id()));
+        {
+            let mut f = std::fs::File::create(&real_script).unwrap();
+            writeln!(f, "#!/bin/sh").unwrap();
+        }
+        let link_path = tmp.join(format!("mh-link-{}.sh", std::process::id()));
+        let _ = std::fs::remove_file(&link_path);
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real_script, &link_path).unwrap();
+
+        let expected_hook = real_script.to_string_lossy().into_owned();
+        let link_hook = link_path.to_string_lossy().into_owned();
+
+        // Build the expected config against the real path, then swap the
+        // command in the "current" config to the symlink path.
+        let mut config = build_agent_snippet("claude", &expected_hook).unwrap();
+        let hooks = config
+            .get_mut("hooks")
+            .and_then(Value::as_object_mut)
+            .expect("top-level hooks object");
+        let session_start = hooks
+            .get_mut("SessionStart")
+            .and_then(Value::as_array_mut)
+            .expect("SessionStart array");
+        let entry = session_start[0]
+            .as_object_mut()
+            .expect("SessionStart entry object");
+        let actions = entry
+            .get_mut("hooks")
+            .and_then(Value::as_array_mut)
+            .expect("inner hooks array");
+        let command = actions[0].as_object_mut().expect("command hook object");
+        command.insert(
+            "command".to_string(),
+            json!(format!("bash {} claude session-start", link_hook)),
+        );
+
+        // Both sides canonicalize to `real_script`, so SessionStart must
+        // not appear in the missing list.
+        let missing = missing_hooks("claude", &config, &expected_hook);
+        assert!(
+            !missing.contains(&"SessionStart".to_string()),
+            "symlinked path should be treated as a match: missing = {:?}",
+            missing
+        );
+
+        let _ = std::fs::remove_file(&link_path);
+        let _ = std::fs::remove_file(&real_script);
     }
 
     #[test]

@@ -144,14 +144,15 @@ The sidebar receives status updates through agent hooks. Add the following hook 
 
 Create `~/.claude/settings.json` first.
 
-**Option A — Let an LLM wire it up (recommended).** Paste the following prompt into a Claude Code session:
+**Option A — Copy from the sidebar (recommended).**
 
-```
-Run ~/.tmux/plugins/tmux-agent-sidebar/target/release/tmux-agent-sidebar setup claude (fall back to ~/.tmux/plugins/tmux-agent-sidebar/bin/tmux-agent-sidebar if that path is missing). Add these hooks to ~/.claude/settings.json. If hooks already exist, merge them without making destructive changes.
-```
+1. Open a Claude Code pane in tmux and focus it.
+2. Press `prefix + e` to toggle the sidebar. A yellow `ⓘ` badge appears in the top row of the sidebar when required hooks are missing.
+3. Click `ⓘ`, then click `[copy]` next to `claude` in the Notices popup.
+4. Switch back to the Claude Code pane and paste. Claude Code will run `tmux-agent-sidebar setup claude` and merge the hooks into `~/.claude/settings.json`.
 
 <details>
-<summary>Option B — Manual: copy-paste this JSON into <code>~/.claude/settings.json</code></summary>
+<summary>Option B — Paste this JSON into <code>~/.claude/settings.json</code></summary>
 
 ```json
 {
@@ -342,14 +343,15 @@ Run ~/.tmux/plugins/tmux-agent-sidebar/target/release/tmux-agent-sidebar setup c
 
 Create `~/.codex/hooks.json` first.
 
-**Option A — Let an LLM wire it up (recommended).** Paste the following prompt into a Codex session:
+**Option A — Copy from the sidebar (recommended).**
 
-```
-Run ~/.tmux/plugins/tmux-agent-sidebar/target/release/tmux-agent-sidebar setup codex (fall back to ~/.tmux/plugins/tmux-agent-sidebar/bin/tmux-agent-sidebar if that path is missing). Add these hooks to ~/.codex/hooks.json. If hooks already exist, merge them without making destructive changes.
-```
+1. Open a Codex pane in tmux and focus it.
+2. Press `prefix + e` to toggle the sidebar. A yellow `ⓘ` badge appears in the top row of the sidebar when required hooks are missing.
+3. Click `ⓘ`, then click `[copy]` next to `codex` in the Notices popup.
+4. Switch back to the Codex pane and paste. Codex will run `tmux-agent-sidebar setup codex` and merge the hooks into `~/.codex/hooks.json`.
 
 <details>
-<summary>Option B — Manual: copy-paste this JSON into <code>~/.codex/hooks.json</code></summary>
+<summary>Option B — Paste this JSON into <code>~/.codex/hooks.json</code></summary>
 
 ```json
 {

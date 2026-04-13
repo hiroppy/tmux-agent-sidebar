@@ -11,7 +11,7 @@ use ratatui::{
 use crate::state::{AppState, Focus, RepoFilter, StatusFilter};
 use crate::tmux::PaneStatus;
 
-use super::text::{display_width, pad_to, truncate_to_width};
+use super::text::{display_width, truncate_to_width};
 
 /// Render the status filter bar.
 fn render_filter_bar<'a>(state: &AppState, bar_width: u16) -> Line<'a> {
@@ -79,35 +79,12 @@ fn render_filter_bar<'a>(state: &AppState, bar_width: u16) -> Line<'a> {
     Line::from(spans)
 }
 
-fn render_secondary_header<'a>(state: &AppState, width: u16) -> (Line<'a>, Option<u16>) {
+fn render_secondary_header<'a>(
+    state: &AppState,
+    width: u16,
+) -> (Line<'a>, Option<u16>, Option<u16>) {
     let theme = &state.theme;
-    let banner_text = state
-        .version_notice
-        .as_ref()
-        .map(|notice| format!("new release v{}!", notice.latest_version));
-
-    if let Some(text) = banner_text {
-        let text = truncate_to_width(&text, width as usize);
-        let gap = pad_to(display_width(&text), width as usize);
-        return (
-            Line::from(vec![
-                Span::raw(gap),
-                Span::styled(text, Style::default().fg(theme.status_waiting)),
-            ]),
-            None,
-        );
-    }
-
     let repo_icon = "▾";
-
-    let repo_label = match &state.global.repo_filter {
-        RepoFilter::All => "—".to_string(),
-        RepoFilter::Repo(name) => truncate_to_width(name, width.saturating_sub(3) as usize),
-    };
-    let repo_btn_width = display_width(&repo_label) + 2; // label + space + arrow
-
-    let gap = (width as usize).saturating_sub(repo_btn_width);
-    let repo_button_col = Some(gap as u16);
 
     let repo_has_filter = !matches!(state.global.repo_filter, RepoFilter::All);
     let repo_style = if state.repo_popup_open || repo_has_filter {
@@ -116,13 +93,32 @@ fn render_secondary_header<'a>(state: &AppState, width: u16) -> (Line<'a>, Optio
         Style::default().fg(theme.text_muted)
     };
 
+    let has_notices_info = super::notices::has_info(state);
+    let notices_button_col = has_notices_info.then_some(0);
+    let notices_width = super::notices::BUTTON_WIDTH;
+    let max_repo_label_width = width.saturating_sub((notices_width + 3) as u16) as usize;
+    let repo_label = match &state.global.repo_filter {
+        RepoFilter::All => "—".to_string(),
+        RepoFilter::Repo(name) => truncate_to_width(name, max_repo_label_width),
+    };
+    let repo_btn_width = display_width(&repo_label) + 2; // label + space + arrow
+
+    let gap = (width as usize).saturating_sub(repo_btn_width + notices_width);
+    let repo_button_col = Some((notices_width + gap) as u16);
+
     let mut spans: Vec<Span<'a>> = Vec::new();
+    if has_notices_info {
+        spans.push(super::notices::button_span(state));
+        spans.push(Span::raw(" "));
+    } else {
+        spans.push(Span::raw("  "));
+    }
     spans.push(Span::raw(" ".repeat(gap)));
     spans.push(Span::styled(repo_label, repo_style));
     spans.push(Span::raw(" "));
     spans.push(Span::styled(repo_icon, repo_style));
 
-    (Line::from(spans), repo_button_col)
+    (Line::from(spans), notices_button_col, repo_button_col)
 }
 
 fn render_repo_popup(frame: &mut Frame, state: &mut AppState, area: Rect) {
@@ -210,7 +206,9 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
         width: area.width,
         height: 1.min(area.height.saturating_sub(1)),
     };
-    let (secondary_line, repo_btn_col) = render_secondary_header(state, area.width);
+    let (secondary_line, notices_btn_col, repo_btn_col) =
+        render_secondary_header(state, area.width);
+    state.notices_button_col = notices_btn_col;
     state.repo_button_col = repo_btn_col;
     frame.render_widget(Paragraph::new(vec![secondary_line]), secondary_area);
 
@@ -334,7 +332,9 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
     frame.render_widget(paragraph, list_area);
 
     // Render popup overlay on top if open
-    if state.repo_popup_open {
+    if state.notices_popup_open {
+        super::notices::render_notices_popup(frame, state, area);
+    } else if state.repo_popup_open {
         render_repo_popup(frame, state, area);
     }
 }
@@ -355,18 +355,85 @@ mod tests {
     }
 
     #[test]
-    fn render_secondary_header_version_banner_right_aligns() {
+    fn snapshot_secondary_header_omits_version_banner_when_notice_present() {
+        // Version notices light up the `ⓘ` indicator in the header but
+        // must not leak the "new release vX.Y.Z" banner into the row —
+        // the banner lives in the popup, not the header. A snapshot here
+        // catches any regression that would put banner text back on the
+        // row, including subtle width or spacing drift.
         let mut state = crate::state::AppState::new(String::new());
         state.version_notice = Some(crate::version::UpdateNotice {
             local_version: "0.2.6".into(),
             latest_version: "0.2.7".into(),
         });
 
-        let line = render_secondary_header(&state, 30).0;
-        let text = line_text(&line);
+        let text = line_text(&render_secondary_header(&state, 30).0);
+        insta::assert_snapshot!(text, @"ⓘ                          — ▾");
+    }
 
-        assert!(text.ends_with("new release v0.2.7!"));
-        assert_eq!(display_width(&text), 30);
+    #[test]
+    fn render_secondary_header_keeps_repo_position_with_or_without_notices_info() {
+        let mut with_info = AppState::new(String::new());
+        with_info.version_notice = Some(crate::version::UpdateNotice {
+            local_version: "0.2.6".into(),
+            latest_version: "0.2.7".into(),
+        });
+        with_info.notices_missing_hook_groups = vec![crate::state::NoticesMissingHookGroup {
+            agent: "claude".into(),
+            hooks: vec!["SessionStart".into()],
+        }];
+
+        let without_info = AppState::new(String::new());
+
+        let (_, _, with_repo_col) = render_secondary_header(&with_info, 30);
+        let (_, _, without_repo_col) = render_secondary_header(&without_info, 30);
+
+        assert_eq!(with_repo_col, without_repo_col);
+        assert_eq!(with_repo_col, Some(27));
+    }
+
+    #[test]
+    fn snapshot_secondary_header_without_notices_info() {
+        let state = AppState::new(String::new());
+        let text = line_text(&render_secondary_header(&state, 30).0);
+        insta::assert_snapshot!(text, @"                           — ▾");
+    }
+
+    #[test]
+    fn snapshot_secondary_header_with_version_only() {
+        let mut state = AppState::new(String::new());
+        state.version_notice = Some(crate::version::UpdateNotice {
+            local_version: "0.2.6".into(),
+            latest_version: "0.2.7".into(),
+        });
+        let text = line_text(&render_secondary_header(&state, 30).0);
+        insta::assert_snapshot!(text, @"ⓘ                          — ▾");
+    }
+
+    #[test]
+    fn snapshot_secondary_header_with_hooks_only() {
+        let mut state = AppState::new(String::new());
+        state.notices_missing_hook_groups = vec![crate::state::NoticesMissingHookGroup {
+            agent: "claude".into(),
+            hooks: vec!["SessionStart".into()],
+        }];
+        let text = line_text(&render_secondary_header(&state, 30).0);
+        insta::assert_snapshot!(text, @"ⓘ                          — ▾");
+    }
+
+    #[test]
+    fn snapshot_secondary_header_with_version_and_hooks() {
+        let mut state = AppState::new(String::new());
+        state.version_notice = Some(crate::version::UpdateNotice {
+            local_version: "0.2.6".into(),
+            latest_version: "0.2.7".into(),
+        });
+        state.notices_missing_hook_groups = vec![crate::state::NoticesMissingHookGroup {
+            agent: "claude".into(),
+            hooks: vec!["SessionStart".into()],
+        }];
+        let text = line_text(&render_secondary_header(&state, 30).0);
+        insta::assert_snapshot!(text, @"ⓘ                          — ▾");
     }
 
     // ─── render_filter_bar tests ──────────────────────────────
@@ -487,8 +554,30 @@ mod tests {
     #[test]
     fn render_secondary_header_repo_button_col_returned() {
         let state = make_state_with_groups(vec![]);
-        let (_, col) = render_secondary_header(&state, 28);
+        let (_, _, col) = render_secondary_header(&state, 28);
         assert_eq!(col, Some(25), "repo button should be right-aligned");
+    }
+
+    #[test]
+    fn snapshot_secondary_header_shows_notices_indicator_when_missing_hooks_exist() {
+        // Visual regression check: the indicator MUST sit at column 0
+        // and the repo filter MUST stay pinned to the right edge when
+        // missing hooks are present. A snapshot catches any drift in
+        // spacing, glyph, or column alignment that a `starts_with` /
+        // `contains` probe would silently miss.
+        let mut state = make_state_with_groups(vec![]);
+        state.notices_missing_hook_groups = vec![crate::state::NoticesMissingHookGroup {
+            agent: "claude".into(),
+            hooks: vec!["SessionStart".into(), "Stop".into()],
+        }];
+
+        let (line, notices_col, repo_col) = render_secondary_header(&state, 28);
+        let text = line_text(&line);
+        insta::assert_snapshot!(text, @"ⓘ                        — ▾");
+        // Click-target columns are layout state, not visible characters,
+        // so they stay as direct equality checks alongside the snapshot.
+        assert_eq!(notices_col, Some(0));
+        assert_eq!(repo_col, Some(25));
     }
 
     #[test]
@@ -508,7 +597,7 @@ mod tests {
             text.find("my-app").unwrap() < text.find("▾").unwrap(),
             "repo name should come before the arrow"
         );
-        let (line, _) = render_secondary_header(&state, 40);
+        let (line, _, _) = render_secondary_header(&state, 40);
         let repo_span = line
             .spans
             .iter()
@@ -549,7 +638,7 @@ mod tests {
     fn render_secondary_header_popup_open_styling() {
         let mut state = make_state_with_groups(vec![]);
         state.repo_popup_open = true;
-        let (line, _) = render_secondary_header(&state, 28);
+        let (line, _, _) = render_secondary_header(&state, 28);
         let last_span = line.spans.last().unwrap();
         assert!(
             !last_span.style.add_modifier.contains(Modifier::UNDERLINED),

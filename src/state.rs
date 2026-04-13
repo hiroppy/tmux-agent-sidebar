@@ -278,6 +278,21 @@ pub struct AppState {
     pub repo_popup_open: bool,
     pub repo_popup_selected: usize,
     pub repo_popup_area: Option<ratatui::layout::Rect>,
+    /// `notices` diff indicator area and popup state for missing hook triggers.
+    pub notices_popup_open: bool,
+    pub notices_popup_area: Option<ratatui::layout::Rect>,
+    pub notices_button_col: Option<u16>,
+    pub notices_missing_hook_groups: Vec<NoticesMissingHookGroup>,
+    /// Click regions for the `copy` label on each agent row in the popup.
+    pub notices_copy_targets: Vec<NoticesCopyTarget>,
+    /// Agent name and timestamp of the most recent successful copy, shown
+    /// as a transient `copied` label next to the popup title.
+    pub notices_copied_at: Option<(String, Instant)>,
+    /// Pending OSC 52 clipboard payload. The main loop flushes this to
+    /// stdout after the next frame so tmux (with `set-clipboard on`) can
+    /// forward it to the upstream terminal's clipboard — covering the
+    /// SSH case where `arboard` would only reach the remote machine.
+    pub pending_osc52_copy: Option<String>,
     pub repo_button_col: Option<u16>,
     /// Update notice shown when a newer GitHub release is available.
     pub version_notice: Option<crate::version::UpdateNotice>,
@@ -299,6 +314,20 @@ pub struct HyperlinkOverlay {
     pub y: u16,
     pub text: String,
     pub url: String,
+}
+
+/// Missing hooks grouped by agent name.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NoticesMissingHookGroup {
+    pub agent: String,
+    pub hooks: Vec<String>,
+}
+
+/// Click target for the `copy` label next to an agent in the notices popup.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoticesCopyTarget {
+    pub area: ratatui::layout::Rect,
+    pub agent: String,
 }
 
 impl AppState {
@@ -331,6 +360,13 @@ impl AppState {
             repo_popup_open: false,
             repo_popup_selected: 0,
             repo_popup_area: None,
+            notices_popup_open: false,
+            notices_popup_area: None,
+            notices_button_col: None,
+            notices_missing_hook_groups: vec![],
+            notices_copy_targets: vec![],
+            notices_copied_at: None,
+            pending_osc52_copy: None,
             repo_button_col: None,
             version_notice: None,
             global: GlobalState::new(),
@@ -347,6 +383,22 @@ impl AppState {
 
     pub fn pane_state(&self, pane_id: &str) -> Option<&PaneRuntimeState> {
         self.pane_states.get(pane_id)
+    }
+
+    pub fn pane_by_id(&self, pane_id: &str) -> Option<&crate::tmux::PaneInfo> {
+        for group in &self.repo_groups {
+            for (pane, _) in &group.panes {
+                if pane.pane_id == pane_id {
+                    return Some(pane);
+                }
+            }
+        }
+        None
+    }
+
+    pub fn selected_pane(&self) -> Option<&crate::tmux::PaneInfo> {
+        let target = self.pane_row_targets.get(self.global.selected_pane_row)?;
+        self.pane_by_id(&target.pane_id)
     }
 
     pub fn set_pane_ports(&mut self, pane_id: &str, ports: Vec<u16>) {
@@ -393,6 +445,107 @@ impl AppState {
 
     pub fn clear_pane_state(&mut self, pane_id: &str) {
         self.pane_states.remove(pane_id);
+    }
+
+    /// Refresh the missing-hook list for the currently selected agent pane.
+    pub fn refresh_notices(&mut self) {
+        let Some(pane_id) = self.focused_pane_id.clone() else {
+            return;
+        };
+        let Some(agent) = self
+            .pane_by_id(&pane_id)
+            .map(|pane| pane.agent.as_str().to_string())
+        else {
+            return;
+        };
+
+        let hook_script = crate::cli::setup::resolve_hook_script().path;
+        let force_missing = debug_forced_display();
+        self.notices_missing_hook_groups = notices_agents(&agent)
+            .into_iter()
+            .filter_map(|agent| {
+                let config = if force_missing {
+                    serde_json::Value::Null
+                } else {
+                    crate::cli::setup::load_current_config(&agent)
+                };
+                let hooks = crate::cli::setup::missing_hooks(&agent, &config, &hook_script);
+                if hooks.is_empty() {
+                    None
+                } else {
+                    Some(NoticesMissingHookGroup { agent, hooks })
+                }
+            })
+            .collect();
+    }
+
+    pub fn toggle_notices_popup(&mut self) {
+        self.notices_popup_open = !self.notices_popup_open;
+        if self.notices_popup_open {
+            self.repo_popup_open = false;
+            self.repo_popup_area = None;
+        } else {
+            self.notices_popup_area = None;
+            self.notices_copy_targets.clear();
+            self.notices_copied_at = None;
+        }
+    }
+
+    pub fn close_notices_popup(&mut self) {
+        self.notices_popup_open = false;
+        self.notices_popup_area = None;
+        self.notices_copy_targets.clear();
+        self.notices_copied_at = None;
+    }
+
+    /// Return the agent name if the given (row, col) hits a `[copy]` label
+    /// in the currently rendered notices popup. Pure lookup — no side effects.
+    pub fn notices_copy_target_at(&self, row: u16, col: u16) -> Option<&str> {
+        self.notices_copy_targets
+            .iter()
+            .find(|t| {
+                row >= t.area.y
+                    && row < t.area.y + t.area.height
+                    && col >= t.area.x
+                    && col < t.area.x + t.area.width
+            })
+            .map(|t| t.agent.as_str())
+    }
+
+    /// Copy the LLM setup prompt for the given agent (`claude` / `codex`)
+    /// to every clipboard-reachable surface: `arboard` for the local OS
+    /// clipboard, `tmux set-buffer` for the tmux paste buffer, and a
+    /// queued OSC 52 escape (flushed by the main loop) for upstream
+    /// terminals over SSH. Returns true only when at least one *verifiable*
+    /// destination succeeded so the caller can decide whether to show the
+    /// `[copied]` feedback.
+    pub fn copy_notices_prompt(&mut self, agent: &str) -> bool {
+        let Some(prompt) = crate::ui::notices::prompt_for_agent(agent) else {
+            return false;
+        };
+        let clip_ok = arboard::Clipboard::new()
+            .and_then(|mut c| c.set_text(prompt.to_string()))
+            .is_ok();
+        let tmux_ok = std::process::Command::new("tmux")
+            .args(["set-buffer", prompt])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        // OSC 52 is queued regardless — it reaches the upstream terminal
+        // even when the local sinks above fail (SSH case). But we do not
+        // count it toward the feedback because there is no success signal.
+        self.pending_osc52_copy = Some(prompt.to_string());
+        self.record_notices_copy_result(agent, clip_ok || tmux_ok)
+    }
+
+    /// Stamp the `[copied]` feedback state. Pure separation from the I/O
+    /// above so the success policy is unit-testable without touching the
+    /// real clipboard or tmux.
+    pub fn record_notices_copy_result(&mut self, agent: &str, success: bool) -> bool {
+        if success {
+            self.notices_copied_at = Some((agent.to_string(), Instant::now()));
+        }
+        success
     }
 
     pub fn prune_pane_states_to_current_panes(&mut self) {
@@ -554,6 +707,13 @@ impl AppState {
     /// The repo filter button lives on the far right of this row.
     pub fn handle_secondary_header_click(&mut self, col: u16) {
         if self
+            .notices_button_col
+            .is_some_and(|notices_col| col == notices_col)
+        {
+            self.toggle_notices_popup();
+            return;
+        }
+        if self
             .repo_button_col
             .is_some_and(|repo_button_col| col >= repo_button_col)
         {
@@ -566,6 +726,22 @@ impl AppState {
     /// Row 0 is the fixed filter bar, row 1+ maps to the scrollable agent list.
     pub fn handle_mouse_click(&mut self, row: u16, col: u16) {
         // Handle popup interactions first
+        if self.notices_popup_open {
+            if let Some(popup_area) = self.notices_popup_area {
+                if row >= popup_area.y
+                    && row < popup_area.y + popup_area.height
+                    && col >= popup_area.x
+                    && col < popup_area.x + popup_area.width
+                {
+                    if let Some(agent) = self.notices_copy_target_at(row, col).map(str::to_string) {
+                        self.copy_notices_prompt(&agent);
+                    }
+                    return;
+                }
+            }
+            self.close_notices_popup();
+            return;
+        }
         if self.repo_popup_open {
             if let Some(popup_area) = self.repo_popup_area {
                 if row >= popup_area.y
@@ -641,12 +817,16 @@ impl AppState {
     pub fn toggle_repo_popup(&mut self) {
         self.repo_popup_open = !self.repo_popup_open;
         if self.repo_popup_open {
+            self.notices_popup_open = false;
+            self.notices_popup_area = None;
             // Set selected to current filter position
             let names = self.repo_names();
             self.repo_popup_selected = match &self.global.repo_filter {
                 RepoFilter::All => 0,
                 RepoFilter::Repo(name) => names.iter().position(|n| n == name).unwrap_or(0),
             };
+        } else {
+            self.repo_popup_area = None;
         }
     }
 
@@ -660,13 +840,30 @@ impl AppState {
             };
         }
         self.repo_popup_open = false;
+        self.notices_popup_open = false;
+        self.notices_popup_area = None;
         self.global.save_repo_filter();
         self.rebuild_row_targets();
     }
 
     pub fn close_repo_popup(&mut self) {
         self.repo_popup_open = false;
+        self.repo_popup_area = None;
     }
+}
+
+fn notices_agents(current_agent: &str) -> Vec<String> {
+    if debug_forced_display() {
+        return vec!["claude".to_string(), "codex".to_string()];
+    }
+
+    vec![current_agent.to_string()]
+}
+
+pub(crate) fn debug_forced_display() -> bool {
+    option_env!("DEBUG")
+        .map(|value| value != "0")
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -680,6 +877,111 @@ mod tests {
     /// Reset filter click debounce so the next `handle_filter_click` is not ignored.
     fn reset_filter_debounce(state: &mut AppState) {
         state.last_filter_click = std::time::Instant::now() - std::time::Duration::from_millis(200);
+    }
+
+    // ─── copy feedback policy ────────────────────────────────────────
+
+    #[test]
+    fn record_notices_copy_result_success_sets_copied_feedback() {
+        let mut state = AppState::new(String::new());
+        assert!(state.record_notices_copy_result("claude", true));
+        let entry = state
+            .notices_copied_at
+            .as_ref()
+            .expect("success path must set notices_copied_at");
+        assert_eq!(entry.0, "claude");
+    }
+
+    #[test]
+    fn record_notices_copy_result_failure_does_not_set_copied_feedback() {
+        let mut state = AppState::new(String::new());
+        // Pre-populate to assert the failure path does not overwrite it.
+        state.notices_copied_at = None;
+        assert!(!state.record_notices_copy_result("claude", false));
+        assert!(
+            state.notices_copied_at.is_none(),
+            "`[copied]` must not flash when every clipboard sink failed"
+        );
+    }
+
+    #[test]
+    fn record_notices_copy_result_failure_preserves_previous_feedback() {
+        let mut state = AppState::new(String::new());
+        let earlier = (
+            "codex".to_string(),
+            std::time::Instant::now() - std::time::Duration::from_millis(10),
+        );
+        state.notices_copied_at = Some(earlier.clone());
+        // A later copy that fails should not clobber an earlier success,
+        // but more importantly it must not fabricate a success for itself.
+        assert!(!state.record_notices_copy_result("claude", false));
+        let still = state
+            .notices_copied_at
+            .as_ref()
+            .expect("prior success should survive a subsequent failure");
+        assert_eq!(still.0, earlier.0);
+    }
+
+    #[test]
+    fn copy_notices_prompt_short_circuits_for_unknown_agent() {
+        // `gemini` has no prompt definition, so the function must return
+        // early with `false` and leave `notices_copied_at` untouched —
+        // without touching the real clipboard or tmux at all.
+        let mut state = AppState::new(String::new());
+        state.notices_copied_at = None;
+        assert!(!state.copy_notices_prompt("gemini"));
+        assert!(state.notices_copied_at.is_none());
+        assert!(
+            state.pending_osc52_copy.is_none(),
+            "unknown agents must not queue an OSC 52 payload"
+        );
+    }
+
+    // ─── notices_copy_target_at hit detection ───────────────────────
+
+    fn copy_target_fixture() -> AppState {
+        let mut state = AppState::new(String::new());
+        state.notices_copy_targets = vec![
+            NoticesCopyTarget {
+                area: ratatui::layout::Rect::new(10, 5, 8, 1),
+                agent: "claude".into(),
+            },
+            NoticesCopyTarget {
+                area: ratatui::layout::Rect::new(10, 7, 8, 1),
+                agent: "codex".into(),
+            },
+        ];
+        state
+    }
+
+    #[test]
+    fn notices_copy_target_at_finds_claude_row() {
+        let state = copy_target_fixture();
+        assert_eq!(state.notices_copy_target_at(5, 10), Some("claude"));
+        assert_eq!(state.notices_copy_target_at(5, 17), Some("claude"));
+    }
+
+    #[test]
+    fn notices_copy_target_at_finds_codex_row() {
+        let state = copy_target_fixture();
+        assert_eq!(state.notices_copy_target_at(7, 12), Some("codex"));
+    }
+
+    #[test]
+    fn notices_copy_target_at_misses_outside_target_bounds() {
+        let state = copy_target_fixture();
+        // Same row but to the left of the slot
+        assert_eq!(state.notices_copy_target_at(5, 9), None);
+        // Same row but to the right of the slot
+        assert_eq!(state.notices_copy_target_at(5, 18), None);
+        // Gap row between the two targets
+        assert_eq!(state.notices_copy_target_at(6, 12), None);
+    }
+
+    #[test]
+    fn notices_copy_target_at_returns_none_when_no_targets_tracked() {
+        let state = AppState::new(String::new());
+        assert_eq!(state.notices_copy_target_at(5, 10), None);
     }
 
     fn test_pane(id: &str) -> PaneInfo {
@@ -707,6 +1009,18 @@ mod tests {
         let path = crate::activity::log_file_path(pane_id);
         fs::write(&path, contents).unwrap();
         path.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn notices_agents_falls_back_to_current_agent() {
+        if debug_forced_display() {
+            assert_eq!(
+                notices_agents("claude"),
+                vec!["claude".to_string(), "codex".to_string()]
+            );
+        } else {
+            assert_eq!(notices_agents("claude"), vec!["claude".to_string()]);
+        }
     }
 
     #[test]

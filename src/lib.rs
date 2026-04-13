@@ -1,6 +1,7 @@
 pub mod activity;
 pub mod adapter;
 pub mod cli;
+pub mod clipboard;
 pub mod event;
 pub mod git;
 pub mod group;

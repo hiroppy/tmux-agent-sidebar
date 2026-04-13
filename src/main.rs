@@ -131,6 +131,15 @@ fn run_app(
         // Write OSC 8 hyperlink overlays after frame render
         write_hyperlink_overlays(terminal.backend_mut(), &state.hyperlink_overlays)?;
 
+        // Flush any pending OSC 52 clipboard payload (set by notices copy).
+        if let Some(payload) = state.pending_osc52_copy.take() {
+            let seq = tmux_agent_sidebar::clipboard::osc52_sequence(&payload);
+            let backend = terminal.backend_mut();
+            use std::io::Write;
+            let _ = backend.write_all(seq.as_bytes());
+            let _ = backend.flush();
+        }
+
         let refresh_timeout = refresh_interval.saturating_sub(last_refresh.elapsed());
         let spinner_timeout = spinner_interval.saturating_sub(last_spinner.elapsed());
         let timeout = refresh_timeout.min(spinner_timeout);
@@ -138,6 +147,10 @@ fn run_app(
             loop {
                 let ev = event::read()?;
                 match ev {
+                    Event::Key(key) if state.notices_popup_open => match key.code {
+                        KeyCode::Esc => state.close_notices_popup(),
+                        _ => {}
+                    },
                     Event::Key(key) if state.repo_popup_open => match key.code {
                         KeyCode::Esc => state.close_repo_popup(),
                         KeyCode::Char('j') | KeyCode::Down => {
