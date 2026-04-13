@@ -119,6 +119,8 @@ pub fn make_pane(agent: AgentType, status: PaneStatus) -> PaneInfo {
         pane_pid: None,
         worktree_name: String::new(),
         worktree_branch: String::new(),
+        session_id: None,
+        session_name: String::new(),
     }
 }
 

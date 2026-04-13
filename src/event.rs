@@ -23,6 +23,7 @@ pub enum AgentEvent {
         permission_mode: String,
         worktree: Option<WorktreeInfo>,
         agent_id: Option<String>,
+        session_id: Option<String>,
     },
     SessionEnd,
     UserPromptSubmit {
@@ -32,6 +33,7 @@ pub enum AgentEvent {
         prompt: String,
         worktree: Option<WorktreeInfo>,
         agent_id: Option<String>,
+        session_id: Option<String>,
     },
     Notification {
         agent: String,
@@ -44,6 +46,7 @@ pub enum AgentEvent {
         meta_only: bool,
         worktree: Option<WorktreeInfo>,
         agent_id: Option<String>,
+        session_id: Option<String>,
     },
     Stop {
         agent: String,
@@ -53,6 +56,7 @@ pub enum AgentEvent {
         response: Option<String>,
         worktree: Option<WorktreeInfo>,
         agent_id: Option<String>,
+        session_id: Option<String>,
     },
     StopFailure {
         agent: String,
@@ -61,6 +65,7 @@ pub enum AgentEvent {
         error: String,
         worktree: Option<WorktreeInfo>,
         agent_id: Option<String>,
+        session_id: Option<String>,
     },
     SubagentStart {
         agent_type: String,
@@ -83,11 +88,13 @@ pub enum AgentEvent {
         permission_mode: String,
         worktree: Option<WorktreeInfo>,
         agent_id: Option<String>,
+        session_id: Option<String>,
     },
     CwdChanged {
         cwd: String,
         worktree: Option<WorktreeInfo>,
         agent_id: Option<String>,
+        session_id: Option<String>,
     },
     TaskCreated {
         task_id: String,
@@ -410,6 +417,7 @@ mod tests {
             permission_mode: "default".into(),
             worktree: None,
             agent_id: None,
+            session_id: None,
         };
         match event {
             AgentEvent::SessionStart {
@@ -436,6 +444,7 @@ mod tests {
             permission_mode: "default".into(),
             worktree: Some(wt.clone()),
             agent_id: Some("abc-123".into()),
+            session_id: None,
         };
         match event {
             AgentEvent::SessionStart {
@@ -507,6 +516,7 @@ mod tests {
                 cwd,
                 worktree,
                 agent_id,
+                ..
             } => {
                 assert_eq!(cwd, "/new/dir");
                 assert!(worktree.is_none());

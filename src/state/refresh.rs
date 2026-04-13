@@ -69,6 +69,7 @@ impl AppState {
             "@pane_worktree_branch",
             "@pane_started_at",
             "@pane_wait_reason",
+            "@pane_session_id",
         ] {
             tmux::unset_pane_option(pane_id, key);
         }
@@ -120,9 +121,33 @@ impl AppState {
         } else {
             self.apply_session_snapshot(focused, sessions);
         }
+        self.refresh_session_names();
         self.refresh_activity_data();
         self.refresh_notices();
         window_active
+    }
+
+    /// Periodically scan `~/.claude/sessions/*.json` to resolve session names.
+    /// Populates `pane.session_name` for panes that have a matching `session_id`.
+    fn refresh_session_names(&mut self) {
+        const SESSION_REFRESH_INTERVAL: Duration = Duration::from_secs(10);
+
+        if self.last_session_refresh.elapsed() >= SESSION_REFRESH_INTERVAL {
+            self.session_names = crate::session::scan_session_names();
+            self.last_session_refresh = std::time::Instant::now();
+        }
+
+        for group in &mut self.repo_groups {
+            for (pane, _) in &mut group.panes {
+                if let Some(sid) = &pane.session_id
+                    && let Some(name) = self.session_names.get(sid)
+                {
+                    pane.session_name.clone_from(name);
+                } else {
+                    pane.session_name.clear();
+                }
+            }
+        }
     }
 
     pub(crate) fn refresh_port_data(
@@ -281,6 +306,8 @@ mod tests {
             pane_pid: None,
             worktree_name: String::new(),
             worktree_branch: String::new(),
+            session_id: None,
+            session_name: String::new(),
         }
     }
 

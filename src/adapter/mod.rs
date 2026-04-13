@@ -7,6 +7,11 @@ pub(crate) fn json_str<'a>(val: &'a serde_json::Value, key: &str) -> &'a str {
     val.get(key).and_then(|v| v.as_str()).unwrap_or("")
 }
 
+pub(crate) fn optional_str(val: &serde_json::Value, key: &str) -> Option<String> {
+    let s = json_str(val, key);
+    if s.is_empty() { None } else { Some(s.into()) }
+}
+
 /// Binding between an upstream agent-side hook trigger (as it appears in the
 /// agent's `settings.json`) and the internal `AgentEventKind` the sidebar
 /// produces once the hook fires.

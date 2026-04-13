@@ -305,6 +305,10 @@ pub struct AppState {
     /// Height of the bottom panel in lines. Loaded once at startup from
     /// the `@sidebar_bottom_height` tmux option. A value of 0 hides the panel.
     pub bottom_panel_height: u16,
+    /// Maps session_id → session name, refreshed periodically from
+    /// `~/.claude/sessions/*.json` files.
+    pub session_names: HashMap<String, String>,
+    pub last_session_refresh: Instant,
 }
 
 /// Screen-positioned hyperlink overlay for OSC 8 terminal hyperlinks.
@@ -374,6 +378,8 @@ impl AppState {
             port_scan_initialized: false,
             last_port_refresh: Instant::now(),
             bottom_panel_height: crate::ui::BOTTOM_PANEL_HEIGHT,
+            session_names: HashMap::new(),
+            last_session_refresh: Instant::now(),
         }
     }
 
@@ -1002,6 +1008,8 @@ mod tests {
             pane_pid: None,
             worktree_name: String::new(),
             worktree_branch: String::new(),
+            session_id: None,
+            session_name: String::new(),
         }
     }
 

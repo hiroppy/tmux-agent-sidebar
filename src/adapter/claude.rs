@@ -26,11 +26,7 @@ fn parse_worktree(input: &Value) -> Option<WorktreeInfo> {
     })
 }
 
-/// Parse optional agent_id from hook payload.
-fn parse_agent_id(input: &Value) -> Option<String> {
-    let id = json_str(input, "agent_id");
-    if id.is_empty() { None } else { Some(id.into()) }
-}
+use super::optional_str;
 
 fn parse_json_field(input: &Value, field: &str) -> Value {
     input
@@ -151,7 +147,8 @@ impl EventAdapter for ClaudeAdapter {
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: json_str(input, "permission_mode").into(),
                 worktree: parse_worktree(input),
-                agent_id: parse_agent_id(input),
+                agent_id: optional_str(input, "agent_id"),
+                session_id: optional_str(input, "session_id"),
             }),
             "session-end" => Some(AgentEvent::SessionEnd),
             "user-prompt-submit" => Some(AgentEvent::UserPromptSubmit {
@@ -160,7 +157,8 @@ impl EventAdapter for ClaudeAdapter {
                 permission_mode: json_str(input, "permission_mode").into(),
                 prompt: json_str(input, "prompt").into(),
                 worktree: parse_worktree(input),
-                agent_id: parse_agent_id(input),
+                agent_id: optional_str(input, "agent_id"),
+                session_id: optional_str(input, "session_id"),
             }),
             "notification" => {
                 let wait_reason = json_str(input, "notification_type");
@@ -172,7 +170,8 @@ impl EventAdapter for ClaudeAdapter {
                     wait_reason: wait_reason.into(),
                     meta_only,
                     worktree: parse_worktree(input),
-                    agent_id: parse_agent_id(input),
+                    agent_id: optional_str(input, "agent_id"),
+                    session_id: optional_str(input, "session_id"),
                 })
             }
             "stop" => Some(AgentEvent::Stop {
@@ -182,7 +181,8 @@ impl EventAdapter for ClaudeAdapter {
                 last_message: json_str(input, "last_assistant_message").into(),
                 response: None,
                 worktree: parse_worktree(input),
-                agent_id: parse_agent_id(input),
+                agent_id: optional_str(input, "agent_id"),
+                session_id: optional_str(input, "session_id"),
             }),
             "stop-failure" => {
                 // Upstream fields: error_type (category), error_message (detail)
@@ -206,7 +206,8 @@ impl EventAdapter for ClaudeAdapter {
                     permission_mode: json_str(input, "permission_mode").into(),
                     error: error.into(),
                     worktree: parse_worktree(input),
-                    agent_id: parse_agent_id(input),
+                    agent_id: optional_str(input, "agent_id"),
+                    session_id: optional_str(input, "session_id"),
                 })
             }
             "permission-denied" => Some(AgentEvent::PermissionDenied {
@@ -214,12 +215,14 @@ impl EventAdapter for ClaudeAdapter {
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: json_str(input, "permission_mode").into(),
                 worktree: parse_worktree(input),
-                agent_id: parse_agent_id(input),
+                agent_id: optional_str(input, "agent_id"),
+                session_id: optional_str(input, "session_id"),
             }),
             "cwd-changed" => Some(AgentEvent::CwdChanged {
                 cwd: json_str(input, "cwd").into(),
                 worktree: parse_worktree(input),
-                agent_id: parse_agent_id(input),
+                agent_id: optional_str(input, "agent_id"),
+                session_id: optional_str(input, "session_id"),
             }),
             "subagent-start" => {
                 let agent_type = json_str(input, "agent_type");
@@ -228,7 +231,7 @@ impl EventAdapter for ClaudeAdapter {
                 }
                 Some(AgentEvent::SubagentStart {
                     agent_type: agent_type.into(),
-                    agent_id: parse_agent_id(input),
+                    agent_id: optional_str(input, "agent_id"),
                 })
             }
             "subagent-stop" => {
@@ -238,7 +241,7 @@ impl EventAdapter for ClaudeAdapter {
                 }
                 Some(AgentEvent::SubagentStop {
                     agent_type: agent_type.into(),
-                    agent_id: parse_agent_id(input),
+                    agent_id: optional_str(input, "agent_id"),
                     last_message: json_str(input, "last_assistant_message").into(),
                     transcript_path: json_str(input, "agent_transcript_path").into(),
                 })
@@ -298,6 +301,7 @@ mod tests {
                 permission_mode: "default".into(),
                 worktree: None,
                 agent_id: None,
+                session_id: None,
             }
         );
     }
@@ -325,6 +329,7 @@ mod tests {
                 prompt: "fix bug".into(),
                 worktree: None,
                 agent_id: None,
+                session_id: None,
             }
         );
     }
@@ -345,6 +350,7 @@ mod tests {
                 meta_only: false,
                 worktree: None,
                 agent_id: None,
+                session_id: None,
             }
         );
     }
@@ -364,6 +370,7 @@ mod tests {
                 meta_only: true,
                 worktree: None,
                 agent_id: None,
+                session_id: None,
             }
         );
     }
@@ -384,6 +391,7 @@ mod tests {
                 response: None,
                 worktree: None,
                 agent_id: None,
+                session_id: None,
             }
         );
     }
@@ -402,6 +410,7 @@ mod tests {
                 error: "rate_limit".into(),
                 worktree: None,
                 agent_id: None,
+                session_id: None,
             }
         );
     }
@@ -420,6 +429,7 @@ mod tests {
                 error: "rate_limit".into(),
                 worktree: None,
                 agent_id: None,
+                session_id: None,
             }
         );
     }
@@ -438,6 +448,7 @@ mod tests {
                 error: "something went wrong".into(),
                 worktree: None,
                 agent_id: None,
+                session_id: None,
             }
         );
     }
@@ -456,6 +467,7 @@ mod tests {
                 error: "something went wrong".into(),
                 worktree: None,
                 agent_id: None,
+                session_id: None,
             }
         );
     }
@@ -823,6 +835,7 @@ mod tests {
                 meta_only: false,
                 worktree: None,
                 agent_id: None,
+                session_id: None,
             }
         );
     }
@@ -880,6 +893,7 @@ mod tests {
                 error: "rate_limit".into(),
                 worktree: None,
                 agent_id: None,
+                session_id: None,
             }
         );
     }
@@ -898,6 +912,7 @@ mod tests {
                 error: "".into(),
                 worktree: None,
                 agent_id: None,
+                session_id: None,
             }
         );
     }
@@ -917,6 +932,7 @@ mod tests {
                 response: None,
                 worktree: None,
                 agent_id: None,
+                session_id: None,
             }
         );
     }
@@ -984,6 +1000,7 @@ mod tests {
                 permission_mode: "auto".into(),
                 worktree: None,
                 agent_id: None,
+                session_id: None,
             }
         );
     }
@@ -999,6 +1016,7 @@ mod tests {
                 cwd: "/new/path".into(),
                 worktree: None,
                 agent_id: None,
+                session_id: None,
             }
         );
     }
@@ -1065,6 +1083,7 @@ mod tests {
                 permission_mode: "".into(),
                 worktree: None,
                 agent_id: None,
+                session_id: None,
             }
         );
     }

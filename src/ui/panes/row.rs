@@ -78,7 +78,11 @@ fn status_row(
     let (icon, pulse_color) = running_icon_for(&pane.status, spinner_frame, icons);
     let icon_color =
         pulse_color.unwrap_or_else(|| theme.status_color(&pane.status, pane.attention));
-    let title = pane.agent.label();
+    let title = if pane.session_name.is_empty() {
+        pane.agent.label()
+    } else {
+        &pane.session_name
+    };
     let badge = pane.permission_mode.badge();
     let elapsed = elapsed_label(pane.started_at, now);
 
@@ -470,6 +474,8 @@ mod tests {
             pane_pid: None,
             worktree_name: String::new(),
             worktree_branch: String::new(),
+            session_id: None,
+            session_name: String::new(),
         }
     }
 
@@ -511,6 +517,36 @@ mod tests {
 
         let status = line_text(&lines[0]);
         assert!(status.contains(" codex auto"));
+    }
+
+    #[test]
+    fn render_pane_lines_shows_session_name_instead_of_agent() {
+        let theme = ColorTheme::default();
+        let mut p = pane(PermissionMode::Default, PaneStatus::Running, "");
+        p.session_name = "fix-csv-aliases".into();
+        let lines = render_pane_lines_with_ports(
+            &p,
+            &PaneGitInfo::default(),
+            None,
+            None,
+            false,
+            false,
+            40,
+            &StatusIcons::default(),
+            &theme,
+            0,
+            0,
+        );
+
+        let status = line_text(&lines[0]);
+        assert!(
+            status.contains("fix-csv-aliases"),
+            "session name should appear in status row, got: {status}"
+        );
+        assert!(
+            !status.contains("codex"),
+            "agent label should be replaced by session name, got: {status}"
+        );
     }
 
     #[test]

@@ -210,6 +210,8 @@ fn snapshot_two_agents_same_window_ui() {
         pane_pid: None,
         worktree_name: String::new(),
         worktree_branch: String::new(),
+        session_id: None,
+        session_name: String::new(),
     };
     let pane2 = PaneInfo {
         pane_id: "%2".into(),
@@ -228,6 +230,8 @@ fn snapshot_two_agents_same_window_ui() {
         pane_pid: None,
         worktree_name: String::new(),
         worktree_branch: String::new(),
+        session_id: None,
+        session_name: String::new(),
     };
 
     let mut state = make_state(vec![SessionInfo {

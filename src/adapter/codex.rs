@@ -51,6 +51,7 @@ impl EventAdapter for CodexAdapter {
                 permission_mode: json_str(input, "permission_mode").into(),
                 worktree: None,
                 agent_id: None,
+                session_id: None,
             }),
             "user-prompt-submit" => Some(AgentEvent::UserPromptSubmit {
                 agent: CODEX_AGENT.into(),
@@ -59,6 +60,7 @@ impl EventAdapter for CodexAdapter {
                 prompt: json_str(input, "prompt").into(),
                 worktree: None,
                 agent_id: None,
+                session_id: None,
             }),
             "stop" => Some(AgentEvent::Stop {
                 agent: CODEX_AGENT.into(),
@@ -68,6 +70,7 @@ impl EventAdapter for CodexAdapter {
                 response: Some("{\"continue\":true}".into()),
                 worktree: None,
                 agent_id: None,
+                session_id: None,
             }),
             // Codex's PostToolUse currently fires only for Bash (tool_input is
             // typed `{ command: String }`). Other tools do not emit the hook,
@@ -113,6 +116,7 @@ mod tests {
                 permission_mode: "".into(),
                 worktree: None,
                 agent_id: None,
+                session_id: None,
             }
         );
     }
@@ -138,6 +142,7 @@ mod tests {
                 prompt: "hello".into(),
                 worktree: None,
                 agent_id: None,
+                session_id: None,
             }
         );
     }
@@ -157,6 +162,7 @@ mod tests {
                 response: Some("{\"continue\":true}".into()),
                 worktree: None,
                 agent_id: None,
+                session_id: None,
             }
         );
     }
@@ -225,6 +231,7 @@ mod tests {
                 response: Some("{\"continue\":true}".into()),
                 worktree: None,
                 agent_id: None,
+                session_id: None,
             }
         );
     }
@@ -301,6 +308,7 @@ mod tests {
                 permission_mode: "".into(),
                 worktree: None,
                 agent_id: None,
+                session_id: None,
             }
         );
     }
