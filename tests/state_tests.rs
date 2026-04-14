@@ -360,7 +360,7 @@ fn test_state_new_defaults() {
     let state = AppState::new("%99".into());
     assert_eq!(state.now, 0);
     assert_eq!(state.tmux_pane, "%99");
-    assert!(state.sessions.is_empty());
+    assert!(state.repo_groups.is_empty());
     assert!(!state.sidebar_focused);
     assert_eq!(state.focus, Focus::Panes);
     assert_eq!(state.spinner_frame, 0);

@@ -364,6 +364,43 @@ mod tests {
     }
 
     #[test]
+    fn group_panes_same_repo_across_sessions_merge_into_one_group() {
+        // Regression for the `state.sessions` field removal: panes that
+        // live in different tmux sessions but share the same repo path
+        // must still collapse into a single `RepoGroup`. This is what
+        // makes the sidebar usable across multi-session workflows.
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let pane_session_a = test_pane("%1", manifest_dir);
+        let pane_session_b = test_pane("%2", manifest_dir);
+
+        let sessions = vec![
+            crate::tmux::SessionInfo {
+                session_name: "alpha".into(),
+                windows: vec![test_window(vec![pane_session_a], true)],
+            },
+            crate::tmux::SessionInfo {
+                session_name: "beta".into(),
+                windows: vec![test_window(vec![pane_session_b], false)],
+            },
+        ];
+        let groups = group_panes_by_repo(&sessions);
+
+        assert_eq!(
+            groups.len(),
+            1,
+            "panes in the same repo across sessions must merge into one group"
+        );
+        assert_eq!(groups[0].panes.len(), 2);
+        let pane_ids: Vec<&str> = groups[0]
+            .panes
+            .iter()
+            .map(|(p, _)| p.pane_id.as_str())
+            .collect();
+        assert!(pane_ids.contains(&"%1"));
+        assert!(pane_ids.contains(&"%2"));
+    }
+
+    #[test]
     fn group_panes_sorted_by_name_case_insensitive() {
         // Groups should be sorted alphabetically regardless of encounter order
         let pane1 = test_pane("%1", "/tmp/zzz");

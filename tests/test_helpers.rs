@@ -135,10 +135,15 @@ pub fn make_repo_group(name: &str, panes: Vec<PaneInfo>) -> tmux_agent_sidebar::
     }
 }
 
-pub fn make_state(sessions: Vec<SessionInfo>) -> AppState {
+/// Build a baseline `AppState` for UI/render tests.
+///
+/// The `_sessions` argument is kept so the call sites can document the
+/// intended pane topology, but the field itself was removed from
+/// `AppState`. Callers that need a populated tree should set
+/// `state.repo_groups` directly (which they already do).
+pub fn make_state(_sessions: Vec<SessionInfo>) -> AppState {
     let mut state = AppState::new("%99".into());
     state.now = FIXED_NOW;
-    state.sessions = sessions;
     state.sidebar_focused = true;
     state.focused_pane_id = Some("%1".into());
     state.notices.missing_hook_groups = vec![tmux_agent_sidebar::state::NoticesMissingHookGroup {

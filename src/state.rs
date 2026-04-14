@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use crate::activity::{ActivityEntry, TaskProgress};
-use crate::tmux::{self, SessionInfo};
+use crate::tmux;
 use crate::ui::colors::ColorTheme;
 use crate::ui::icons::StatusIcons;
 
@@ -326,7 +326,6 @@ pub struct NoticesState {
 
 pub struct AppState {
     pub now: u64,
-    pub sessions: Vec<SessionInfo>,
     pub repo_groups: Vec<crate::group::RepoGroup>,
     pub sidebar_focused: bool,
     pub focus: Focus,
@@ -433,7 +432,6 @@ impl AppState {
     pub fn new(tmux_pane: String) -> Self {
         Self {
             now: 0,
-            sessions: vec![],
             repo_groups: vec![],
             sidebar_focused: false,
             focus: Focus::Panes,
@@ -729,7 +727,7 @@ impl AppState {
     }
 
     pub fn find_focused_pane(&mut self) {
-        // Query tmux directly for the active pane, not through self.sessions
+        // Query tmux directly for the active pane, not through `repo_groups`
         // which only contains agent panes. This allows activity/git info to
         // be displayed even when the focused pane has no agent running.
         // When the sidebar has focus, find_active_pane returns None — preserve
@@ -2029,7 +2027,7 @@ mod tests {
         state.global.selected_pane_row = 3;
 
         let pane = test_pane("%1");
-        let sessions = vec![SessionInfo {
+        let sessions = vec![crate::tmux::SessionInfo {
             session_name: "main".into(),
             windows: vec![crate::tmux::WindowInfo {
                 window_id: "@0".into(),
@@ -2043,7 +2041,6 @@ mod tests {
         state.apply_session_snapshot(true, sessions);
 
         assert!(state.sidebar_focused);
-        assert_eq!(state.sessions.len(), 1);
         assert_eq!(state.repo_groups.len(), 1);
         assert_eq!(state.pane_row_targets.len(), 1);
         assert_eq!(state.global.selected_pane_row, 0);

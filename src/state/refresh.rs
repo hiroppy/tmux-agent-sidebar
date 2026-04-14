@@ -57,8 +57,7 @@ impl AppState {
         sessions: Vec<SessionInfo>,
     ) {
         self.sidebar_focused = sidebar_focused;
-        self.sessions = sessions;
-        self.repo_groups = crate::group::group_panes_by_repo(&self.sessions);
+        self.repo_groups = crate::group::group_panes_by_repo(&sessions);
         self.prune_pane_states_to_current_panes();
         self.rebuild_row_targets();
         self.find_focused_pane();

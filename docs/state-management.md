@@ -66,8 +66,7 @@ Per-pane file-based state:
 
 | Field | Update Frequency | Description |
 |-------|-----------------|-------------|
-| `sessions` | Every 1s | Full tmux session/window/pane hierarchy |
-| `repo_groups` | Every 1s | Panes grouped by git repo root |
+| `repo_groups` | Every 1s | Panes grouped by git repo root (built directly from `tmux::query_sessions()` output, not stored separately as a session list) |
 | `focused_pane_id` | Every 1s | Currently focused agent pane |
 | `sidebar_focused` | Every 1s | Whether sidebar pane itself has focus |
 | `now` | Every 1s | Current Unix epoch |
