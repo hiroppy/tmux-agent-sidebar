@@ -139,9 +139,9 @@ impl AppState {
     fn refresh_session_names(&mut self) {
         const SESSION_REFRESH_INTERVAL: Duration = Duration::from_secs(10);
 
-        if self.last_session_refresh.elapsed() >= SESSION_REFRESH_INTERVAL {
+        if self.timers.last_session_refresh.elapsed() >= SESSION_REFRESH_INTERVAL {
             self.session_names = crate::session::scan_session_names();
-            self.last_session_refresh = std::time::Instant::now();
+            self.timers.last_session_refresh = std::time::Instant::now();
         }
 
         for group in &mut self.repo_groups {
@@ -163,7 +163,8 @@ impl AppState {
     ) -> Option<crate::port::PaneProcessSnapshot> {
         const PORT_REFRESH_INTERVAL: Duration = Duration::from_secs(10);
 
-        if !self.port_scan_initialized || self.last_port_refresh.elapsed() >= PORT_REFRESH_INTERVAL
+        if !self.timers.port_scan_initialized
+            || self.timers.last_port_refresh.elapsed() >= PORT_REFRESH_INTERVAL
         {
             let scanned = crate::port::scan_session_process_snapshot(sessions)?;
             let mut active_ids: HashSet<String> = HashSet::new();
@@ -199,8 +200,8 @@ impl AppState {
             }
             self.pane_states
                 .retain(|pane_id, _| active_ids.contains(pane_id));
-            self.port_scan_initialized = true;
-            self.last_port_refresh = std::time::Instant::now();
+            self.timers.port_scan_initialized = true;
+            self.timers.last_port_refresh = std::time::Instant::now();
             return Some(scanned);
         }
 

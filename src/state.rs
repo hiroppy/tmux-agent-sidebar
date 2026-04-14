@@ -131,6 +131,11 @@ pub struct PaneRuntimeState {
     pub task_progress: Option<TaskProgress>,
     pub task_dismissed_total: Option<usize>,
     pub inactive_since: Option<u64>,
+    /// Last bottom tab the user selected while this pane was focused.
+    /// `None` until the user changes tabs at least once. Cleaned up
+    /// automatically by `prune_pane_states_to_current_panes` when the
+    /// pane disappears, so a relaunched pane starts fresh.
+    pub tab_pref: Option<BottomTab>,
 }
 
 #[derive(Debug, Clone)]
@@ -286,6 +291,35 @@ impl GlobalState {
     }
 }
 
+/// Periodic-refresh bookkeeping. Bundles the four wall/monotonic clocks
+/// that gate refresh cadence in `state/refresh.rs` (port scan, session
+/// name scan, filter-bar debounce, and the "first port scan completed"
+/// flag) so they live as a unit instead of cluttering [`AppState`].
+#[derive(Debug, Clone)]
+pub struct RefreshTimers {
+    /// Last time a mouse click was processed on the filter bar (debounce).
+    pub last_filter_click: Instant,
+    /// Timestamp of the last port/command scan.
+    pub last_port_refresh: Instant,
+    /// Timestamp of the last `session_names` refresh.
+    pub last_session_refresh: Instant,
+    /// Whether the first port scan has completed; the first scan must
+    /// always run regardless of the elapsed-time gate.
+    pub port_scan_initialized: bool,
+}
+
+impl Default for RefreshTimers {
+    fn default() -> Self {
+        let now = Instant::now();
+        Self {
+            last_filter_click: now,
+            last_port_refresh: now,
+            last_session_refresh: now,
+            port_scan_initialized: false,
+        }
+    }
+}
+
 /// Sub-state for the ⓘ notices popup, lifted out of [`AppState`] so its
 /// seven related fields (button column, missing-hook groups, plugin
 /// version, legacy hook flag, plugin notice, copy targets, copy feedback)
@@ -346,12 +380,11 @@ pub struct AppState {
     pub pane_states: HashMap<String, PaneRuntimeState>,
     /// Agent pane IDs that have already been seen.
     pub seen_agent_panes: std::collections::HashSet<String>,
-    /// Per-pane bottom tab preference.
-    pub pane_tab_prefs: HashMap<String, BottomTab>,
     /// Previous focused pane ID, used to detect focus changes.
     pub prev_focused_pane_id: Option<String>,
-    /// Last time a mouse click was processed on the filter bar (for debounce).
-    pub last_filter_click: std::time::Instant,
+    /// Periodic-refresh clocks (port scan, session-name scan, filter
+    /// debounce, port-scan first-run flag).
+    pub timers: RefreshTimers,
     /// Current popup state. At most one popup is open at a time; the enum
     /// variant encodes both which popup is open and its per-popup data.
     pub popup: PopupState,
@@ -371,15 +404,12 @@ pub struct AppState {
     pub global: GlobalState,
     /// Hyperlink overlays to be written after frame render (OSC 8).
     pub hyperlink_overlays: Vec<HyperlinkOverlay>,
-    pub port_scan_initialized: bool,
-    pub last_port_refresh: Instant,
     /// Height of the bottom panel in lines. Loaded once at startup from
     /// the `@sidebar_bottom_height` tmux option. A value of 0 hides the panel.
     pub bottom_panel_height: u16,
     /// Maps session_id → session name, refreshed periodically from
     /// `~/.claude/sessions/*.json` files.
     pub session_names: HashMap<String, String>,
-    pub last_session_refresh: Instant,
 }
 
 /// Screen-positioned hyperlink overlay for OSC 8 terminal hyperlinks.
@@ -451,9 +481,8 @@ impl AppState {
             git_scroll: ScrollState::default(),
             pane_states: HashMap::new(),
             seen_agent_panes: std::collections::HashSet::new(),
-            pane_tab_prefs: HashMap::new(),
             prev_focused_pane_id: None,
-            last_filter_click: std::time::Instant::now(),
+            timers: RefreshTimers::default(),
             popup: PopupState::None,
             notices: NoticesState::default(),
             pending_osc52_copy: None,
@@ -461,11 +490,8 @@ impl AppState {
             version_notice: None,
             global: GlobalState::new(),
             hyperlink_overlays: vec![],
-            port_scan_initialized: false,
-            last_port_refresh: Instant::now(),
             bottom_panel_height: crate::ui::BOTTOM_PANEL_HEIGHT,
             session_names: HashMap::new(),
-            last_session_refresh: Instant::now(),
         }
     }
 
@@ -810,10 +836,14 @@ impl AppState {
     pub fn handle_filter_click(&mut self, col: u16) {
         const DEBOUNCE_MS: u128 = 150;
         let now = std::time::Instant::now();
-        if now.duration_since(self.last_filter_click).as_millis() < DEBOUNCE_MS {
+        if now
+            .duration_since(self.timers.last_filter_click)
+            .as_millis()
+            < DEBOUNCE_MS
+        {
             return;
         }
-        self.last_filter_click = now;
+        self.timers.last_filter_click = now;
 
         let (all, running, waiting, idle, error) = self.status_counts();
         // Layout: " ∑N  ●N  ◐N  ○N  ✕N"
@@ -1064,7 +1094,8 @@ mod tests {
 
     /// Reset filter click debounce so the next `handle_filter_click` is not ignored.
     fn reset_filter_debounce(state: &mut AppState) {
-        state.last_filter_click = std::time::Instant::now() - std::time::Duration::from_millis(200);
+        state.timers.last_filter_click =
+            std::time::Instant::now() - std::time::Duration::from_millis(200);
     }
 
     // ─── compute_missing_hook_groups: claude_plugin_present gating ───

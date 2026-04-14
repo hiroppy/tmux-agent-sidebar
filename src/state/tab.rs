@@ -65,8 +65,12 @@ impl AppState {
                 }
             }
         }
-        // Remove disappeared agents from seen set and clear their saved tab,
-        // so that relaunching an agent is detected as new.
+        // Remove disappeared agents from seen set so that relaunching an
+        // agent is detected as new. Also clear the matching `tab_pref` so a
+        // relaunched pane starts on the default tab — explicit here because
+        // detect_new_agents can run before `prune_pane_states_to_current_panes`
+        // (e.g. when tests mutate `repo_groups` directly without going
+        // through `apply_session_snapshot`).
         let removed: Vec<String> = self
             .seen_agent_panes
             .iter()
@@ -75,16 +79,18 @@ impl AppState {
             .collect();
         for id in &removed {
             self.seen_agent_panes.remove(id);
-            self.pane_tab_prefs.remove(id);
+            if let Some(state) = self.pane_states.get_mut(id) {
+                state.tab_pref = None;
+            }
         }
         new_ids
     }
 
     /// Save the current tab preference for the pane we're leaving.
     fn save_current_tab(&mut self) {
-        if let Some(ref prev_id) = self.prev_focused_pane_id {
-            self.pane_tab_prefs
-                .insert(prev_id.clone(), self.bottom_tab.clone());
+        if let Some(prev_id) = self.prev_focused_pane_id.clone() {
+            let tab = self.bottom_tab.clone();
+            self.pane_state_mut(&prev_id).tab_pref = Some(tab);
         }
     }
 
@@ -97,7 +103,7 @@ impl AppState {
         let Some(ref cur_id) = self.focused_pane_id else {
             return TabDecision::Keep;
         };
-        if let Some(saved) = self.pane_tab_prefs.get(cur_id) {
+        if let Some(saved) = self.pane_state(cur_id).and_then(|s| s.tab_pref.as_ref()) {
             TabDecision::Set(saved.clone())
         } else if new_agent_pane_ids.contains(cur_id) || self.focused_pane_is_agent() {
             // The focused pane is an agent, and there's no saved preference yet.
