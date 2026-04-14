@@ -45,7 +45,9 @@ Pane options written to tmux:
 | `@pane_worktree_branch` | SessionStart | Worktree branch (if applicable) |
 | `@pane_session_id` | SessionStart, UserPromptSubmit, Notification, Stop, StopFailure, PermissionDenied, CwdChanged | Agent-reported session id (skipped when subagents are active) |
 
-In-memory per-pane runtime state:
+In-memory per-pane runtime state. Every field lives inside
+`PaneRuntimeState` so the whole record is dropped together when its
+pane disappears (`prune_pane_states_to_current_panes`).
 
 | Field | Update Frequency | Description |
 |-------|-----------------|-------------|
@@ -54,7 +56,7 @@ In-memory per-pane runtime state:
 | `pane_states[...].task_progress` | Every 1s (refresh cycle) | Parsed from activity log — task list per pane |
 | `pane_states[...].task_dismissed_total` | On task completion | Tracks dismissed completed-task counts |
 | `pane_states[...].inactive_since` | On status change | Debounce timestamp (3s grace before hiding tasks) |
-| `pane_tab_prefs` | On user tab switch | Remembered bottom tab choice per pane |
+| `pane_states[...].tab_pref` | On user tab switch | Remembered bottom tab choice per pane (cleared on relaunch) |
 
 Per-pane file-based state:
 
@@ -70,7 +72,6 @@ Per-pane file-based state:
 | `focused_pane_id` | Every 1s | Currently focused agent pane |
 | `sidebar_focused` | Every 1s | Whether sidebar pane itself has focus |
 | `now` | Every 1s | Current Unix epoch |
-| `pane_row_targets` | Every 1s | Filtered pane list after applying filters |
 | `focus` | On user input | UI focus: `Filter` / `Panes` / `ActivityLog` |
 | `panes_scroll` | On user input / render | Agent list scroll position |
 | `activity_scroll` | On user input / render | Activity log scroll position |
@@ -78,31 +79,20 @@ Per-pane file-based state:
 | `activity_entries` | Every 1s | Focused pane's activity entries (max 50) |
 | `git` | Every 2s (bg thread) | Branch, diff stats, ahead/behind, PR number |
 | `bottom_tab` | On user input / auto-switch | Current bottom panel tab |
-| `line_to_row` | Every frame (render) | Rendered line → agent row mapping for click routing |
 | `theme` | Once at startup | Color theme from tmux `@sidebar_color_*` variables |
 | `popup` | On user input / render | `PopupState` enum: `None` / `Repo { selected, area }` / `Notices { area }`. Enforces "at most one popup open" via the type system |
-| `notices.button_col` | Every frame (render) | Notices indicator button column position |
-| `notices.missing_hook_groups` | Once at startup | Per-agent missing hook groups shown in the popup |
-| `notices.claude_plugin_installed_version` | Once at startup | Version recorded in Claude Code's installed plugin registry |
-| `notices.claude_settings_has_residual_hooks` | Once at startup | Whether `~/.claude/settings.json` still contains legacy Claude hook entries |
-| `notices.claude_plugin_notice` | Once at startup | Derived Claude plugin notice shown in the popup |
-| `notices.copy_targets` | Every frame (render) | Click targets for `[copy]` / `[prompt]` labels in the notices popup |
-| `notices.copied_at` | On successful copy | Transient `[copied]` feedback state |
+| `layout` | Every frame (render) | `FrameLayout` sub-struct bundling the four ephemeral fields the UI rewrites every frame for click hit-testing: `pane_row_targets`, `line_to_row`, `repo_button_col`, `hyperlink_overlays` |
+| `notices` | Once at startup / on copy | `NoticesState` sub-struct: `button_col`, `missing_hook_groups`, `claude_plugin_installed_version`, `claude_settings_has_residual_hooks`, `claude_plugin_notice`, `copy_targets`, `copied_at` |
+| `timers` | Refresh cycle / on user input | `RefreshTimers` sub-struct gating periodic work: `last_filter_click` (debounce), `last_port_refresh`, `port_scan_initialized` |
 | `pending_osc52_copy` | On successful copy / frame flush | OSC 52 clipboard payload queued for terminal forwarding |
 | `spinner_frame` | Every 200ms (animation) | Spinner animation frame counter |
 | `icons` | Once at startup | `StatusIcons` theme (overridable via tmux options) |
 | `tmux_pane` | Once at startup | This sidebar's own tmux pane ID |
 | `activity_max_entries` | Once at startup | Max activity log entries to display |
 | `prev_focused_pane_id` | Every 1s | Previous focused pane ID (for detecting focus changes) |
-| `last_filter_click` | On user input | Last filter bar click timestamp (debounce) |
-| `repo_button_col` | Every frame (render) | Repo filter button column position |
-| `hyperlink_overlays` | Every frame (render) | OSC 8 hyperlink overlays to write after render |
 | `seen_agent_panes` | Every 1s | Set of pane IDs that have been seen as agents |
-| `port_scan_initialized` | Every 10s (port scan) | Whether the first port scan has completed |
-| `last_port_refresh` | Every 10s (port scan) | Timestamp of the last port/command scan |
 | `version_notice` | Once at startup (bg fetch) | GitHub release update notice, `None` when up-to-date |
-| `session_names` | Periodic refresh | `session_id → session name` map from `~/.claude/sessions/*.json` |
-| `last_session_refresh` | Periodic refresh | Timestamp of the last `session_names` refresh |
+| `session_names` | Every 10s (background thread) | `session_id → session name` map; scanned by `session_poll_loop` in `main.rs` so the TUI thread never blocks on filesystem I/O |
 
 ---
 
@@ -111,14 +101,17 @@ Per-pane file-based state:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Every frame (~200ms)                                       │
-│  line_to_row, scroll dimensions, spinner animation          │
+│  layout.* (rebuilt by ui::draw), spinner animation          │
 ├─────────────────────────────────────────────────────────────┤
 │  Every 1s (refresh cycle)                                   │
-│  sessions, repo_groups, focused_pane_id, pane_row_targets, │
+│  repo_groups, focused_pane_id, layout.pane_row_targets,     │
 │  activity_entries, pane_states.task_progress                │
 ├─────────────────────────────────────────────────────────────┤
-│  Every 10s (port scan)                                      │
+│  Every 10s (port scan, background)                          │
 │  pane_states.ports, agent liveness cleanup                  │
+├─────────────────────────────────────────────────────────────┤
+│  Every 10s (session_names background thread)                │
+│  session_names map populated by session_poll_loop           │
 ├─────────────────────────────────────────────────────────────┤
 │  Once at startup                                             │
 │  theme, bottom_panel_height, notices.claude_plugin_*,       │
@@ -136,11 +129,12 @@ Per-pane file-based state:
 ├─────────────────────────────────────────────────────────────┤
 │  On user input                                              │
 │  focus, scroll offsets, bottom_tab, GlobalState fields,     │
-│  popup (PopupState enum)                                    │
+│  popup (PopupState enum), timers.last_filter_click          │
 ├─────────────────────────────────────────────────────────────┤
 │  Every frame (render)                                       │
-│  line_to_row, popup.area (Repo/Notices variants),           │
-│  notices.button_col, notices.copy_targets, hyperlink_overlays
+│  layout.line_to_row, popup.area (Repo/Notices variants),    │
+│  notices.button_col, notices.copy_targets,                  │
+│  layout.hyperlink_overlays                                  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -187,6 +181,14 @@ enum PaneStatus { Running, Waiting, Idle, Error, Unknown }
 enum AgentType { Claude, Codex, Unknown }
 enum PermissionMode { Default, Plan, AcceptEdits, Auto, DontAsk, BypassPermissions }
 
+/// At-most-one popup state. The enum encodes both which popup is open
+/// and its per-popup data so the invariant is checked by the type system.
+enum PopupState {
+    None,
+    Repo { selected: usize, area: Option<Rect> },
+    Notices { area: Option<Rect> },
+}
+
 struct ScrollState {
     offset: usize,
     total_lines: usize,
@@ -206,6 +208,37 @@ struct PaneRuntimeState {
     task_progress: Option<TaskProgress>,
     task_dismissed_total: Option<usize>,
     inactive_since: Option<u64>,
+    tab_pref: Option<BottomTab>,
+}
+
+/// Frame-scoped render output cached for click hit-testing. Rewritten
+/// every frame by the UI layer; consumed by mouse/keyboard handlers
+/// before the next render.
+struct FrameLayout {
+    pane_row_targets: Vec<RowTarget>,
+    line_to_row: Vec<Option<usize>>,
+    repo_button_col: Option<u16>,
+    hyperlink_overlays: Vec<HyperlinkOverlay>,
+}
+
+/// Periodic-refresh bookkeeping. session_names refresh is intentionally
+/// NOT here — it lives in a dedicated background thread so the TUI
+/// thread never performs blocking filesystem I/O.
+struct RefreshTimers {
+    last_filter_click: Instant,
+    last_port_refresh: Instant,
+    port_scan_initialized: bool,
+}
+
+/// All fields for the ⓘ notices button and its popup.
+struct NoticesState {
+    button_col: Option<u16>,
+    missing_hook_groups: Vec<NoticesMissingHookGroup>,
+    claude_plugin_installed_version: Option<String>,
+    claude_settings_has_residual_hooks: bool,
+    claude_plugin_notice: Option<ClaudePluginNotice>,
+    copy_targets: Vec<NoticesCopyTarget>,
+    copied_at: Option<(String, Instant)>,
 }
 ```
 
@@ -213,13 +246,14 @@ struct PaneRuntimeState {
 
 ## State Invariants
 
-1. `selected_pane_row` is always < `pane_row_targets.len()` — clamped in `rebuild_row_targets()`
+1. `selected_pane_row` is always < `layout.pane_row_targets.len()` — clamped in `rebuild_row_targets()`
 2. `activity_entries` contains only the focused pane's entries — cleared on focus change
-3. Tab preferences persist per pane ID in `pane_tab_prefs` — restored on focus change
+3. Tab preferences persist per pane in `PaneRuntimeState.tab_pref` and are restored on focus change. They vanish together with the rest of `PaneRuntimeState` when the pane is pruned, so a relaunched agent starts on the default tab
 4. Git fetching respects the `git_tab_active` flag — stops when tab is hidden
 5. Task progress has a 3-second debounce — prevents flicker when agent briefly pauses
 6. Global state syncs via tmux variables — enables coordination across sidebar instances
 7. Scroll positions are independent per panel — agents, activity, git each have their own `ScrollState`
-8. `line_to_row` is rebuilt every frame — ensures accurate click routing
-9. Pane runtime state is pruned when the pane disappears — prevents stale per-pane ports and task progress from surviving after the agent is gone
+8. `layout.line_to_row` is rebuilt every frame — ensures accurate click routing
+9. Pane runtime state is pruned when the pane disappears — prevents stale per-pane ports, task progress, and tab preferences from surviving after the agent is gone
+10. At most one popup is open at a time — enforced structurally by the `PopupState` enum, not by parallel boolean flags
 10. Hook-based cleanup wins when available; pid-based cleanup is a slower fallback that removes panes when the agent process is gone but the hook did not fire
