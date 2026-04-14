@@ -34,7 +34,7 @@ pub fn bottom_panel_height_from_tmux() -> u16 {
 // ── public entry point ──────────────────────────────────────────────
 
 pub fn draw(frame: &mut Frame, state: &mut AppState) {
-    state.hyperlink_overlays.clear();
+    state.layout.hyperlink_overlays.clear();
     let area = frame.area();
 
     let bot_h = state.bottom_panel_height;

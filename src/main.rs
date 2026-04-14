@@ -146,7 +146,7 @@ fn run_app(
         terminal.draw(|frame| ui::draw(frame, &mut state))?;
 
         // Write OSC 8 hyperlink overlays after frame render
-        write_hyperlink_overlays(terminal.backend_mut(), &state.hyperlink_overlays)?;
+        write_hyperlink_overlays(terminal.backend_mut(), &state.layout.hyperlink_overlays)?;
 
         // Flush any pending OSC 52 clipboard payload (set by notices copy).
         if let Some(payload) = state.pending_osc52_copy.take() {

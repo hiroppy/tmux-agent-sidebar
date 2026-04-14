@@ -1,116 +1,174 @@
+use serde_json::Value;
+
+/// How a tool's label should be derived from its input/response payload.
+/// Keeping this as data (rather than a giant `match` with inline closures)
+/// makes adding a new tool a one-line edit in [`STRATEGY_TABLE`] and lets
+/// the per-tool extraction logic live as named, individually testable
+/// functions for the few cases that need custom code.
+enum LabelStrategy {
+    /// Unknown tool — produces an empty label.
+    None,
+    /// Pull a single string field straight out of `tool_input`.
+    Field(&'static str),
+    /// Pull a path field out of `tool_input` and reduce to its basename.
+    FilePath(&'static str),
+    /// Pull a URL field out of `tool_input` and strip the http(s):// prefix.
+    UrlStrip(&'static str),
+    /// Run a custom extractor that needs both `tool_input` and `tool_response`.
+    Custom(fn(&Value, &Value) -> String),
+}
+
+/// Tool name → extraction strategy. Order is preserved for readability;
+/// dispatch is O(N) but N is ~30 so a linear scan is fine and avoids the
+/// overhead/lifetime constraints of a static `HashMap`.
+const STRATEGY_TABLE: &[(&str, LabelStrategy)] = &[
+    ("Read", LabelStrategy::FilePath("file_path")),
+    ("Edit", LabelStrategy::FilePath("file_path")),
+    ("Write", LabelStrategy::FilePath("file_path")),
+    ("NotebookEdit", LabelStrategy::FilePath("notebook_path")),
+    ("Bash", LabelStrategy::Field("command")),
+    ("PowerShell", LabelStrategy::Field("command")),
+    ("Glob", LabelStrategy::Field("pattern")),
+    ("Grep", LabelStrategy::Field("pattern")),
+    ("WebFetch", LabelStrategy::UrlStrip("url")),
+    ("WebSearch", LabelStrategy::Field("query")),
+    ("ToolSearch", LabelStrategy::Field("query")),
+    ("Skill", LabelStrategy::Field("skill")),
+    ("SendMessage", LabelStrategy::Field("to")),
+    ("TeamCreate", LabelStrategy::Field("team_name")),
+    ("LSP", LabelStrategy::Field("operation")),
+    ("CronCreate", LabelStrategy::Field("cron")),
+    ("CronDelete", LabelStrategy::Field("id")),
+    ("EnterWorktree", LabelStrategy::Field("name")),
+    ("ExitWorktree", LabelStrategy::Field("name")),
+    ("Agent", LabelStrategy::Custom(label_agent)),
+    ("TaskCreate", LabelStrategy::Custom(label_task_create)),
+    ("TaskUpdate", LabelStrategy::Custom(label_task_update)),
+    ("TaskGet", LabelStrategy::Custom(label_task_id)),
+    ("TaskStop", LabelStrategy::Custom(label_task_id)),
+    ("TaskOutput", LabelStrategy::Custom(label_task_id)),
+    (
+        "AskUserQuestion",
+        LabelStrategy::Custom(label_ask_user_question),
+    ),
+];
+
 pub(crate) fn extract_tool_label(
     tool_name: &str,
-    tool_input: &serde_json::Value,
-    tool_response: &serde_json::Value,
+    tool_input: &Value,
+    tool_response: &Value,
 ) -> String {
-    let input_str = |key: &str| -> String {
-        tool_input
-            .get(key)
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string()
-    };
-    let basename = |path: &str| -> String {
-        std::path::Path::new(path)
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default()
-    };
+    let strategy = STRATEGY_TABLE
+        .iter()
+        .find(|(name, _)| *name == tool_name)
+        .map(|(_, s)| s)
+        .unwrap_or(&LabelStrategy::None);
 
-    match tool_name {
-        "Read" | "Edit" | "Write" => {
-            let fp = input_str("file_path");
-            basename(&fp)
-        }
-        "Bash" | "PowerShell" => input_str("command"),
-        "Glob" | "Grep" => input_str("pattern"),
-        "Agent" => {
-            // Prefer the subagent's response text (tool_response.content[0].text)
-            // so the Activity tab shows what came back, not just what the
-            // parent asked for. Fall back to description when the response
-            // field is missing (e.g. error cases) so the entry is never blank.
-            let response_text = tool_response
-                .get("content")
-                .and_then(|c| c.as_array())
-                .and_then(|arr| {
-                    arr.iter()
-                        .find(|block| block.get("type").and_then(|t| t.as_str()) == Some("text"))
-                })
-                .and_then(|block| block.get("text"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            if response_text.is_empty() {
-                input_str("description")
-            } else {
-                response_text
-            }
-        }
-        "WebFetch" => {
-            let url = input_str("url");
+    match strategy {
+        LabelStrategy::None => String::new(),
+        LabelStrategy::Field(key) => field_str(tool_input, key),
+        LabelStrategy::FilePath(key) => basename(&field_str(tool_input, key)),
+        LabelStrategy::UrlStrip(key) => {
+            let url = field_str(tool_input, key);
             url.trim_start_matches("https://")
                 .trim_start_matches("http://")
                 .to_string()
         }
-        "WebSearch" => input_str("query"),
-        "Skill" => input_str("skill"),
-        "ToolSearch" => input_str("query"),
-        "TaskCreate" => {
-            let task_id = tool_response
-                .get("task")
-                .and_then(|t| t.get("id"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let subject = input_str("subject");
-            if !task_id.is_empty() {
-                format!("#{} {}", task_id, subject)
-            } else {
-                subject
-            }
-        }
-        "TaskUpdate" => {
-            let status = input_str("status");
-            let task_id = input_str("taskId");
-            let mut parts = Vec::new();
-            if !status.is_empty() {
-                parts.push(status);
-            }
-            if !task_id.is_empty() {
-                parts.push(format!("#{}", task_id));
-            }
-            parts.join(" ")
-        }
-        "TaskGet" | "TaskStop" | "TaskOutput" => {
-            let id = input_str("taskId");
-            let id2 = input_str("task_id");
-            let id = if !id.is_empty() { id } else { id2 };
-            if !id.is_empty() {
-                format!("#{}", id)
-            } else {
-                String::new()
-            }
-        }
-        "SendMessage" => input_str("to"),
-        "TeamCreate" => input_str("team_name"),
-        "NotebookEdit" => {
-            let np = input_str("notebook_path");
-            basename(&np)
-        }
-        "LSP" => input_str("operation"),
-        "AskUserQuestion" => tool_input
-            .get("questions")
-            .and_then(|q| q.as_array())
-            .and_then(|arr| arr.first())
-            .and_then(|q| q.get("question"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string(),
-        "CronCreate" => input_str("cron"),
-        "CronDelete" => input_str("id"),
-        "EnterWorktree" | "ExitWorktree" => input_str("name"),
-        _ => String::new(),
+        LabelStrategy::Custom(f) => f(tool_input, tool_response),
     }
+}
+
+fn field_str(input: &Value, key: &str) -> String {
+    input
+        .get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+fn basename(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default()
+}
+
+/// Subagent output: prefer the response text (`content[].type=="text"`) so
+/// the Activity tab shows what came back, not just what the parent asked
+/// for. Falls back to the prompt's `description` when the response is
+/// missing (e.g. errors) so the entry is never blank.
+fn label_agent(input: &Value, response: &Value) -> String {
+    let response_text = response
+        .get("content")
+        .and_then(|c| c.as_array())
+        .and_then(|arr| {
+            arr.iter()
+                .find(|block| block.get("type").and_then(|t| t.as_str()) == Some("text"))
+        })
+        .and_then(|block| block.get("text"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if response_text.is_empty() {
+        field_str(input, "description")
+    } else {
+        response_text
+    }
+}
+
+fn label_task_create(input: &Value, response: &Value) -> String {
+    let task_id = response
+        .get("task")
+        .and_then(|t| t.get("id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let subject = field_str(input, "subject");
+    if !task_id.is_empty() {
+        format!("#{task_id} {subject}")
+    } else {
+        subject
+    }
+}
+
+fn label_task_update(input: &Value, _: &Value) -> String {
+    let status = field_str(input, "status");
+    let task_id = field_str(input, "taskId");
+    let mut parts = Vec::new();
+    if !status.is_empty() {
+        parts.push(status);
+    }
+    if !task_id.is_empty() {
+        parts.push(format!("#{task_id}"));
+    }
+    parts.join(" ")
+}
+
+/// Task tools (Get/Stop/Output) can use either `taskId` or `task_id`.
+/// Camel-case wins when both are present, matching the legacy fall-through.
+fn label_task_id(input: &Value, _: &Value) -> String {
+    let id = field_str(input, "taskId");
+    let id = if id.is_empty() {
+        field_str(input, "task_id")
+    } else {
+        id
+    };
+    if id.is_empty() {
+        String::new()
+    } else {
+        format!("#{id}")
+    }
+}
+
+fn label_ask_user_question(input: &Value, _: &Value) -> String {
+    input
+        .get("questions")
+        .and_then(|q| q.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|q| q.get("question"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string()
 }
 
 #[cfg(test)]

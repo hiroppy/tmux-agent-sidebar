@@ -335,6 +335,7 @@ pub(super) fn draw_git_content(frame: &mut Frame, state: &mut AppState, inner: R
     // Store PR hyperlink overlay for OSC 8 post-render
     if let Some(info) = pr_link {
         state
+            .layout
             .hyperlink_overlays
             .push(crate::state::HyperlinkOverlay {
                 x: inner.x + info.x_offset,

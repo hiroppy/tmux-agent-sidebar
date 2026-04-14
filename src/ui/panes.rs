@@ -209,7 +209,7 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let (secondary_line, notices_btn_col, repo_btn_col) =
         render_secondary_header(state, area.width);
     state.notices.button_col = notices_btn_col;
-    state.repo_button_col = repo_btn_col;
+    state.layout.repo_button_col = repo_btn_col;
     frame.render_widget(Paragraph::new(vec![secondary_line]), secondary_area);
 
     // Scrollable agent list below
@@ -299,7 +299,7 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
         }
     }
 
-    state.line_to_row = line_to_row;
+    state.layout.line_to_row = line_to_row;
     state.panes_scroll.total_lines = lines.len();
     state.panes_scroll.visible_height = list_area.height as usize;
 
@@ -307,7 +307,7 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
     if state.sidebar_focused && state.focus == Focus::Panes {
         let mut first_line: Option<usize> = None;
         let mut last_line: Option<usize> = None;
-        for (i, mapping) in state.line_to_row.iter().enumerate() {
+        for (i, mapping) in state.layout.line_to_row.iter().enumerate() {
             if *mapping == Some(state.global.selected_pane_row) {
                 if first_line.is_none() {
                     first_line = Some(i);

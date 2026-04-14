@@ -291,6 +291,30 @@ impl GlobalState {
     }
 }
 
+/// Ephemeral render output cached for click hit-testing.
+///
+/// Every field here is **rewritten on every frame** by the UI layer and
+/// only read by event handlers (mouse/keyboard) before the next render.
+/// Bundling them under `state.layout` makes the "frame-scoped vs
+/// persistent state" boundary visible at a glance, since the rest of
+/// `AppState` only holds data that survives across frames.
+#[derive(Debug, Clone, Default)]
+pub struct FrameLayout {
+    /// Filtered pane list, in the order the UI rendered them. Index
+    /// matches `GlobalState::selected_pane_row`.
+    pub pane_row_targets: Vec<RowTarget>,
+    /// Maps each rendered text line in the agents panel back to a row in
+    /// `pane_row_targets`. `None` for header/blank lines that should not
+    /// route clicks to a pane.
+    pub line_to_row: Vec<Option<usize>>,
+    /// X column of the repo filter button in the secondary header. `None`
+    /// when the button is hidden. Used for click hit-testing.
+    pub repo_button_col: Option<u16>,
+    /// OSC 8 hyperlink overlays the main loop writes after each frame so
+    /// terminals can recognise PR numbers as clickable links.
+    pub hyperlink_overlays: Vec<HyperlinkOverlay>,
+}
+
 /// Periodic-refresh bookkeeping. Bundles the four wall/monotonic clocks
 /// that gate refresh cadence in `state/refresh.rs` (port scan, session
 /// name scan, filter-bar debounce, and the "first port scan completed"
@@ -364,13 +388,16 @@ pub struct AppState {
     pub sidebar_focused: bool,
     pub focus: Focus,
     pub spinner_frame: usize,
-    pub pane_row_targets: Vec<RowTarget>,
+    /// Frame-scoped render output (pane_row_targets, line_to_row,
+    /// repo_button_col, hyperlink_overlays). Rewritten every frame by
+    /// the UI layer; consumed by mouse/keyboard handlers before the
+    /// next render.
+    pub layout: FrameLayout,
     pub activity_entries: Vec<ActivityEntry>,
     pub activity_scroll: ScrollState,
     pub focused_pane_id: Option<String>,
     pub tmux_pane: String,
     pub activity_max_entries: usize,
-    pub line_to_row: Vec<Option<usize>>,
     pub panes_scroll: ScrollState,
     pub theme: ColorTheme,
     pub icons: StatusIcons,
@@ -397,13 +424,10 @@ pub struct AppState {
     /// forward it to the upstream terminal's clipboard — covering the
     /// SSH case where `arboard` would only reach the remote machine.
     pub pending_osc52_copy: Option<String>,
-    pub repo_button_col: Option<u16>,
     /// Update notice shown when a newer GitHub release is available.
     pub version_notice: Option<crate::version::UpdateNotice>,
     /// Shared state across sidebar instances, persisted to tmux global variables.
     pub global: GlobalState,
-    /// Hyperlink overlays to be written after frame render (OSC 8).
-    pub hyperlink_overlays: Vec<HyperlinkOverlay>,
     /// Height of the bottom panel in lines. Loaded once at startup from
     /// the `@sidebar_bottom_height` tmux option. A value of 0 hides the panel.
     pub bottom_panel_height: u16,
@@ -466,13 +490,12 @@ impl AppState {
             sidebar_focused: false,
             focus: Focus::Panes,
             spinner_frame: 0,
-            pane_row_targets: vec![],
+            layout: FrameLayout::default(),
             activity_entries: vec![],
             activity_scroll: ScrollState::default(),
             focused_pane_id: None,
             tmux_pane,
             activity_max_entries: 50,
-            line_to_row: vec![],
             panes_scroll: ScrollState::default(),
             theme: ColorTheme::default(),
             icons: StatusIcons::default(),
@@ -486,10 +509,8 @@ impl AppState {
             popup: PopupState::None,
             notices: NoticesState::default(),
             pending_osc52_copy: None,
-            repo_button_col: None,
             version_notice: None,
             global: GlobalState::new(),
-            hyperlink_overlays: vec![],
             bottom_panel_height: crate::ui::BOTTOM_PANEL_HEIGHT,
             session_names: HashMap::new(),
         }
@@ -515,7 +536,10 @@ impl AppState {
     }
 
     pub fn selected_pane(&self) -> Option<&crate::tmux::PaneInfo> {
-        let target = self.pane_row_targets.get(self.global.selected_pane_row)?;
+        let target = self
+            .layout
+            .pane_row_targets
+            .get(self.global.selected_pane_row)?;
         self.pane_by_id(&target.pane_id)
     }
 
@@ -732,23 +756,23 @@ impl AppState {
             self.global.repo_filter = RepoFilter::All;
         }
 
-        self.pane_row_targets.clear();
+        self.layout.pane_row_targets.clear();
         for group in &self.repo_groups {
             if !self.global.repo_filter.matches_group(&group.name) {
                 continue;
             }
             for (pane, _) in &group.panes {
                 if self.global.status_filter.matches(&pane.status) {
-                    self.pane_row_targets.push(RowTarget {
+                    self.layout.pane_row_targets.push(RowTarget {
                         pane_id: pane.pane_id.clone(),
                     });
                 }
             }
         }
-        if self.global.selected_pane_row >= self.pane_row_targets.len()
-            && !self.pane_row_targets.is_empty()
+        if self.global.selected_pane_row >= self.layout.pane_row_targets.len()
+            && !self.layout.pane_row_targets.is_empty()
         {
-            self.global.selected_pane_row = self.pane_row_targets.len() - 1;
+            self.global.selected_pane_row = self.layout.pane_row_targets.len() - 1;
         }
     }
 
@@ -765,10 +789,10 @@ impl AppState {
 
     /// Move agent selection. Returns true if moved, false if at boundary.
     pub fn move_pane_selection(&mut self, delta: isize) -> bool {
-        if self.pane_row_targets.is_empty() {
+        if self.layout.pane_row_targets.is_empty() {
             return false;
         }
-        let len = self.pane_row_targets.len() as isize;
+        let len = self.layout.pane_row_targets.len() as isize;
         let next = self.global.selected_pane_row as isize + delta;
         if next >= 0 && next < len {
             self.global.selected_pane_row = next as usize;
@@ -779,7 +803,11 @@ impl AppState {
     }
 
     pub fn activate_selected_pane(&self) {
-        if let Some(target) = self.pane_row_targets.get(self.global.selected_pane_row) {
+        if let Some(target) = self
+            .layout
+            .pane_row_targets
+            .get(self.global.selected_pane_row)
+        {
             tmux::select_pane(&target.pane_id);
         }
     }
@@ -884,6 +912,7 @@ impl AppState {
             return;
         }
         if self
+            .layout
             .repo_button_col
             .is_some_and(|repo_button_col| col >= repo_button_col)
         {
@@ -941,7 +970,7 @@ impl AppState {
             return;
         }
         let line_index = (row as usize - 2) + self.panes_scroll.offset;
-        if let Some(Some(agent_row)) = self.line_to_row.get(line_index) {
+        if let Some(Some(agent_row)) = self.layout.line_to_row.get(line_index) {
             self.global.selected_pane_row = *agent_row;
             self.global.save_cursor();
             self.activate_selected_pane();
@@ -1385,10 +1414,10 @@ mod tests {
         ];
         state.rebuild_row_targets();
 
-        assert_eq!(state.pane_row_targets.len(), 3);
-        assert_eq!(state.pane_row_targets[0].pane_id, "%1");
-        assert_eq!(state.pane_row_targets[1].pane_id, "%2");
-        assert_eq!(state.pane_row_targets[2].pane_id, "%3");
+        assert_eq!(state.layout.pane_row_targets.len(), 3);
+        assert_eq!(state.layout.pane_row_targets[0].pane_id, "%1");
+        assert_eq!(state.layout.pane_row_targets[1].pane_id, "%2");
+        assert_eq!(state.layout.pane_row_targets[2].pane_id, "%3");
     }
 
     #[test]
@@ -1410,12 +1439,12 @@ mod tests {
 
         // Start at first group
         assert_eq!(state.global.selected_pane_row, 0);
-        assert_eq!(state.pane_row_targets[0].pane_id, "%1");
+        assert_eq!(state.layout.pane_row_targets[0].pane_id, "%1");
 
         // Move to second group
         assert!(state.move_pane_selection(1));
         assert_eq!(state.global.selected_pane_row, 1);
-        assert_eq!(state.pane_row_targets[1].pane_id, "%5");
+        assert_eq!(state.layout.pane_row_targets[1].pane_id, "%5");
     }
 
     #[test]
@@ -2073,7 +2102,7 @@ mod tests {
 
         assert!(state.sidebar_focused);
         assert_eq!(state.repo_groups.len(), 1);
-        assert_eq!(state.pane_row_targets.len(), 1);
+        assert_eq!(state.layout.pane_row_targets.len(), 1);
         assert_eq!(state.global.selected_pane_row, 0);
         // focused_pane_id is set by find_focused_pane() which queries tmux
         // directly, so we don't assert it here (tmux not available in tests).
@@ -2210,7 +2239,7 @@ mod tests {
     #[test]
     fn move_pane_selection_boundary_returns() {
         let mut state = AppState::new("%99".into());
-        state.pane_row_targets = vec![
+        state.layout.pane_row_targets = vec![
             RowTarget {
                 pane_id: "%1".into(),
             },
@@ -2263,7 +2292,7 @@ mod tests {
         state.global.selected_pane_row = 5;
         state.repo_groups = vec![];
         state.rebuild_row_targets();
-        assert!(state.pane_row_targets.is_empty());
+        assert!(state.layout.pane_row_targets.is_empty());
         // selected_pane_row stays as-is when targets empty (no clamp needed)
         assert_eq!(state.global.selected_pane_row, 5);
     }
@@ -2291,25 +2320,25 @@ mod tests {
         // All filter: all 3 panes
         state.global.status_filter = StatusFilter::All;
         state.rebuild_row_targets();
-        assert_eq!(state.pane_row_targets.len(), 3);
+        assert_eq!(state.layout.pane_row_targets.len(), 3);
 
         // Running filter: only 2 panes
         state.global.status_filter = StatusFilter::Running;
         state.rebuild_row_targets();
-        assert_eq!(state.pane_row_targets.len(), 2);
-        assert_eq!(state.pane_row_targets[0].pane_id, "%1");
-        assert_eq!(state.pane_row_targets[1].pane_id, "%3");
+        assert_eq!(state.layout.pane_row_targets.len(), 2);
+        assert_eq!(state.layout.pane_row_targets[0].pane_id, "%1");
+        assert_eq!(state.layout.pane_row_targets[1].pane_id, "%3");
 
         // Idle filter: only 1 pane
         state.global.status_filter = StatusFilter::Idle;
         state.rebuild_row_targets();
-        assert_eq!(state.pane_row_targets.len(), 1);
-        assert_eq!(state.pane_row_targets[0].pane_id, "%2");
+        assert_eq!(state.layout.pane_row_targets.len(), 1);
+        assert_eq!(state.layout.pane_row_targets[0].pane_id, "%2");
 
         // Error filter: no panes
         state.global.status_filter = StatusFilter::Error;
         state.rebuild_row_targets();
-        assert!(state.pane_row_targets.is_empty());
+        assert!(state.layout.pane_row_targets.is_empty());
     }
 
     #[test]
@@ -2341,7 +2370,7 @@ mod tests {
         state.global.status_filter = StatusFilter::Running;
         state.rebuild_row_targets();
         assert_eq!(state.global.selected_pane_row, 0);
-        assert_eq!(state.pane_row_targets[0].pane_id, "%1");
+        assert_eq!(state.layout.pane_row_targets[0].pane_id, "%1");
     }
 
     // ─── handle_mouse_click tests ────────────────────────────────────
@@ -2349,7 +2378,7 @@ mod tests {
     #[test]
     fn mouse_click_selects_agent_row() {
         let mut state = AppState::new("%99".into());
-        state.pane_row_targets = vec![
+        state.layout.pane_row_targets = vec![
             RowTarget {
                 pane_id: "%1".into(),
             },
@@ -2358,7 +2387,7 @@ mod tests {
             },
         ];
         // line_to_row: line 0 = group header (None), line 1 = agent 0, line 2 = agent 1
-        state.line_to_row = vec![None, Some(0), Some(1)];
+        state.layout.line_to_row = vec![None, Some(0), Some(1)];
         state.panes_scroll.offset = 0;
 
         // row 0 = filter bar, row 1 = secondary header, row 2+ = agent list rows
@@ -2372,10 +2401,10 @@ mod tests {
     #[test]
     fn mouse_click_on_filter_bar_changes_filter() {
         let mut state = AppState::new("%99".into());
-        state.pane_row_targets = vec![RowTarget {
+        state.layout.pane_row_targets = vec![RowTarget {
             pane_id: "%1".into(),
         }];
-        state.line_to_row = vec![None, Some(0)];
+        state.layout.line_to_row = vec![None, Some(0)];
         state.global.selected_pane_row = 0;
         state.global.status_filter = StatusFilter::All;
 
@@ -2408,7 +2437,7 @@ mod tests {
                 panes: vec![(test_pane("%2"), PaneGitInfo::default())],
             },
         ];
-        state.repo_button_col = Some(20);
+        state.layout.repo_button_col = Some(20);
 
         state.handle_mouse_click(1, 19);
         assert!(!state.is_repo_popup_open());
@@ -2420,7 +2449,7 @@ mod tests {
     #[test]
     fn mouse_click_with_scroll_offset() {
         let mut state = AppState::new("%99".into());
-        state.pane_row_targets = vec![
+        state.layout.pane_row_targets = vec![
             RowTarget {
                 pane_id: "%1".into(),
             },
@@ -2429,7 +2458,7 @@ mod tests {
             },
         ];
         // 5 lines total, scrolled down by 2
-        state.line_to_row = vec![None, Some(0), Some(0), None, Some(1)];
+        state.layout.line_to_row = vec![None, Some(0), Some(0), None, Some(1)];
         state.panes_scroll.offset = 2;
 
         // row 4 → line_index = (4-2) + 2 = 4 → agent row 1
@@ -2440,10 +2469,10 @@ mod tests {
     #[test]
     fn mouse_click_out_of_bounds() {
         let mut state = AppState::new("%99".into());
-        state.pane_row_targets = vec![RowTarget {
+        state.layout.pane_row_targets = vec![RowTarget {
             pane_id: "%1".into(),
         }];
-        state.line_to_row = vec![None, Some(0)];
+        state.layout.line_to_row = vec![None, Some(0)];
         state.global.selected_pane_row = 0;
 
         state.handle_mouse_click(50, 5); // way beyond line_to_row
@@ -2656,24 +2685,24 @@ mod tests {
         }];
         state.global.status_filter = StatusFilter::All;
         state.rebuild_row_targets();
-        assert_eq!(state.pane_row_targets.len(), 3);
+        assert_eq!(state.layout.pane_row_targets.len(), 3);
 
         // Click Running filter — row_targets should update immediately
         // Layout: " All  ●2  ◐0  ○1  ✕0" → Running at x=6
         reset_filter_debounce(&mut state);
         state.handle_filter_click(6);
         assert_eq!(state.global.status_filter, StatusFilter::Running);
-        assert_eq!(state.pane_row_targets.len(), 2);
-        assert_eq!(state.pane_row_targets[0].pane_id, "%1");
-        assert_eq!(state.pane_row_targets[1].pane_id, "%3");
+        assert_eq!(state.layout.pane_row_targets.len(), 2);
+        assert_eq!(state.layout.pane_row_targets[0].pane_id, "%1");
+        assert_eq!(state.layout.pane_row_targets[1].pane_id, "%3");
 
         // Click Idle filter — row_targets should update again
         // Layout: " All  ●2  ◐0  ○1  ✕0" → Idle at x=14
         reset_filter_debounce(&mut state);
         state.handle_filter_click(14);
         assert_eq!(state.global.status_filter, StatusFilter::Idle);
-        assert_eq!(state.pane_row_targets.len(), 1);
-        assert_eq!(state.pane_row_targets[0].pane_id, "%2");
+        assert_eq!(state.layout.pane_row_targets.len(), 1);
+        assert_eq!(state.layout.pane_row_targets[0].pane_id, "%2");
     }
 
     // ─── StatusFilter as_str / from_str tests ─────────────────────────
@@ -2749,7 +2778,7 @@ mod tests {
         state.global.repo_filter = RepoFilter::All;
         state.rebuild_row_targets();
 
-        assert_eq!(state.pane_row_targets.len(), 2);
+        assert_eq!(state.layout.pane_row_targets.len(), 2);
     }
 
     #[test]
@@ -2770,8 +2799,8 @@ mod tests {
         state.global.repo_filter = RepoFilter::Repo("app".into());
         state.rebuild_row_targets();
 
-        assert_eq!(state.pane_row_targets.len(), 1);
-        assert_eq!(state.pane_row_targets[0].pane_id, "%2");
+        assert_eq!(state.layout.pane_row_targets.len(), 1);
+        assert_eq!(state.layout.pane_row_targets[0].pane_id, "%2");
     }
 
     #[test]
@@ -2799,8 +2828,8 @@ mod tests {
         state.rebuild_row_targets();
 
         // Only Running panes in "app" group
-        assert_eq!(state.pane_row_targets.len(), 1);
-        assert_eq!(state.pane_row_targets[0].pane_id, "%1");
+        assert_eq!(state.layout.pane_row_targets.len(), 1);
+        assert_eq!(state.layout.pane_row_targets[0].pane_id, "%1");
     }
 
     #[test]
@@ -2815,7 +2844,7 @@ mod tests {
         state.rebuild_row_targets();
 
         assert_eq!(state.global.repo_filter, RepoFilter::All);
-        assert_eq!(state.pane_row_targets.len(), 1);
+        assert_eq!(state.layout.pane_row_targets.len(), 1);
     }
 
     #[test]
@@ -2887,8 +2916,8 @@ mod tests {
 
         assert_eq!(state.global.repo_filter, RepoFilter::Repo("beta".into()));
         assert!(!state.is_repo_popup_open());
-        assert_eq!(state.pane_row_targets.len(), 1);
-        assert_eq!(state.pane_row_targets[0].pane_id, "%2");
+        assert_eq!(state.layout.pane_row_targets.len(), 1);
+        assert_eq!(state.layout.pane_row_targets[0].pane_id, "%2");
     }
 
     #[test]
