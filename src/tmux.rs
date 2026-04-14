@@ -254,12 +254,16 @@ fn resolve_codex_permission_modes(sessions_map: &mut SessionMap, codex_pids: &[C
 }
 
 /// Flatten the session→window hierarchy into a `Vec<SessionInfo>`, dropping
-/// any sessions that would be empty after filtering windows with no panes.
+/// any windows whose `parse_pane_line` filtering left them empty, and any
+/// sessions whose windows are all empty as a result.
 fn finalize_sessions(sessions_map: SessionMap) -> Vec<SessionInfo> {
     let mut sessions = Vec::new();
     for (session_name, windows) in sessions_map {
-        let windows: Vec<WindowInfo> = windows.into_values().collect();
-        if windows.iter().any(|w| !w.panes.is_empty()) {
+        let windows: Vec<WindowInfo> = windows
+            .into_values()
+            .filter(|w| !w.panes.is_empty())
+            .collect();
+        if !windows.is_empty() {
             sessions.push(SessionInfo {
                 session_name,
                 windows,
@@ -1383,5 +1387,87 @@ mod tests {
             parse_pane_line(&line).is_none(),
             "shell detection should handle paths, args, and case differences"
         );
+    }
+
+    // ─── finalize_sessions ─────────────────────────────────────────
+
+    #[test]
+    fn finalize_sessions_drops_windows_with_no_panes() {
+        // Regression: build_session_hierarchy() creates a WindowInfo as
+        // soon as it sees a tmux row, but parse_pane_line() may then
+        // reject every pane in that window (sidebar / shell / unknown).
+        // finalize_sessions must filter out the resulting empty windows
+        // so downstream code never has to special-case them.
+        let mut sessions_map: SessionMap = indexmap::IndexMap::new();
+        let entry = sessions_map.entry("main".to_string()).or_default();
+        entry.insert(
+            "@1".to_string(),
+            WindowInfo {
+                window_id: "@1".into(),
+                window_name: "with-pane".into(),
+                window_active: true,
+                auto_rename: false,
+                panes: vec![PaneInfo {
+                    pane_id: "%1".into(),
+                    pane_active: true,
+                    status: PaneStatus::Running,
+                    attention: false,
+                    agent: AgentType::Claude,
+                    path: "/repo".into(),
+                    current_command: String::new(),
+                    prompt: String::new(),
+                    prompt_is_response: false,
+                    started_at: None,
+                    wait_reason: String::new(),
+                    permission_mode: PermissionMode::Default,
+                    subagents: vec![],
+                    pane_pid: None,
+                    worktree_name: String::new(),
+                    worktree_branch: String::new(),
+                    session_id: None,
+                    session_name: String::new(),
+                }],
+            },
+        );
+        entry.insert(
+            "@2".to_string(),
+            WindowInfo {
+                window_id: "@2".into(),
+                window_name: "empty".into(),
+                window_active: false,
+                auto_rename: false,
+                panes: vec![],
+            },
+        );
+
+        let sessions = finalize_sessions(sessions_map);
+
+        assert_eq!(sessions.len(), 1, "session should survive");
+        assert_eq!(
+            sessions[0].windows.len(),
+            1,
+            "empty window must be filtered out"
+        );
+        assert_eq!(sessions[0].windows[0].window_id, "@1");
+    }
+
+    #[test]
+    fn finalize_sessions_drops_session_when_all_windows_are_empty() {
+        let mut sessions_map: SessionMap = indexmap::IndexMap::new();
+        let entry = sessions_map.entry("dead".to_string()).or_default();
+        entry.insert(
+            "@9".to_string(),
+            WindowInfo {
+                window_id: "@9".into(),
+                window_name: "ghost".into(),
+                window_active: false,
+                auto_rename: false,
+                panes: vec![],
+            },
+        );
+
+        let sessions = finalize_sessions(sessions_map);
+
+        assert!(sessions.is_empty(), "session with no panes must be dropped");
     }
 }

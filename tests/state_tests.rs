@@ -225,6 +225,10 @@ fn test_secondary_header_click_on_i_opens_notices_popup_even_without_missing_hoo
         }],
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
+    // make_state() seeds a missing hook group for general-purpose
+    // tests; clear it here so the test actually exercises the
+    // version-notice-only path described in the test name.
+    state.notices.missing_hook_groups.clear();
     state.version_notice = Some(tmux_agent_sidebar::version::UpdateNotice {
         local_version: "0.2.6".into(),
         latest_version: "0.2.7".into(),

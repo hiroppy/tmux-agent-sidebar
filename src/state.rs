@@ -618,7 +618,7 @@ impl AppState {
         // re-adding Claude here would only duplicate the warning.
         let claude_plugin_present = self.notices.claude_plugin_installed_version.is_some();
 
-        let hook_script = crate::cli::setup::resolve_hook_script().path;
+        let resolved_hook = crate::cli::setup::resolve_hook_script();
         let force_missing = debug_forced_display();
         let load_config = |agent: &str| -> serde_json::Value {
             if force_missing {
@@ -627,15 +627,25 @@ impl AppState {
                 crate::cli::setup::load_current_config(agent)
             }
         };
-        self.notices.missing_hook_groups = compute_missing_hook_groups(
-            claude_plugin_present,
-            vec![
-                crate::tmux::CLAUDE_AGENT.to_string(),
-                crate::tmux::CODEX_AGENT.to_string(),
-            ],
-            &hook_script,
-            load_config,
-        );
+        // When `resolve_hook_script` could not actually locate the
+        // installed `hook.sh` it returns a fallback path that is unlikely
+        // to match what the user wrote in their config. Verifying against
+        // that fallback would flag every custom install as "Missing hooks"
+        // — skip the check unless detection succeeded (debug overrides
+        // still force the warning so the popup remains testable).
+        self.notices.missing_hook_groups = if force_missing || resolved_hook.detected {
+            compute_missing_hook_groups(
+                claude_plugin_present,
+                vec![
+                    crate::tmux::CLAUDE_AGENT.to_string(),
+                    crate::tmux::CODEX_AGENT.to_string(),
+                ],
+                &resolved_hook.path,
+                load_config,
+            )
+        } else {
+            Vec::new()
+        };
     }
 
     pub fn is_repo_popup_open(&self) -> bool {
@@ -750,11 +760,14 @@ impl AppState {
     }
 
     pub fn rebuild_row_targets(&mut self) {
-        // Reset stale repo filter if the repo no longer exists
+        // Reset stale repo filter if the repo no longer exists, and
+        // persist the reset back to tmux so fresh sidebar instances do
+        // not reload the dead repo name on startup.
         if let RepoFilter::Repo(ref name) = self.global.repo_filter
             && !self.repo_groups.iter().any(|g| g.name == *name)
         {
             self.global.repo_filter = RepoFilter::All;
+            self.global.save_repo_filter();
         }
 
         self.layout.pane_row_targets.clear();

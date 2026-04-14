@@ -79,9 +79,21 @@ struct AgentContext<'a> {
     session_id: &'a Option<String>,
 }
 
+/// Returns true if pane-scoped writes from this hook event are safe to
+/// apply to the pane's metadata. False while subagents are active so a
+/// child hook cannot clobber the parent pane's identity.
+fn pane_writes_allowed(pane: &str) -> bool {
+    let current_subagents = tmux::get_pane_option_value(pane, "@pane_subagents");
+    should_update_cwd(&current_subagents)
+}
+
 fn set_agent_meta(pane: &str, ctx: &AgentContext<'_>) {
     tmux::set_pane_option(pane, "@pane_agent", ctx.agent);
-    if !ctx.permission_mode.is_empty() {
+    // `@pane_permission_mode` is parent-owned: a child agent can be in
+    // a different mode (e.g. plan vs. default) and overwriting the
+    // parent's value here would flip the badge mid-session. Gate the
+    // write behind the same subagent guard as the cwd/worktree fields.
+    if !ctx.permission_mode.is_empty() && pane_writes_allowed(pane) {
         tmux::set_pane_option(pane, "@pane_permission_mode", ctx.permission_mode);
     }
     sync_pane_location(pane, ctx.cwd, ctx.worktree, ctx.session_id);
@@ -591,15 +603,19 @@ fn handle_activity_log(
         }
     }
 
-    // Update permission mode when plan mode tools are used
-    match tool_name {
-        "EnterPlanMode" => {
-            tmux::set_pane_option(pane, "@pane_permission_mode", "plan");
+    // Update permission mode when plan mode tools are used.
+    // Same parent-protection rule as `set_agent_meta`: a subagent that
+    // enters/exits plan mode must not flip the parent pane's badge.
+    if pane_writes_allowed(pane) {
+        match tool_name {
+            "EnterPlanMode" => {
+                tmux::set_pane_option(pane, "@pane_permission_mode", "plan");
+            }
+            "ExitPlanMode" => {
+                tmux::set_pane_option(pane, "@pane_permission_mode", "default");
+            }
+            _ => {}
         }
-        "ExitPlanMode" => {
-            tmux::set_pane_option(pane, "@pane_permission_mode", "default");
-        }
-        _ => {}
     }
 
     write_activity_entry(pane, tool_name, &label);
@@ -1373,5 +1389,72 @@ mod tests {
             "fresh SessionStart must drop a stale pending marker"
         );
         assert!(!tmux::test_mock::contains(pane, PENDING_WORKTREE_REMOVE));
+    }
+
+    // ─── permission_mode parent-protection regression tests ─────────
+
+    #[test]
+    fn set_agent_meta_does_not_clobber_parent_permission_mode_under_subagents() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%PARENT_PERM";
+        tmux::test_mock::set(pane, "@pane_subagents", "Explore:sub-1");
+        tmux::test_mock::set(pane, "@pane_permission_mode", "plan");
+
+        // A subagent fires a hook with `permission_mode: "default"` —
+        // this must NOT flip the parent badge from "plan" back to
+        // "default".
+        let ctx = AgentContext {
+            agent: "claude",
+            cwd: "/repo",
+            permission_mode: "default",
+            worktree: &None,
+            session_id: &None,
+        };
+        set_agent_meta(pane, &ctx);
+
+        assert_eq!(
+            tmux::test_mock::get(pane, "@pane_permission_mode").as_deref(),
+            Some("plan"),
+            "child hook must not overwrite parent's permission_mode"
+        );
+    }
+
+    #[test]
+    fn set_agent_meta_writes_permission_mode_when_no_subagents() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%LONE_PERM";
+
+        let ctx = AgentContext {
+            agent: "claude",
+            cwd: "/repo",
+            permission_mode: "plan",
+            worktree: &None,
+            session_id: &None,
+        };
+        set_agent_meta(pane, &ctx);
+
+        assert_eq!(
+            tmux::test_mock::get(pane, "@pane_permission_mode").as_deref(),
+            Some("plan"),
+            "regular SessionStart should still write permission_mode"
+        );
+    }
+
+    #[test]
+    fn handle_activity_log_enter_plan_mode_blocked_by_subagents() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%PARENT_PLAN";
+        tmux::test_mock::set(pane, "@pane_subagents", "Explore:sub-1");
+        tmux::test_mock::set(pane, "@pane_permission_mode", "default");
+
+        // A subagent's EnterPlanMode tool use must not flip the parent
+        // badge to "plan".
+        handle_activity_log(pane, "EnterPlanMode", &Value::Null, &Value::Null);
+
+        assert_eq!(
+            tmux::test_mock::get(pane, "@pane_permission_mode").as_deref(),
+            Some("default"),
+            "child EnterPlanMode must not overwrite parent's permission_mode"
+        );
     }
 }
