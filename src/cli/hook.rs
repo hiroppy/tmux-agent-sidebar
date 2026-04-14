@@ -108,10 +108,62 @@ fn clear_all_meta(pane: &str) {
         "@pane_worktree_name",
         "@pane_worktree_branch",
         "@pane_session_id",
+        PENDING_SESSION_END,
+        PENDING_WORKTREE_REMOVE,
     ] {
         tmux::unset_pane_option(pane, key);
     }
     clear_run_state(pane);
+}
+
+/// Tmux pane option set when SessionEnd is deferred because subagents are
+/// still active. Drained by `on_subagent_stop` once `@pane_subagents`
+/// becomes empty.
+const PENDING_SESSION_END: &str = "@pane_pending_session_end";
+/// Same idea for WorktreeRemove.
+const PENDING_WORKTREE_REMOVE: &str = "@pane_pending_worktree_remove";
+
+fn mark_pending(pane: &str, key: &str) {
+    tmux::set_pane_option(pane, key, "1");
+}
+
+/// Run any deferred teardowns recorded by previous calls to
+/// `on_session_end` / `on_worktree_remove`. Called from `on_subagent_stop`
+/// after the subagent list drains to empty so the parent pane is finally
+/// cleaned up instead of being stranded with stale metadata.
+fn drain_pending_teardowns(pane: &str) {
+    let pending_session_end = !tmux::get_pane_option_value(pane, PENDING_SESSION_END).is_empty();
+    let pending_worktree_remove =
+        !tmux::get_pane_option_value(pane, PENDING_WORKTREE_REMOVE).is_empty();
+
+    if pending_session_end {
+        // SessionEnd already cleared the pending marker via clear_all_meta.
+        run_session_end_teardown(pane);
+    } else if pending_worktree_remove {
+        run_worktree_remove_teardown(pane);
+        tmux::unset_pane_option(pane, PENDING_WORKTREE_REMOVE);
+    }
+}
+
+/// Side-effect body of the SessionEnd teardown. Extracted so both the
+/// inline path (no subagents) and the deferred path (drained from
+/// `on_subagent_stop`) execute the exact same cleanup.
+fn run_session_end_teardown(pane: &str) {
+    set_attention(pane, "clear");
+    clear_all_meta(pane);
+    set_status(pane, "clear");
+    let log_path = crate::activity::log_file_path(pane);
+    let _ = std::fs::remove_file(log_path);
+}
+
+/// Side-effect body of the WorktreeRemove teardown. Same pattern as
+/// `run_session_end_teardown` — single source of truth for both the inline
+/// and deferred paths.
+fn run_worktree_remove_teardown(pane: &str) {
+    sync_worktree_meta(pane, &None);
+    // Clear hook-set cwd so query_sessions() falls back to
+    // pane_current_path, avoiding stale worktree path association.
+    tmux::unset_pane_option(pane, "@pane_cwd");
 }
 
 /// Append an agent type to a comma-separated subagent list.
@@ -369,6 +421,10 @@ fn on_session_start(pane: &str, ctx: &AgentContext<'_>) -> i32 {
     tmux::unset_pane_option(pane, "@pane_prompt");
     tmux::unset_pane_option(pane, "@pane_prompt_source");
     tmux::unset_pane_option(pane, "@pane_subagents");
+    // A fresh session overrides any deferred teardown that was waiting
+    // for the previous run's subagents to drain.
+    tmux::unset_pane_option(pane, PENDING_SESSION_END);
+    tmux::unset_pane_option(pane, PENDING_WORKTREE_REMOVE);
     set_status(pane, "idle");
     0
 }
@@ -376,17 +432,16 @@ fn on_session_start(pane: &str, ctx: &AgentContext<'_>) -> i32 {
 fn on_session_end(pane: &str) -> i32 {
     // Subagents share the parent's $TMUX_PANE, so a child emitting
     // SessionEnd must NOT wipe the parent's metadata or activity log.
-    // Wait until `@pane_subagents` is empty (set by the parent's own
-    // SessionStart or by every child's SubagentStop) before tearing down.
+    // While children are still listed, defer the teardown via a marker
+    // that `on_subagent_stop` drains once the list empties — otherwise a
+    // parent SessionEnd that races ahead of every SubagentStop would
+    // leave the pane stranded with stale metadata forever.
     let current_subagents = tmux::get_pane_option_value(pane, "@pane_subagents");
     if !should_update_cwd(&current_subagents) {
+        mark_pending(pane, PENDING_SESSION_END);
         return 0;
     }
-    set_attention(pane, "clear");
-    clear_all_meta(pane);
-    set_status(pane, "clear");
-    let log_path = crate::activity::log_file_path(pane);
-    let _ = std::fs::remove_file(log_path);
+    run_session_end_teardown(pane);
     0
 }
 
@@ -462,14 +517,21 @@ fn on_subagent_stop(pane: &str, agent_id: Option<&str>) -> i32 {
         return 0;
     };
     let current = tmux::get_pane_option_value(pane, "@pane_subagents");
-    match remove_subagent(&current, id) {
-        None => {}
+    let drained_to_empty = match remove_subagent(&current, id) {
+        None => false,
         Some(new_val) if new_val.is_empty() => {
             tmux::unset_pane_option(pane, "@pane_subagents");
+            true
         }
         Some(new_val) => {
             tmux::set_pane_option(pane, "@pane_subagents", &new_val);
+            false
         }
+    };
+    // Once the last subagent stops, replay any teardown that was deferred
+    // because subagents were active when SessionEnd / WorktreeRemove fired.
+    if drained_to_empty {
+        drain_pending_teardowns(pane);
     }
     0
 }
@@ -493,14 +555,14 @@ fn on_worktree_remove(pane: &str) -> i32 {
     // If subagents are active, the removed worktree may belong to one of
     // them — we can't distinguish parent from child at this point, so the
     // safe default is to leave the parent's pane-scoped metadata intact.
+    // Same deferred-drain idea as `on_session_end`: record the intent and
+    // let `on_subagent_stop` execute it once children are gone.
     let current_subagents = tmux::get_pane_option_value(pane, "@pane_subagents");
     if !should_update_cwd(&current_subagents) {
+        mark_pending(pane, PENDING_WORKTREE_REMOVE);
         return 0;
     }
-    sync_worktree_meta(pane, &None);
-    // Clear hook-set cwd so query_sessions() falls back to
-    // pane_current_path, avoiding stale worktree path association.
-    tmux::unset_pane_option(pane, "@pane_cwd");
+    run_worktree_remove_teardown(pane);
     0
 }
 
@@ -1187,5 +1249,129 @@ mod tests {
         assert!(!tmux::test_mock::contains(pane, "@pane_worktree_name"));
         assert!(!tmux::test_mock::contains(pane, "@pane_worktree_branch"));
         assert!(!tmux::test_mock::contains(pane, "@pane_cwd"));
+    }
+
+    // ─── deferred teardown regression tests ─────────────────────────
+    //
+    // These pin the Codex adversarial review fix: SessionEnd /
+    // WorktreeRemove fired while subagents are active must not be lost
+    // forever. They are recorded as pending markers and replayed by
+    // on_subagent_stop once the subagent list drains to empty.
+
+    #[test]
+    fn pending_session_end_drains_when_last_subagent_stops() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%PARENT_DEFER";
+        tmux::test_mock::set(pane, "@pane_subagents", "Explore:sub-1");
+        tmux::test_mock::set(pane, "@pane_agent", "claude");
+        tmux::test_mock::set(pane, "@pane_cwd", "/repo/parent");
+        tmux::test_mock::set(pane, "@pane_status", "running");
+        let log_path = crate::activity::log_file_path(pane);
+        let _ = fs::create_dir_all(log_path.parent().unwrap());
+        fs::write(&log_path, "1234567890|Read|main.rs\n").unwrap();
+
+        // Parent SessionEnd arrives while a subagent is still running.
+        on_session_end(pane);
+        assert!(
+            tmux::test_mock::contains(pane, PENDING_SESSION_END),
+            "SessionEnd must be deferred via the pending marker"
+        );
+        assert!(
+            tmux::test_mock::contains(pane, "@pane_agent"),
+            "deferred SessionEnd must not yet clear parent state"
+        );
+        assert!(log_path.exists(), "deferred SessionEnd must keep the log");
+
+        // Last subagent stops — pending teardown should fire now.
+        on_subagent_stop(pane, Some("sub-1"));
+
+        assert!(
+            !tmux::test_mock::contains(pane, "@pane_agent"),
+            "drained SessionEnd should clear parent agent"
+        );
+        assert!(!tmux::test_mock::contains(pane, "@pane_cwd"));
+        assert!(!tmux::test_mock::contains(pane, "@pane_status"));
+        assert!(
+            !tmux::test_mock::contains(pane, PENDING_SESSION_END),
+            "pending marker must be cleared once teardown runs"
+        );
+        assert!(
+            !log_path.exists(),
+            "drained SessionEnd should remove the activity log"
+        );
+    }
+
+    #[test]
+    fn pending_worktree_remove_drains_when_last_subagent_stops() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%PARENT_WT_DEFER";
+        tmux::test_mock::set(pane, "@pane_subagents", "Explore:sub-1");
+        tmux::test_mock::set(pane, "@pane_worktree_name", "feat");
+        tmux::test_mock::set(pane, "@pane_worktree_branch", "feat");
+        tmux::test_mock::set(pane, "@pane_cwd", "/wt/feat");
+
+        on_worktree_remove(pane);
+        assert!(
+            tmux::test_mock::contains(pane, PENDING_WORKTREE_REMOVE),
+            "WorktreeRemove must be deferred via the pending marker"
+        );
+        assert!(tmux::test_mock::contains(pane, "@pane_worktree_name"));
+
+        on_subagent_stop(pane, Some("sub-1"));
+
+        assert!(!tmux::test_mock::contains(pane, "@pane_worktree_name"));
+        assert!(!tmux::test_mock::contains(pane, "@pane_worktree_branch"));
+        assert!(!tmux::test_mock::contains(pane, "@pane_cwd"));
+        assert!(
+            !tmux::test_mock::contains(pane, PENDING_WORKTREE_REMOVE),
+            "pending marker must be cleared once teardown runs"
+        );
+    }
+
+    #[test]
+    fn pending_teardown_does_not_fire_until_subagents_empty() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%PARENT_PARTIAL";
+        tmux::test_mock::set(pane, "@pane_subagents", "Explore:sub-1,Plan:sub-2");
+        tmux::test_mock::set(pane, "@pane_agent", "claude");
+
+        on_session_end(pane);
+        assert!(tmux::test_mock::contains(pane, PENDING_SESSION_END));
+
+        // First child stops — list still has sub-2, teardown must NOT fire.
+        on_subagent_stop(pane, Some("sub-1"));
+        assert!(
+            tmux::test_mock::contains(pane, "@pane_agent"),
+            "teardown must wait for the LAST subagent"
+        );
+        assert!(tmux::test_mock::contains(pane, PENDING_SESSION_END));
+
+        // Last child stops — now teardown fires.
+        on_subagent_stop(pane, Some("sub-2"));
+        assert!(!tmux::test_mock::contains(pane, "@pane_agent"));
+        assert!(!tmux::test_mock::contains(pane, PENDING_SESSION_END));
+    }
+
+    #[test]
+    fn fresh_session_start_clears_pending_markers() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%PARENT_RESTART";
+        tmux::test_mock::set(pane, PENDING_SESSION_END, "1");
+        tmux::test_mock::set(pane, PENDING_WORKTREE_REMOVE, "1");
+
+        let ctx = AgentContext {
+            agent: "claude",
+            cwd: "/repo",
+            permission_mode: "default",
+            worktree: &None,
+            session_id: &None,
+        };
+        on_session_start(pane, &ctx);
+
+        assert!(
+            !tmux::test_mock::contains(pane, PENDING_SESSION_END),
+            "fresh SessionStart must drop a stale pending marker"
+        );
+        assert!(!tmux::test_mock::contains(pane, PENDING_WORKTREE_REMOVE));
     }
 }
