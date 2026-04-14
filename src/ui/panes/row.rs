@@ -78,7 +78,7 @@ fn status_row(
     let (icon, pulse_color) = running_icon_for(&pane.status, spinner_frame, icons);
     let icon_color =
         pulse_color.unwrap_or_else(|| theme.status_color(&pane.status, pane.attention));
-    let title = if pane.session_name.is_empty() {
+    let title_raw: &str = if pane.session_name.is_empty() {
         pane.agent.label()
     } else {
         &pane.session_name
@@ -95,8 +95,17 @@ fn status_row(
     };
 
     let badge_extra = if badge.is_empty() { 0 } else { 1 };
-    let left_width =
-        display_width(icon) + 1 + display_width(title) + badge_extra + display_width(badge);
+    let fixed_width = display_width(icon) + 1 + badge_extra + display_width(badge);
+    // User-supplied session names (set via `/rename`) can be arbitrarily
+    // long; cap the title to the space left after reserving room for the
+    // icon, badge, and elapsed label so they stay visible instead of
+    // being pushed off-screen.
+    let title_budget = ctx
+        .inner_width
+        .saturating_sub(fixed_width + display_width(&elapsed));
+    let title = truncate_to_width(title_raw, title_budget);
+
+    let left_width = fixed_width + display_width(&title);
     let available_for_elapsed = ctx.inner_width.saturating_sub(left_width);
     let elapsed = truncate_to_width(&elapsed, available_for_elapsed);
     let elapsed_width = display_width(&elapsed);
@@ -546,6 +555,53 @@ mod tests {
         assert!(
             !status.contains("codex"),
             "agent label should be replaced by session name, got: {status}"
+        );
+    }
+
+    #[test]
+    fn render_pane_lines_truncates_long_session_name_to_keep_elapsed_visible() {
+        // Regression: a user-supplied `/rename` title can be arbitrarily
+        // long and would push the elapsed counter off-screen if we did
+        // not truncate it first. The width budget reserves room for the
+        // status icon, the badge, and the elapsed label.
+        let theme = ColorTheme::default();
+        let mut p = pane(PermissionMode::Default, PaneStatus::Running, "");
+        p.session_name = "this-is-a-ridiculously-long-session-name-that-will-not-fit".into();
+        // started_at must be > 0 for elapsed_label to render.
+        // started_at=1, now=66 → elapsed=65s → "1m5s".
+        p.started_at = Some(1);
+        let lines = render_pane_lines_with_ports(
+            &p,
+            &PaneGitInfo::default(),
+            None,
+            None,
+            false,
+            false,
+            30,
+            &StatusIcons::default(),
+            &theme,
+            0,
+            66,
+        );
+
+        let status = line_text(&lines[0]);
+        // The elapsed counter must remain visible — that is the whole
+        // point of capping the title width.
+        assert!(
+            status.contains("1m5s"),
+            "elapsed must stay visible when session name is long, got: {status}"
+        );
+        // The full title must NOT fit; it should be replaced by a
+        // truncated form ending in the standard ellipsis character.
+        assert!(
+            !status.contains("not-fit"),
+            "long session name must be truncated, got: {status}"
+        );
+        // Each rendered cell should fit inside the 30-column width.
+        let visible_width = display_width(&status);
+        assert!(
+            visible_width <= 30,
+            "status row width {visible_width} must not exceed inner_width 30: {status}"
         );
     }
 

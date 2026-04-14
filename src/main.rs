@@ -12,8 +12,10 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
+use std::collections::HashMap;
 use tmux_agent_sidebar::SPINNER_PULSE;
 use tmux_agent_sidebar::git::{self, GitData};
+use tmux_agent_sidebar::session;
 use tmux_agent_sidebar::state::{AppState, BottomTab, Focus, HyperlinkOverlay};
 use tmux_agent_sidebar::tmux;
 use tmux_agent_sidebar::ui;
@@ -120,9 +122,14 @@ fn run_app(
     // also decouples the ⓘ badge from `focused_pane_id`, so killing
     // the last agent pane no longer drops outstanding setup warnings.
     state.refresh_notices();
+    // Populate session names synchronously before the first draw so
+    // `/rename`-assigned labels show up without waiting for the first
+    // background scan tick.
+    state.session_names = session::scan_session_names();
     state.refresh();
 
     let (git_tx, git_rx) = mpsc::channel::<GitData>();
+    let (session_tx, session_rx) = mpsc::channel::<HashMap<String, String>>();
     let (version_tx, version_rx) = mpsc::channel::<UpdateNotice>();
     let tmux_pane_clone = state.tmux_pane.clone();
     let git_tab_active =
@@ -130,6 +137,9 @@ fn run_app(
     let git_tab_flag = std::sync::Arc::clone(&git_tab_active);
     std::thread::spawn(move || {
         git_poll_loop(&tmux_pane_clone, &git_tx, &git_tab_flag);
+    });
+    std::thread::spawn(move || {
+        session_poll_loop(&session_tx);
     });
     std::thread::spawn(move || {
         if let Some(notice) = tmux_agent_sidebar::version::fetch_update_notice() {
@@ -321,6 +331,10 @@ fn run_app(
             state.apply_git_data(data);
         }
 
+        if let Ok(names) = session_rx.try_recv() {
+            state.session_names = names;
+        }
+
         if let Ok(notice) = version_rx.try_recv() {
             state.version_notice = Some(notice);
         }
@@ -343,6 +357,19 @@ fn write_hyperlink_overlays(
         backend.flush()?;
     }
     Ok(())
+}
+
+/// Session name polling thread. Scans `~/.claude/sessions/*.json` every 10
+/// seconds so the main TUI thread never performs blocking filesystem I/O
+/// to refresh `/rename`-assigned labels.
+fn session_poll_loop(tx: &mpsc::Sender<HashMap<String, String>>) {
+    loop {
+        std::thread::sleep(Duration::from_secs(10));
+        let names = session::scan_session_names();
+        if tx.send(names).is_err() {
+            return;
+        }
+    }
 }
 
 /// Git data polling thread. Fetches git status every 2 seconds while the Git

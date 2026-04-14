@@ -134,16 +134,11 @@ impl AppState {
         window_active
     }
 
-    /// Periodically scan `~/.claude/sessions/*.json` to resolve session names.
-    /// Populates `pane.session_name` for panes that have a matching `session_id`.
+    /// Apply the current `session_id → name` map to each pane so the
+    /// sidebar can render `/rename`-assigned labels. The map itself is
+    /// refreshed off-thread by `session_poll_loop` in `main.rs`; this
+    /// function only consumes the cached snapshot.
     fn refresh_session_names(&mut self) {
-        const SESSION_REFRESH_INTERVAL: Duration = Duration::from_secs(10);
-
-        if self.timers.last_session_refresh.elapsed() >= SESSION_REFRESH_INTERVAL {
-            self.session_names = crate::session::scan_session_names();
-            self.timers.last_session_refresh = std::time::Instant::now();
-        }
-
         for group in &mut self.repo_groups {
             for (pane, _) in &mut group.panes {
                 if let Some(sid) = &pane.session_id
@@ -351,5 +346,88 @@ mod tests {
         let filtered = AppState::filter_sessions_to_live_agent_panes(sessions, &live);
 
         assert!(filtered.is_empty());
+    }
+
+    // ─── refresh_session_names ──────────────────────────────────────
+    //
+    // refresh_session_names no longer scans the filesystem itself; it
+    // only consumes the cached `session_names` map populated by the
+    // dedicated polling thread in `main.rs`. These tests pin that
+    // contract: the function must apply the cached snapshot to every
+    // pane and clear stale labels for panes whose session_id is no
+    // longer in the map.
+
+    fn pane_with_session(id: &str, session_id: &str) -> PaneInfo {
+        let mut p = test_pane(id);
+        p.session_id = Some(session_id.to_string());
+        p
+    }
+
+    fn state_with_panes(panes: Vec<PaneInfo>) -> AppState {
+        let mut state = AppState::new("%99".into());
+        state.repo_groups = vec![crate::group::RepoGroup {
+            name: "test".into(),
+            has_focus: true,
+            panes: panes
+                .into_iter()
+                .map(|p| (p, crate::group::PaneGitInfo::default()))
+                .collect(),
+        }];
+        state
+    }
+
+    #[test]
+    fn refresh_session_names_applies_cached_map_to_panes() {
+        let mut state = state_with_panes(vec![
+            pane_with_session("%1", "sess-a"),
+            pane_with_session("%2", "sess-b"),
+        ]);
+        state.session_names.insert("sess-a".into(), "alpha".into());
+        state.session_names.insert("sess-b".into(), "beta".into());
+
+        state.refresh_session_names();
+
+        let names: Vec<&str> = state.repo_groups[0]
+            .panes
+            .iter()
+            .map(|(p, _)| p.session_name.as_str())
+            .collect();
+        assert_eq!(names, vec!["alpha", "beta"]);
+    }
+
+    #[test]
+    fn refresh_session_names_clears_stale_label_when_session_id_missing() {
+        // Pane already has a label from a previous tick, but its
+        // session_id no longer appears in the cached map (e.g. the
+        // session JSON file was deleted). The label must be cleared so
+        // the UI does not show a name for a session that is gone.
+        let mut state = state_with_panes(vec![pane_with_session("%1", "sess-gone")]);
+        state.repo_groups[0].panes[0].0.session_name = "old-label".into();
+        // session_names is empty — no entry for sess-gone.
+
+        state.refresh_session_names();
+
+        assert!(
+            state.repo_groups[0].panes[0].0.session_name.is_empty(),
+            "stale session_name must be cleared when the cache no longer has it"
+        );
+    }
+
+    #[test]
+    fn refresh_session_names_clears_label_for_pane_with_no_session_id() {
+        // Pane has a session_name set but no session_id (e.g. a
+        // non-Claude agent or a pane that has not reported one yet).
+        // The function must not preserve a label that no longer ties
+        // to a known session.
+        let mut state = state_with_panes(vec![test_pane("%1")]);
+        state.repo_groups[0].panes[0].0.session_name = "stray".into();
+        state.session_names.insert("sess-a".into(), "alpha".into());
+
+        state.refresh_session_names();
+
+        assert!(
+            state.repo_groups[0].panes[0].0.session_name.is_empty(),
+            "pane without session_id must end up with an empty session_name"
+        );
     }
 }
