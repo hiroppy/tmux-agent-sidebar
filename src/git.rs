@@ -86,16 +86,16 @@ pub fn fetch_git_data(path: &str) -> GitData {
         loop {
             match child.try_wait() {
                 Ok(Some(status)) => {
-                    if status.success() {
-                        if let Some(stdout) = child.stdout.take() {
-                            use std::io::Read;
-                            let mut buf = String::new();
-                            let mut reader = stdout;
-                            let _ = reader.read_to_string(&mut buf);
-                            let num = buf.trim().to_string();
-                            if !num.is_empty() {
-                                data.pr_number = Some(num);
-                            }
+                    if status.success()
+                        && let Some(stdout) = child.stdout.take()
+                    {
+                        use std::io::Read;
+                        let mut buf = String::new();
+                        let mut reader = stdout;
+                        let _ = reader.read_to_string(&mut buf);
+                        let num = buf.trim().to_string();
+                        if !num.is_empty() {
+                            data.pr_number = Some(num);
                         }
                     }
                     break;

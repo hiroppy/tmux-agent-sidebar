@@ -142,8 +142,8 @@ const COPIED_FEEDBACK_DURATION: std::time::Duration = std::time::Duration::from_
 pub(super) fn has_info(state: &AppState) -> bool {
     debug_forced_display()
         || state.version_notice.is_some()
-        || state.claude_plugin_notice.is_some()
-        || !state.notices_missing_hook_groups.is_empty()
+        || state.notices.claude_plugin_notice.is_some()
+        || !state.notices.missing_hook_groups.is_empty()
 }
 
 /// Span for the notices indicator glyph. Always rendered in the waiting
@@ -210,13 +210,14 @@ const LABEL_MAX_WIDTH: usize = {
 
 pub(super) fn render_notices_popup(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let theme = &state.theme;
-    let groups = state.notices_missing_hook_groups.clone();
+    let groups = state.notices.missing_hook_groups.clone();
     let version_text = notices_popup_version_text(state.version_notice.as_ref());
     let show_version = debug_forced_display() || version_text.is_some();
     let show_hooks = debug_forced_display() || !groups.is_empty();
-    let plugin_subitem = notices_popup_plugin_subitem(state.claude_plugin_notice.as_ref());
+    let plugin_subitem = notices_popup_plugin_subitem(state.notices.claude_plugin_notice.as_ref());
     let copied_agent: Option<String> = state
-        .notices_copied_at
+        .notices
+        .copied_at
         .as_ref()
         .filter(|(_, at)| at.elapsed() < COPIED_FEEDBACK_DURATION)
         .map(|(agent, _)| agent.clone());
@@ -286,7 +287,7 @@ pub(super) fn render_notices_popup(frame: &mut Frame, state: &mut AppState, area
     let popup_height = ((lines_len as u16) + 2).min(height_budget).max(3);
 
     let popup_rect = Rect::new(popup_x, popup_y, popup_width, popup_height);
-    state.notices_popup_area = Some(popup_rect);
+    state.popup.set_notices_area(Some(popup_rect));
 
     frame.render_widget(Clear, popup_rect);
 
@@ -466,7 +467,7 @@ pub(super) fn render_notices_popup(frame: &mut Frame, state: &mut AppState, area
         }
     }
 
-    state.notices_copy_targets = copy_targets;
+    state.notices.copy_targets = copy_targets;
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
@@ -481,7 +482,7 @@ mod tests {
             local_version: local.into(),
             latest_version: latest.into(),
         });
-        state.notices_missing_hook_groups = groups
+        state.notices.missing_hook_groups = groups
             .into_iter()
             .map(|(agent, hooks)| crate::state::NoticesMissingHookGroup {
                 agent: agent.into(),
@@ -493,7 +494,7 @@ mod tests {
 
     fn state_with_plugin_stale(installed: &str, current: &str) -> AppState {
         let mut state = crate::state::AppState::new(String::new());
-        state.claude_plugin_notice = Some(ClaudePluginNotice::Stale {
+        state.notices.claude_plugin_notice = Some(ClaudePluginNotice::Stale {
             installed: installed.into(),
             current: current.into(),
         });
@@ -502,13 +503,13 @@ mod tests {
 
     fn state_with_plugin_install_recommended() -> AppState {
         let mut state = crate::state::AppState::new(String::new());
-        state.claude_plugin_notice = Some(ClaudePluginNotice::InstallRecommended);
+        state.notices.claude_plugin_notice = Some(ClaudePluginNotice::InstallRecommended);
         state
     }
 
     fn state_with_plugin_duplicate_hooks() -> AppState {
         let mut state = crate::state::AppState::new(String::new());
-        state.claude_plugin_notice = Some(ClaudePluginNotice::DuplicateHooks);
+        state.notices.claude_plugin_notice = Some(ClaudePluginNotice::DuplicateHooks);
         state
     }
 
@@ -738,7 +739,7 @@ mod tests {
             local_version: "0.2.6".into(),
             latest_version: "0.2.7".into(),
         });
-        state.notices_missing_hook_groups = vec![
+        state.notices.missing_hook_groups = vec![
             crate::state::NoticesMissingHookGroup {
                 agent: "claude".into(),
                 hooks: vec!["SessionStart".into(), "Stop".into()],
@@ -805,10 +806,10 @@ mod tests {
         // The Plugin section's [prompt] button must register a click
         // target so `notices_copy_target_at` can route the click into
         // `prompt_for_agent("claude")`.
-        assert_eq!(state.notices_copy_targets.len(), 1);
-        assert_eq!(state.notices_copy_targets[0].agent, "claude");
+        assert_eq!(state.notices.copy_targets.len(), 1);
+        assert_eq!(state.notices.copy_targets[0].agent, "claude");
         assert_eq!(
-            state.notices_copy_targets[0].area.width,
+            state.notices.copy_targets[0].area.width,
             LABEL_MAX_WIDTH as u16
         );
     }
@@ -819,7 +820,7 @@ mod tests {
         // button, so no copy target should be registered.
         let mut state = state_with_plugin_stale("0.4.3", "0.5.0");
         let _ = render_notices_popup_text(&mut state, 40, 10);
-        assert!(state.notices_copy_targets.is_empty());
+        assert!(state.notices.copy_targets.is_empty());
     }
 
     #[test]
@@ -841,7 +842,7 @@ mod tests {
         // Plugin install path: the Claude row is suppressed (the plugin
         // owns it) and only Codex shows up in the missing-hooks section.
         let mut state = state_with_plugin_stale("0.4.3", "0.5.0");
-        state.notices_missing_hook_groups = vec![crate::state::NoticesMissingHookGroup {
+        state.notices.missing_hook_groups = vec![crate::state::NoticesMissingHookGroup {
             agent: "codex".into(),
             hooks: vec!["Stop".into()],
         }];
@@ -879,7 +880,7 @@ mod tests {
     #[test]
     fn snapshot_notices_popup_hooks_only() {
         let mut state = crate::state::AppState::new(String::new());
-        state.notices_missing_hook_groups = vec![
+        state.notices.missing_hook_groups = vec![
             crate::state::NoticesMissingHookGroup {
                 agent: "claude".into(),
                 hooks: vec!["SessionStart".into(), "Stop".into()],
@@ -989,7 +990,7 @@ mod tests {
     #[test]
     fn snapshot_notices_popup_shows_copied_label_for_recently_copied_agent() {
         let mut state = state_with(None, vec![("claude", vec!["Stop"])]);
-        state.notices_copied_at = Some(("claude".into(), std::time::Instant::now()));
+        state.notices.copied_at = Some(("claude".into(), std::time::Instant::now()));
         let text = render_notices_popup_text(&mut state, 40, 8);
         insta::assert_snapshot!(text, @"
         ┌──────────────────┐
@@ -1008,7 +1009,7 @@ mod tests {
             None,
             vec![("claude", vec!["Stop"]), ("codex", vec!["Stop"])],
         );
-        state.notices_copied_at = Some(("codex".into(), std::time::Instant::now()));
+        state.notices.copied_at = Some(("codex".into(), std::time::Instant::now()));
         let text = render_notices_popup_text(&mut state, 40, 10);
         insta::assert_snapshot!(text, @"
         ┌──────────────────────┐
@@ -1026,7 +1027,7 @@ mod tests {
     fn snapshot_notices_popup_copied_label_expires_after_feedback_window() {
         let mut state = state_with(None, vec![("claude", vec!["Stop"])]);
         // Past the feedback window → should render `[copy]` again.
-        state.notices_copied_at = Some((
+        state.notices.copied_at = Some((
             "claude".into(),
             std::time::Instant::now()
                 - COPIED_FEEDBACK_DURATION
@@ -1069,34 +1070,34 @@ mod tests {
             vec![("claude", vec!["Stop"]), ("codex", vec!["Stop"])],
         );
         let _ = render_notices_popup_text(&mut state, 40, 10);
-        assert_eq!(state.notices_copy_targets.len(), 1);
-        assert_eq!(state.notices_copy_targets[0].agent, "codex");
+        assert_eq!(state.notices.copy_targets.len(), 1);
+        assert_eq!(state.notices.copy_targets[0].agent, "codex");
         assert_eq!(
-            state.notices_copy_targets[0].area.width,
+            state.notices.copy_targets[0].area.width,
             LABEL_MAX_WIDTH as u16
         );
-        assert_eq!(state.notices_copy_targets[0].area.height, 1);
+        assert_eq!(state.notices.copy_targets[0].area.height, 1);
     }
 
     #[test]
     fn rendering_skips_copy_targets_for_unknown_agents() {
         let mut state = state_with(None, vec![("gemini", vec!["Stop"])]);
         let _ = render_notices_popup_text(&mut state, 40, 8);
-        assert!(state.notices_copy_targets.is_empty());
+        assert!(state.notices.copy_targets.is_empty());
     }
 
     #[test]
     fn rendering_skips_copy_targets_when_popup_too_narrow() {
         let mut state = state_with(None, vec![("codex", vec!["ThisIsAnExtremelyLongHookName"])]);
         let _ = render_notices_popup_text(&mut state, 20, 8);
-        assert!(state.notices_copy_targets.is_empty());
+        assert!(state.notices.copy_targets.is_empty());
     }
 
     #[test]
     fn rendering_copy_target_reserves_label_slot_flush_right() {
         let mut state = state_with(None, vec![("codex", vec!["Stop"])]);
         let _ = render_notices_popup_text(&mut state, 40, 8);
-        let target = &state.notices_copy_targets[0];
+        let target = &state.notices.copy_targets[0];
         // The popup is left-aligned at x=0 with a single-column border.
         // Space-between rendering pins the label's `LABEL_MAX_WIDTH`-wide
         // slot to the right edge of the inner area. The label always

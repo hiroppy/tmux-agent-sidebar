@@ -135,12 +135,12 @@ fn wrap_text_inner(text: &str, max_width: usize, max_lines: usize, word_wrap: bo
             let mut trunc = String::new();
             let mut tw = 0;
             let ellipsis_w = 1; // ... is 1 column wide in most terminals
-            for i in pos..chars.len() {
-                let ch_w = unicode_width::UnicodeWidthChar::width(chars[i]).unwrap_or(0);
+            for &ch in &chars[pos..] {
+                let ch_w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
                 if tw + ch_w + ellipsis_w > max_width {
                     break;
                 }
-                trunc.push(chars[i]);
+                trunc.push(ch);
                 tw += ch_w;
             }
             trunc.push('\u{2026}');
@@ -149,19 +149,18 @@ fn wrap_text_inner(text: &str, max_width: usize, max_lines: usize, word_wrap: bo
         }
 
         // Try to find word boundary (space) for nicer wrapping
-        if word_wrap {
-            if let Some(space_pos) = chunk.rfind(' ') {
-                if space_pos > 0 {
-                    let nice_chunk = chunk[..space_pos].to_string();
-                    let char_count = nice_chunk.chars().count();
-                    result.push(nice_chunk);
-                    pos += char_count;
-                    while pos < chars.len() && chars[pos] == ' ' {
-                        pos += 1;
-                    }
-                    continue;
-                }
+        if word_wrap
+            && let Some(space_pos) = chunk.rfind(' ')
+            && space_pos > 0
+        {
+            let nice_chunk = chunk[..space_pos].to_string();
+            let char_count = nice_chunk.chars().count();
+            result.push(nice_chunk);
+            pos += char_count;
+            while pos < chars.len() && chars[pos] == ' ' {
+                pos += 1;
             }
+            continue;
         }
 
         result.push(chunk);

@@ -152,7 +152,7 @@ fn best_command_for_pane(
         let len = candidate.len();
         let is_leaf = children_of
             .get(&pid)
-            .map_or(true, |children| children.is_empty());
+            .is_none_or(|children| children.is_empty());
         if is_leaf {
             leaf_candidates.push((len, candidate));
         } else {
@@ -211,9 +211,7 @@ pub fn scan_session_process_snapshot(sessions: &[SessionInfo]) -> Option<PanePro
         return None;
     }
 
-    let Some(ps_output) = run_command("ps", &["-eo", "pid=,ppid=,comm=,args="]) else {
-        return None;
-    };
+    let ps_output = run_command("ps", &["-eo", "pid=,ppid=,comm=,args="])?;
     let (children_of, info_by_pid) = parse_ps_processes(&ps_output);
 
     let mut pid_to_panes: HashMap<u32, Vec<String>> = HashMap::new();
@@ -242,10 +240,7 @@ pub fn scan_session_process_snapshot(sessions: &[SessionInfo]) -> Option<PanePro
         }
     }
 
-    let Some(lsof_output) = run_command("lsof", &["-iTCP", "-sTCP:LISTEN", "-nP", "-F", "pn"])
-    else {
-        return None;
-    };
+    let lsof_output = run_command("lsof", &["-iTCP", "-sTCP:LISTEN", "-nP", "-F", "pn"])?;
     let listening = parse_lsof_listening_ports(&lsof_output);
 
     let mut ports_by_pane: HashMap<String, BTreeSet<u16>> = HashMap::new();

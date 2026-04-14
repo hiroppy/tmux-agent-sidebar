@@ -294,7 +294,10 @@ fn repo_popup_renders_repo_names_when_open() {
         make_repo_group("backend", vec![pane.clone()]),
     ];
     state.rebuild_row_targets();
-    state.repo_popup_open = true;
+    state.popup = tmux_agent_sidebar::state::PopupState::Repo {
+        selected: 0,
+        area: None,
+    };
 
     let output = render_to_string(&mut state, 40, 30);
     assert!(output.contains("All"), "popup should list 'All' entry");
@@ -304,8 +307,8 @@ fn repo_popup_renders_repo_names_when_open() {
     );
     assert!(output.contains("backend"), "popup should list backend repo");
     assert!(
-        state.repo_popup_area.is_some(),
-        "render should populate repo_popup_area for hit-testing"
+        state.repo_popup_area().is_some(),
+        "render should populate repo popup area for hit-testing"
     );
 }
 
@@ -328,8 +331,10 @@ fn repo_popup_highlights_selected_entry_with_background() {
     ];
     state.rebuild_row_targets();
     state.sidebar_focused = false; // surface raw colors instead of REVERSED
-    state.repo_popup_open = true;
-    state.repo_popup_selected = 2; // "backend" (0=All, 1=frontend, 2=backend)
+    state.popup = tmux_agent_sidebar::state::PopupState::Repo {
+        selected: 2, // "backend" (0=All, 1=frontend, 2=backend)
+        area: None,
+    };
 
     let styled = render_to_styled_string(&mut state, 40, 30);
     // The highlighted row should carry the selection background.

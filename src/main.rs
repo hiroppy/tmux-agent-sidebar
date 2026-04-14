@@ -99,21 +99,21 @@ fn run_app(
     state.refresh();
     let mut window_inactive_count: u32 = 0;
 
-    if let Some(ref pane_id) = state.focused_pane_id {
-        if let Some(path) = tmux::get_pane_path(pane_id) {
-            state.apply_git_data(git::fetch_git_data(&path));
-        }
+    if let Some(ref pane_id) = state.focused_pane_id
+        && let Some(path) = tmux::get_pane_path(pane_id)
+    {
+        state.apply_git_data(git::fetch_git_data(&path));
     }
 
     // Resolve the installed Claude Code plugin version once at startup,
     // matching the version_notice pattern. Restart the sidebar after a
     // /plugin install or /plugin uninstall to pick up the new state.
-    state.claude_plugin_installed_version =
+    state.notices.claude_plugin_installed_version =
         tmux_agent_sidebar::cli::plugin_state::installed_plugin_version();
     // Likewise resolve whether the user still has legacy
     // tmux-agent-sidebar/hook.sh entries in ~/.claude/settings.json so
     // the notices popup can warn about duplicate hook execution.
-    state.claude_settings_has_residual_hooks =
+    state.notices.claude_settings_has_residual_hooks =
         tmux_agent_sidebar::cli::plugin_state::claude_settings_has_residual_hooks();
     // Notice inputs are static after the two lines above, so compute
     // them once here instead of from the per-tick refresh loop. This
@@ -164,21 +164,24 @@ fn run_app(
             loop {
                 let ev = event::read()?;
                 match ev {
-                    Event::Key(key) if state.notices_popup_open => match key.code {
-                        KeyCode::Esc => state.close_notices_popup(),
-                        _ => {}
-                    },
-                    Event::Key(key) if state.repo_popup_open => match key.code {
+                    Event::Key(key) if state.is_notices_popup_open() => {
+                        if key.code == KeyCode::Esc {
+                            state.close_notices_popup();
+                        }
+                    }
+                    Event::Key(key) if state.is_repo_popup_open() => match key.code {
                         KeyCode::Esc => state.close_repo_popup(),
                         KeyCode::Char('j') | KeyCode::Down => {
                             let count = state.repo_names().len();
-                            if state.repo_popup_selected + 1 < count {
-                                state.repo_popup_selected += 1;
+                            let current = state.repo_popup_selected();
+                            if current + 1 < count {
+                                state.set_repo_popup_selected(current + 1);
                             }
                         }
                         KeyCode::Char('k') | KeyCode::Up => {
-                            if state.repo_popup_selected > 0 {
-                                state.repo_popup_selected -= 1;
+                            let current = state.repo_popup_selected();
+                            if current > 0 {
+                                state.set_repo_popup_selected(current - 1);
                             }
                         }
                         KeyCode::Enter => state.confirm_repo_popup(),

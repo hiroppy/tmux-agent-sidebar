@@ -1,6 +1,6 @@
 # Event Adapter Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status: Completed.** All 6 tasks shipped in `src/event.rs`, `src/adapter/{mod,claude,codex}.rs`, and `src/cli/hook.rs`. The `- [ ]` checkboxes below are kept as a historical record of the original plan steps. See the **Post-Plan Extensions** section below for what grew beyond the original design.
 
 **Goal:** Decouple hook event handling from agent-specific event names/JSON schemas by introducing an internal `AgentEvent` enum and per-agent adapter modules.
 
@@ -924,3 +924,34 @@ After all tasks:
 3. `cargo fmt --check` — clean
 4. Manual check: `grep -r '"claude"\|"codex"' src/cli/hook.rs` returns no matches (handler is agent-agnostic)
 5. Manual check: `grep -r 'json_str' src/cli/hook.rs` returns no matches in non-test code (handler doesn't read raw JSON)
+
+---
+
+## Post-Plan Extensions
+
+The shipped implementation grew beyond the 9 variants in this plan. These were added incrementally after the initial refactor landed and are documented here so the historical plan does not imply a narrower contract than what actually exists.
+
+### Additional `AgentEvent` variants (source of truth: `src/event.rs`)
+
+- `PermissionDenied { agent, cwd, permission_mode, worktree, agent_id, session_id }` — Claude-only.
+- `CwdChanged { cwd, worktree, agent_id, session_id }` — fires when the agent reports a `chdir`.
+- `TaskCreated { task_id, task_subject }` / `TaskCompleted { task_id, task_subject }` — task lifecycle surfaced in the bottom panel.
+- `TeammateIdle { teammate_name, team_name }` — team coordination signal.
+- `WorktreeCreate` (unit) / `WorktreeRemove { worktree_path }` — worktree lifecycle.
+
+### Additional fields on existing variants
+
+- `SessionStart`, `UserPromptSubmit`, `Notification`, `Stop`, `StopFailure`, `PermissionDenied`, `CwdChanged` all carry `worktree: Option<WorktreeInfo>`, `agent_id: Option<String>`, `session_id: Option<String>`.
+- `Notification` also carries `meta_only: bool` so events like `idle_prompt` can refresh metadata without flipping the visible status.
+- `SubagentStart { agent_type, agent_id }` — agent_id added.
+- `SubagentStop { agent_type, agent_id, last_message, transcript_path }` — three new fields so the handler can surface the subagent's final message and link back to its transcript.
+- New sibling struct `WorktreeInfo { name, path, branch, original_repo_dir }`.
+
+### `AgentEventKind` + `HOOK_REGISTRATIONS`
+
+A discriminant enum `AgentEventKind` was added alongside `AgentEvent` (16 variants) with `ALL`, `external_name()`, and `from_external_name()`. Each adapter now exposes a `HOOK_REGISTRATIONS: &'static [HookRegistration]` table (`src/adapter/mod.rs`) that binds upstream trigger names + matchers to `AgentEventKind`. A shared `assert_table_drift_free` test guarantees the table and `parse()` match arms stay in sync. This is the single source of truth consumed by the `setup` subcommand (`src/cli/setup.rs`) that prints ready-to-paste hook configs — no hook identity is duplicated anywhere.
+
+### Handler-side
+
+- `handle_event` in `src/cli/hook.rs` writes an additional `@pane_session_id` tmux option via `sync_pane_location`, and resolves cwd through `resolve_cwd()` so worktree panes group under `original_repo_dir` instead of the worktree path.
+- `clear_all_meta` clears `@pane_session_id` alongside the other `@pane_*` keys.

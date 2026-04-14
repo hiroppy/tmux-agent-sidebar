@@ -58,7 +58,7 @@ fn snapshot_secondary_header_without_notices() {
         }],
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
-    state.notices_missing_hook_groups.clear();
+    state.notices.missing_hook_groups.clear();
     state.rebuild_row_targets();
 
     let output = render_to_string(&mut state, 28, 25);

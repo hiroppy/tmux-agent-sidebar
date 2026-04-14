@@ -78,7 +78,7 @@ fn set_attention(pane: &str, state: &str) {
 }
 
 fn sanitize_tmux_value(s: &str) -> String {
-    s.replace('\n', " ").replace('|', " ")
+    s.replace(['\n', '|'], " ")
 }
 
 // ─── set-status subcommand ──────────────────────────────────────────────────

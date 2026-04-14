@@ -107,14 +107,14 @@ fn render_git_header(state: &AppState, inner_w: usize) -> (Vec<Line<'static>>, O
             left_spans.push(Span::raw(" "));
 
             // Build PR URL from remote_url
-            if !state.git.remote_url.is_empty() {
-                if let Some(num) = &state.git.pr_number {
-                    pr_link_info = Some(PrLinkInfo {
-                        x_offset: pr_x_offset,
-                        text: pr.clone(),
-                        url: format!("{}/pull/{num}", state.git.remote_url),
-                    });
-                }
+            if !state.git.remote_url.is_empty()
+                && let Some(num) = &state.git.pr_number
+            {
+                pr_link_info = Some(PrLinkInfo {
+                    x_offset: pr_x_offset,
+                    text: pr.clone(),
+                    url: format!("{}/pull/{num}", state.git.remote_url),
+                });
             }
         } else if !movement_spans.is_empty() {
             let gap = pad_to(branch_w + right_w, inner_w);
@@ -171,7 +171,7 @@ fn render_git_header(state: &AppState, inner_w: usize) -> (Vec<Line<'static>>, O
     let sep = "─".repeat(inner_w);
     lines.push(Line::from(Span::styled(
         sep,
-        Style::default().fg(theme.text_muted),
+        Style::default().fg(theme.border_inactive),
     )));
 
     (lines, pr_link_info)

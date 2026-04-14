@@ -87,7 +87,7 @@ fn render_secondary_header<'a>(
     let repo_icon = "▾";
 
     let repo_has_filter = !matches!(state.global.repo_filter, RepoFilter::All);
-    let repo_style = if state.repo_popup_open || repo_has_filter {
+    let repo_style = if state.is_repo_popup_open() || repo_has_filter {
         Style::default().fg(theme.text_active)
     } else {
         Style::default().fg(theme.text_muted)
@@ -138,7 +138,7 @@ fn render_repo_popup(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let popup_y = area.y + 2;
 
     let popup_rect = Rect::new(popup_x, popup_y, popup_width, popup_height);
-    state.repo_popup_area = Some(popup_rect);
+    state.popup.set_repo_area(Some(popup_rect));
 
     frame.render_widget(Clear, popup_rect);
 
@@ -154,7 +154,7 @@ fn render_repo_popup(frame: &mut Frame, state: &mut AppState, area: Rect) {
             break;
         }
 
-        let is_highlighted = i == state.repo_popup_selected;
+        let is_highlighted = i == state.repo_popup_selected();
         let is_current = match &state.global.repo_filter {
             RepoFilter::All => i == 0,
             RepoFilter::Repo(n) => *n == *name,
@@ -208,7 +208,7 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
     };
     let (secondary_line, notices_btn_col, repo_btn_col) =
         render_secondary_header(state, area.width);
-    state.notices_button_col = notices_btn_col;
+    state.notices.button_col = notices_btn_col;
     state.repo_button_col = repo_btn_col;
     frame.render_widget(Paragraph::new(vec![secondary_line]), secondary_area);
 
@@ -248,9 +248,10 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
         }
         first_group = false;
 
-        let group_has_focused_pane = state.focused_pane_id.as_ref().map_or(false, |fid| {
-            group.panes.iter().any(|(p, _)| p.pane_id == *fid)
-        });
+        let group_has_focused_pane = state
+            .focused_pane_id
+            .as_ref()
+            .is_some_and(|fid| group.panes.iter().any(|(p, _)| p.pane_id == *fid));
 
         // Plain repo header at column 0 (no frame).
         let title = &group.name;
@@ -270,10 +271,7 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 && state.focus == Focus::Panes
                 && row_index == state.global.selected_pane_row;
 
-            let is_active = state
-                .focused_pane_id
-                .as_ref()
-                .map_or(false, |id| id == &pane.pane_id);
+            let is_active = state.focused_pane_id.as_ref() == Some(&pane.pane_id);
 
             let pane_state = state.pane_state(&pane.pane_id);
             let ports = pane_state.map(|s| s.ports.as_slice());
@@ -332,9 +330,9 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
     frame.render_widget(paragraph, list_area);
 
     // Render popup overlay on top if open
-    if state.notices_popup_open {
+    if state.is_notices_popup_open() {
         super::notices::render_notices_popup(frame, state, area);
-    } else if state.repo_popup_open {
+    } else if state.is_repo_popup_open() {
         render_repo_popup(frame, state, area);
     }
 }
@@ -378,7 +376,7 @@ mod tests {
             local_version: "0.2.6".into(),
             latest_version: "0.2.7".into(),
         });
-        with_info.notices_missing_hook_groups = vec![crate::state::NoticesMissingHookGroup {
+        with_info.notices.missing_hook_groups = vec![crate::state::NoticesMissingHookGroup {
             agent: "claude".into(),
             hooks: vec!["SessionStart".into()],
         }];
@@ -413,7 +411,7 @@ mod tests {
     #[test]
     fn snapshot_secondary_header_with_hooks_only() {
         let mut state = AppState::new(String::new());
-        state.notices_missing_hook_groups = vec![crate::state::NoticesMissingHookGroup {
+        state.notices.missing_hook_groups = vec![crate::state::NoticesMissingHookGroup {
             agent: "claude".into(),
             hooks: vec!["SessionStart".into()],
         }];
@@ -428,7 +426,7 @@ mod tests {
             local_version: "0.2.6".into(),
             latest_version: "0.2.7".into(),
         });
-        state.notices_missing_hook_groups = vec![crate::state::NoticesMissingHookGroup {
+        state.notices.missing_hook_groups = vec![crate::state::NoticesMissingHookGroup {
             agent: "claude".into(),
             hooks: vec!["SessionStart".into()],
         }];
@@ -570,7 +568,7 @@ mod tests {
         // spacing, glyph, or column alignment that a `starts_with` /
         // `contains` probe would silently miss.
         let mut state = make_state_with_groups(vec![]);
-        state.notices_missing_hook_groups = vec![crate::state::NoticesMissingHookGroup {
+        state.notices.missing_hook_groups = vec![crate::state::NoticesMissingHookGroup {
             agent: "claude".into(),
             hooks: vec!["SessionStart".into(), "Stop".into()],
         }];
@@ -641,7 +639,10 @@ mod tests {
     #[test]
     fn render_secondary_header_popup_open_styling() {
         let mut state = make_state_with_groups(vec![]);
-        state.repo_popup_open = true;
+        state.popup = crate::state::PopupState::Repo {
+            selected: 0,
+            area: None,
+        };
         let (line, _, _) = render_secondary_header(&state, 28);
         let last_span = line.spans.last().unwrap();
         assert!(

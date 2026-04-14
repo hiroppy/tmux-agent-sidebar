@@ -14,6 +14,15 @@ pub(crate) enum TaskProgressDecision {
     Skip,
 }
 
+/// A per-pane task-progress update computed in the first pass of
+/// `refresh_task_progress`, applied back to `pane_states` in the second pass.
+struct PaneTaskUpdate {
+    pane_id: String,
+    progress: Option<TaskProgress>,
+    dismissed_total: Option<usize>,
+    inactive_since: Option<u64>,
+}
+
 pub(crate) fn classify_task_progress(
     progress: &TaskProgress,
     dismissed_total: Option<usize>,
@@ -201,8 +210,7 @@ impl AppState {
 
     pub(crate) fn refresh_task_progress(&mut self) {
         let mut active_pane_ids: HashSet<String> = HashSet::new();
-        let mut updates: Vec<(String, Option<TaskProgress>, Option<usize>, Option<u64>)> =
-            Vec::new();
+        let mut updates: Vec<PaneTaskUpdate> = Vec::new();
         for group in &self.repo_groups {
             for (pane, _) in &group.panes {
                 active_pane_ids.insert(pane.pane_id.clone());
@@ -232,9 +240,8 @@ impl AppState {
                 } else {
                     None
                 };
-                let grace_expired = next_inactive_since.map_or(false, |since| {
-                    self.now.saturating_sub(since) >= INACTIVE_GRACE_SECS
-                });
+                let grace_expired = next_inactive_since
+                    .is_some_and(|since| self.now.saturating_sub(since) >= INACTIVE_GRACE_SECS);
 
                 let decision = if grace_expired && !progress.is_empty() && !progress.all_completed()
                 {
@@ -255,19 +262,19 @@ impl AppState {
                     TaskProgressDecision::Dismiss { total } => Some(total),
                     TaskProgressDecision::Skip => prior_state.task_dismissed_total,
                 };
-                updates.push((
-                    pane.pane_id.clone(),
-                    next_progress,
-                    next_dismissed_total,
-                    next_inactive_since,
-                ));
+                updates.push(PaneTaskUpdate {
+                    pane_id: pane.pane_id.clone(),
+                    progress: next_progress,
+                    dismissed_total: next_dismissed_total,
+                    inactive_since: next_inactive_since,
+                });
             }
         }
-        for (pane_id, progress, dismissed_total, inactive_since) in updates {
-            let pane_state = self.pane_state_mut(&pane_id);
-            pane_state.inactive_since = inactive_since;
-            pane_state.task_dismissed_total = dismissed_total;
-            pane_state.task_progress = progress;
+        for update in updates {
+            let pane_state = self.pane_state_mut(&update.pane_id);
+            pane_state.inactive_since = update.inactive_since;
+            pane_state.task_dismissed_total = update.dismissed_total;
+            pane_state.task_progress = update.progress;
         }
         self.pane_states
             .retain(|id, _| active_pane_ids.contains(id));

@@ -234,7 +234,7 @@ fn test_secondary_header_click_on_i_opens_notices_popup_even_without_missing_hoo
 
     state.handle_mouse_click(1, 0);
     assert!(
-        state.notices_popup_open,
+        state.is_notices_popup_open(),
         "i should stay clickable even when there are no missing hooks"
     );
 }

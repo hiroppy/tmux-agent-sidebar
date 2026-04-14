@@ -1,14 +1,14 @@
-# Doctor CLI Subcommand Implementation Plan
+# Setup CLI Subcommand Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status: Completed.** Shipped under the name `setup` rather than `doctor`: module is `src/cli/setup.rs`, command is `tmux-agent-sidebar setup`, functions are `cmd_setup` / `build_setup_output` / `run_setup`. Every step below was executed — the `- [ ]` checkboxes are kept as historical record. Post-ship additions beyond this plan: POSIX shell quoting (`shell_quote` / `format_hook_command` in `setup.rs`) so install paths with spaces or metacharacters are safe, and a richer `ResolvedHookScript` return type from `resolve_hook_script`.
 
-**Goal:** Add a `doctor` CLI subcommand that prints the hooks Claude Code and Codex must register (and ready-to-paste config snippets) as JSON, derived entirely from the existing `HOOK_REGISTRATIONS` tables.
+**Goal:** Add a `setup` CLI subcommand that prints the hooks Claude Code and Codex must register (and ready-to-paste config snippets) as JSON, derived entirely from the existing `HOOK_REGISTRATIONS` tables.
 
-**Architecture:** One new file `src/cli/doctor.rs` with three pure functions (`build_agent_snippet`, `build_doctor_output`, `resolve_hook_script`) plus a thin `cmd_doctor` CLI shell. Dispatch is wired into `src/cli/mod.rs`. The pure functions read only `ClaudeAdapter::HOOK_REGISTRATIONS` / `CodexAdapter::HOOK_REGISTRATIONS` and `AgentEventKind::external_name()` — no hook knowledge is duplicated. All tests run on the pure core with a fixed fake hook path.
+**Architecture:** One new file `src/cli/setup.rs` with three pure functions (`build_agent_snippet`, `build_setup_output`, `resolve_hook_script`) plus a thin `cmd_setup` CLI shell. Dispatch is wired into `src/cli/mod.rs`. The pure functions read only `ClaudeAdapter::HOOK_REGISTRATIONS` / `CodexAdapter::HOOK_REGISTRATIONS` and `AgentEventKind::external_name()` — no hook knowledge is duplicated. All tests run on the pure core with a fixed fake hook path.
 
 **Tech Stack:** Rust 2024, `serde_json`, no new dependencies. Uses the existing `adapter::HookRegistration` struct and `event::AgentEventKind`.
 
-**Spec:** `docs/specs/2026-04-11-doctor-command-design.md`
+**Spec:** _(never written; this plan was the sole design document)_
 
 ---
 
@@ -16,8 +16,8 @@
 
 | File | Role |
 |---|---|
-| `src/cli/doctor.rs` | **Create.** Owns `cmd_doctor`, `build_doctor_output`, `build_agent_snippet`, `resolve_hook_script`, and all unit tests. |
-| `src/cli/mod.rs` | **Modify.** Add `mod doctor;` and the `"doctor"` match arm in `run()`. |
+| `src/cli/setup.rs` | **Create.** Owns `cmd_setup`, `build_setup_output`, `build_agent_snippet`, `resolve_hook_script`, and all unit tests. |
+| `src/cli/mod.rs` | **Modify.** Add `mod setup;` and the `"setup"` match arm in `run()`. |
 | `src/adapter/mod.rs` | **Read-only.** Source of `HookRegistration` type. Not edited. |
 | `src/adapter/claude.rs` | **Read-only.** `ClaudeAdapter::HOOK_REGISTRATIONS` consumed. Not edited. |
 | `src/adapter/codex.rs` | **Read-only.** `CodexAdapter::HOOK_REGISTRATIONS` consumed. Not edited. |
@@ -27,32 +27,32 @@ Nothing else is touched. README updates are out of scope for this plan.
 
 ---
 
-## Task 1: Stub `doctor` module and wire CLI dispatch
+## Task 1: Stub `setup` module and wire CLI dispatch
 
 Gets the new module compiling and callable before adding any real logic, so later tasks can focus on behavior.
 
 **Files:**
-- Create: `src/cli/doctor.rs`
+- Create: `src/cli/setup.rs`
 - Modify: `src/cli/mod.rs` (top of file, and inside `run()`)
 
 - [ ] **Step 1: Create stub module file**
 
-Create `src/cli/doctor.rs` with this exact content:
+Create `src/cli/setup.rs` with this exact content:
 
 ```rust
-//! `doctor` subcommand — prints required hooks and ready-to-paste config
+//! `setup` subcommand — prints required hooks and ready-to-paste config
 //! snippets for Claude Code and Codex as JSON on stdout. Pure generator:
 //! reads only the adapter `HOOK_REGISTRATIONS` tables, never the user's
 //! config files.
 
-pub(crate) fn cmd_doctor(_args: &[String]) -> i32 {
+pub(crate) fn cmd_setup(_args: &[String]) -> i32 {
     0
 }
 ```
 
 - [ ] **Step 2: Wire dispatch in `src/cli/mod.rs`**
 
-At the top of `src/cli/mod.rs`, add `mod doctor;` alongside the other module declarations. The existing block is:
+At the top of `src/cli/mod.rs`, add `mod setup;` alongside the other module declarations. The existing block is:
 
 ```rust
 mod hook;
@@ -63,13 +63,13 @@ mod toggle;
 Change it to:
 
 ```rust
-mod doctor;
+mod setup;
 mod hook;
 mod label;
 mod toggle;
 ```
 
-Then in the `run()` function, add the `"doctor"` arm to the match. The existing match contains:
+Then in the `run()` function, add the `"setup"` arm to the match. The existing match contains:
 
 ```rust
     let code = match cmd {
@@ -90,7 +90,7 @@ Change it to:
 
 ```rust
     let code = match cmd {
-        "doctor" => doctor::cmd_doctor(rest),
+        "setup" => setup::cmd_setup(rest),
         "hook" => hook::cmd_hook(rest),
         "toggle" => toggle::cmd_toggle(rest),
         "toggle-all" => toggle::cmd_toggle_all(rest),
@@ -112,25 +112,25 @@ Expected: successful build, no warnings about the stub (`_args` silences the unu
 - [ ] **Step 4: Commit**
 
 ```bash
-git add src/cli/doctor.rs src/cli/mod.rs
-git commit -m "feat(cli): scaffold doctor subcommand"
+git add src/cli/setup.rs src/cli/mod.rs
+git commit -m "feat(cli): scaffold setup subcommand"
 ```
 
 ---
 
-## Task 2: Expose `HookRegistration` so `doctor` can read it
+## Task 2: Expose `HookRegistration` so `setup` can read it
 
-The `HookRegistration` struct is currently `pub` but its containing module is `pub mod adapter` with the struct reachable as `crate::adapter::HookRegistration`. This task verifies reachability from `src/cli/doctor.rs` with a compile-only test — no runtime behavior yet.
+The `HookRegistration` struct is currently `pub` but its containing module is `pub mod adapter` with the struct reachable as `crate::adapter::HookRegistration`. This task verifies reachability from `src/cli/setup.rs` with a compile-only test — no runtime behavior yet.
 
 **Files:**
-- Modify: `src/cli/doctor.rs`
+- Modify: `src/cli/setup.rs`
 
 - [ ] **Step 1: Add a compile-only import**
 
-Replace the content of `src/cli/doctor.rs` with:
+Replace the content of `src/cli/setup.rs` with:
 
 ```rust
-//! `doctor` subcommand — prints required hooks and ready-to-paste config
+//! `setup` subcommand — prints required hooks and ready-to-paste config
 //! snippets for Claude Code and Codex as JSON on stdout. Pure generator:
 //! reads only the adapter `HOOK_REGISTRATIONS` tables, never the user's
 //! config files.
@@ -144,7 +144,7 @@ const _CLAUDE_TABLE_REACHABLE: &[HookRegistration] = ClaudeAdapter::HOOK_REGISTR
 #[allow(dead_code)]
 const _CODEX_TABLE_REACHABLE: &[HookRegistration] = CodexAdapter::HOOK_REGISTRATIONS;
 
-pub(crate) fn cmd_doctor(_args: &[String]) -> i32 {
+pub(crate) fn cmd_setup(_args: &[String]) -> i32 {
     0
 }
 ```
@@ -157,7 +157,7 @@ Expected: successful build. If it fails with a privacy error, `HookRegistration`
 - [ ] **Step 3: Commit**
 
 ```bash
-git add -u src/cli/doctor.rs
+git add -u src/cli/setup.rs
 git commit -m "chore(cli): pin doctor to adapter registration tables"
 ```
 
@@ -168,11 +168,11 @@ git commit -m "chore(cli): pin doctor to adapter registration tables"
 Builds the ready-to-paste `{ "hooks": { ... } }` JSON block for a single agent. This is the core of single-agent mode and is reused by full mode, so it must be correct before anything else.
 
 **Files:**
-- Modify: `src/cli/doctor.rs`
+- Modify: `src/cli/setup.rs`
 
 - [ ] **Step 1: Write the failing tests**
 
-Append a test module to `src/cli/doctor.rs`. Add this after the existing code:
+Append a test module to `src/cli/setup.rs`. Add this after the existing code:
 
 ```rust
 #[cfg(test)]
@@ -283,12 +283,12 @@ mod tests {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cargo test --lib cli::doctor::tests`
+Run: `cargo test --lib cli::setup::tests`
 Expected: all tests fail with `build_agent_snippet` not defined / not found.
 
 - [ ] **Step 3: Implement `build_agent_snippet`**
 
-Insert this function into `src/cli/doctor.rs` just above the `cmd_doctor` function (below the `_*_REACHABLE` consts):
+Insert this function into `src/cli/setup.rs` just above the `cmd_setup` function (below the `_*_REACHABLE` consts):
 
 ```rust
 /// Build the ready-to-paste `{ "hooks": { ... } }` JSON block for a single
@@ -338,29 +338,29 @@ pub(crate) fn build_agent_snippet(
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cargo test --lib cli::doctor::tests`
+Run: `cargo test --lib cli::setup::tests`
 Expected: all 7 tests pass.
 
 - [ ] **Step 5: Run the whole suite to catch drift**
 
 Run: `cargo test`
-Expected: every test including `assert_table_drift_free` passes. This confirms `doctor` is not reaching into adapter internals it shouldn't.
+Expected: every test including `assert_table_drift_free` passes. This confirms `setup` is not reaching into adapter internals it shouldn't.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add -u src/cli/doctor.rs
-git commit -m "feat(cli): add build_agent_snippet for doctor command"
+git add -u src/cli/setup.rs
+git commit -m "feat(cli): add build_agent_snippet for setup command"
 ```
 
 ---
 
-## Task 4: Implement `build_doctor_output` (pure, TDD)
+## Task 4: Implement `build_setup_output` (pure, TDD)
 
 Wraps both agents' snippets plus normalized metadata into the full-mode output. Reuses `build_agent_snippet` so single- and full-mode views cannot drift.
 
 **Files:**
-- Modify: `src/cli/doctor.rs`
+- Modify: `src/cli/setup.rs`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -369,7 +369,7 @@ Append these tests inside the existing `mod tests` block (after the Codex matche
 ```rust
     #[test]
     fn full_output_has_expected_top_level_keys() {
-        let v = build_doctor_output(FAKE_HOOK);
+        let v = build_setup_output(FAKE_HOOK);
         assert_eq!(
             v.get("version").and_then(Value::as_str),
             Some(crate::VERSION)
@@ -387,7 +387,7 @@ Append these tests inside the existing `mod tests` block (after the Codex matche
     #[test]
     fn full_output_snippet_matches_single_agent_snippet() {
         // The two views of the same data MUST be byte-identical.
-        let full = build_doctor_output(FAKE_HOOK);
+        let full = build_setup_output(FAKE_HOOK);
         for agent in ["claude", "codex"] {
             let from_full = full
                 .pointer(&format!("/agents/{}/snippet", agent))
@@ -399,7 +399,7 @@ Append these tests inside the existing `mod tests` block (after the Codex matche
 
     #[test]
     fn full_output_normalized_hooks_count_matches_table() {
-        let full = build_doctor_output(FAKE_HOOK);
+        let full = build_setup_output(FAKE_HOOK);
         for (agent, table_len) in [
             ("claude", ClaudeAdapter::HOOK_REGISTRATIONS.len()),
             ("codex", CodexAdapter::HOOK_REGISTRATIONS.len()),
@@ -419,7 +419,7 @@ Append these tests inside the existing `mod tests` block (after the Codex matche
 
     #[test]
     fn full_output_normalized_entry_shape() {
-        let full = build_doctor_output(FAKE_HOOK);
+        let full = build_setup_output(FAKE_HOOK);
         // Spot-check a Claude entry.
         let first = full.pointer("/agents/claude/hooks/0").unwrap();
         assert_eq!(first.get("trigger"), Some(&json!("SessionStart")));
@@ -438,7 +438,7 @@ Append these tests inside the existing `mod tests` block (after the Codex matche
 
     #[test]
     fn full_output_config_paths() {
-        let full = build_doctor_output(FAKE_HOOK);
+        let full = build_setup_output(FAKE_HOOK);
         assert_eq!(
             full.pointer("/agents/claude/config_path")
                 .and_then(Value::as_str),
@@ -456,7 +456,7 @@ Append these tests inside the existing `mod tests` block (after the Codex matche
         // For every registration, the normalized `command` and the snippet's
         // inner `command` must be byte-identical. Prevents the two views
         // from drifting.
-        let full = build_doctor_output(FAKE_HOOK);
+        let full = build_setup_output(FAKE_HOOK);
         for agent in ["claude", "codex"] {
             let hooks = full
                 .pointer(&format!("/agents/{}/hooks", agent))
@@ -488,21 +488,21 @@ Append these tests inside the existing `mod tests` block (after the Codex matche
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cargo test --lib cli::doctor::tests`
-Expected: the new tests fail with `build_doctor_output` not defined.
+Run: `cargo test --lib cli::setup::tests`
+Expected: the new tests fail with `build_setup_output` not defined.
 
-- [ ] **Step 3: Implement `build_doctor_output`**
+- [ ] **Step 3: Implement `build_setup_output`**
 
-Insert this function into `src/cli/doctor.rs` just below `build_agent_snippet`:
+Insert this function into `src/cli/setup.rs` just below `build_agent_snippet`:
 
 ```rust
-/// Build the full doctor output: version, resolved hook script path,
+/// Build the full setup output: version, resolved hook script path,
 /// and a per-agent object containing `config_path`, the normalized
 /// `hooks[]` array, and the ready-to-paste `snippet`.
 ///
 /// This is a pure function. `hook_script` is passed in so tests can pin it
 /// to a fixed string.
-pub(crate) fn build_doctor_output(hook_script: &str) -> serde_json::Value {
+pub(crate) fn build_setup_output(hook_script: &str) -> serde_json::Value {
     let claude = build_agent_entry(
         "claude",
         "~/.claude/settings.json",
@@ -566,7 +566,7 @@ fn build_agent_entry(
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cargo test --lib cli::doctor::tests`
+Run: `cargo test --lib cli::setup::tests`
 Expected: all 13 tests in the module pass (7 from Task 3 + 6 new).
 
 - [ ] **Step 5: Run the whole suite**
@@ -577,8 +577,8 @@ Expected: full green.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add -u src/cli/doctor.rs
-git commit -m "feat(cli): add build_doctor_output for doctor full mode"
+git add -u src/cli/setup.rs
+git commit -m "feat(cli): add build_setup_output for doctor full mode"
 ```
 
 ---
@@ -588,11 +588,11 @@ git commit -m "feat(cli): add build_doctor_output for doctor full mode"
 Resolves the absolute path of `hook.sh` from the running binary location, with a README-matching fallback. Not unit-tested (depends on `current_exe()` and the filesystem), but kept small and obvious.
 
 **Files:**
-- Modify: `src/cli/doctor.rs`
+- Modify: `src/cli/setup.rs`
 
 - [ ] **Step 1: Add the helper**
 
-Insert this function into `src/cli/doctor.rs` above `cmd_doctor`:
+Insert this function into `src/cli/setup.rs` above `cmd_setup`:
 
 ```rust
 /// Resolve the absolute path of `hook.sh` to embed in the generated
@@ -639,38 +639,38 @@ Expected: successful build. The function is unused so far — expect a dead-code
 - [ ] **Step 3: Commit**
 
 ```bash
-git add -u src/cli/doctor.rs
+git add -u src/cli/setup.rs
 git commit -m "feat(cli): add hook.sh path resolver for doctor"
 ```
 
 ---
 
-## Task 6: Wire `cmd_doctor` dispatch and argument parsing
+## Task 6: Wire `cmd_setup` dispatch and argument parsing
 
-Turn the stub `cmd_doctor` into the real CLI shell: resolve the hook path, dispatch on argument count, print pretty JSON, handle errors.
+Turn the stub `cmd_setup` into the real CLI shell: resolve the hook path, dispatch on argument count, print pretty JSON, handle errors.
 
 **Files:**
-- Modify: `src/cli/doctor.rs`
+- Modify: `src/cli/setup.rs`
 
 - [ ] **Step 1: Write the failing dispatch tests**
 
 Append to the `mod tests` block:
 
 ```rust
-    // Helper: invoke cmd_doctor with captured stdout is not straightforward
+    // Helper: invoke cmd_setup with captured stdout is not straightforward
     // without a harness, so these tests exercise the pure dispatch core
-    // (`run_doctor`) that cmd_doctor will delegate to.
+    // (`run_setup`) that cmd_setup will delegate to.
 
     #[test]
-    fn run_doctor_no_args_returns_full_output() {
-        let (code, json) = run_doctor(&[], FAKE_HOOK);
+    fn run_setup_no_args_returns_full_output() {
+        let (code, json) = run_setup(&[], FAKE_HOOK);
         assert_eq!(code, 0);
         assert!(json.unwrap().get("agents").is_some());
     }
 
     #[test]
-    fn run_doctor_claude_returns_only_snippet() {
-        let (code, json) = run_doctor(&["claude".to_string()], FAKE_HOOK);
+    fn run_setup_claude_returns_only_snippet() {
+        let (code, json) = run_setup(&["claude".to_string()], FAKE_HOOK);
         assert_eq!(code, 0);
         let v = json.unwrap();
         // Snippet shape only: top-level must be exactly { "hooks": {...} }.
@@ -681,8 +681,8 @@ Append to the `mod tests` block:
     }
 
     #[test]
-    fn run_doctor_codex_returns_only_snippet() {
-        let (code, json) = run_doctor(&["codex".to_string()], FAKE_HOOK);
+    fn run_setup_codex_returns_only_snippet() {
+        let (code, json) = run_setup(&["codex".to_string()], FAKE_HOOK);
         assert_eq!(code, 0);
         let v = json.unwrap();
         assert!(v.get("hooks").is_some());
@@ -690,15 +690,15 @@ Append to the `mod tests` block:
     }
 
     #[test]
-    fn run_doctor_unknown_agent_returns_err_exit_2() {
-        let (code, json) = run_doctor(&["gemini".to_string()], FAKE_HOOK);
+    fn run_setup_unknown_agent_returns_err_exit_2() {
+        let (code, json) = run_setup(&["gemini".to_string()], FAKE_HOOK);
         assert_eq!(code, 2);
         assert!(json.is_none());
     }
 
     #[test]
-    fn run_doctor_too_many_args_returns_err_exit_2() {
-        let (code, json) = run_doctor(
+    fn run_setup_too_many_args_returns_err_exit_2() {
+        let (code, json) = run_setup(
             &["claude".to_string(), "extra".to_string()],
             FAKE_HOOK,
         );
@@ -709,15 +709,15 @@ Append to the `mod tests` block:
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cargo test --lib cli::doctor::tests`
-Expected: the new tests fail with `run_doctor` not found.
+Run: `cargo test --lib cli::setup::tests`
+Expected: the new tests fail with `run_setup` not found.
 
-- [ ] **Step 3: Implement `run_doctor` and rewrite `cmd_doctor`**
+- [ ] **Step 3: Implement `run_setup` and rewrite `cmd_setup`**
 
 Replace the existing stub:
 
 ```rust
-pub(crate) fn cmd_doctor(_args: &[String]) -> i32 {
+pub(crate) fn cmd_setup(_args: &[String]) -> i32 {
     0
 }
 ```
@@ -725,12 +725,12 @@ pub(crate) fn cmd_doctor(_args: &[String]) -> i32 {
 with:
 
 ```rust
-/// Pure dispatch core for `cmd_doctor`. Returns the exit code and the JSON
+/// Pure dispatch core for `cmd_setup`. Returns the exit code and the JSON
 /// value to print (or `None` if nothing should be printed, e.g. on error).
-/// Splitting this out keeps `cmd_doctor` a pure I/O wrapper.
-fn run_doctor(args: &[String], hook_script: &str) -> (i32, Option<serde_json::Value>) {
+/// Splitting this out keeps `cmd_setup` a pure I/O wrapper.
+fn run_setup(args: &[String], hook_script: &str) -> (i32, Option<serde_json::Value>) {
     match args.len() {
-        0 => (0, Some(build_doctor_output(hook_script))),
+        0 => (0, Some(build_setup_output(hook_script))),
         1 => match build_agent_snippet(&args[0], hook_script) {
             Some(snippet) => (0, Some(snippet)),
             None => {
@@ -742,20 +742,20 @@ fn run_doctor(args: &[String], hook_script: &str) -> (i32, Option<serde_json::Va
             }
         },
         _ => {
-            eprintln!("usage: tmux-agent-sidebar doctor [claude|codex]");
+            eprintln!("usage: tmux-agent-sidebar setup [claude|codex]");
             (2, None)
         }
     }
 }
 
-pub(crate) fn cmd_doctor(args: &[String]) -> i32 {
+pub(crate) fn cmd_setup(args: &[String]) -> i32 {
     let hook_script = resolve_hook_script();
-    let (code, json) = run_doctor(args, &hook_script);
+    let (code, json) = run_setup(args, &hook_script);
     if let Some(v) = json {
         match serde_json::to_string_pretty(&v) {
             Ok(s) => println!("{}", s),
             Err(e) => {
-                eprintln!("error: failed to serialize doctor output: {}", e);
+                eprintln!("error: failed to serialize setup output: {}", e);
                 return 1;
             }
         }
@@ -766,7 +766,7 @@ pub(crate) fn cmd_doctor(args: &[String]) -> i32 {
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cargo test --lib cli::doctor::tests`
+Run: `cargo test --lib cli::setup::tests`
 Expected: all 18 tests pass (13 from earlier + 5 new dispatch tests).
 
 - [ ] **Step 5: Run the full suite**
@@ -777,8 +777,8 @@ Expected: full green.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add -u src/cli/doctor.rs
-git commit -m "feat(cli): wire doctor command dispatch and output"
+git add -u src/cli/setup.rs
+git commit -m "feat(cli): wire setup command dispatch and output"
 ```
 
 ---
@@ -788,7 +788,7 @@ git commit -m "feat(cli): wire doctor command dispatch and output"
 Lock the full JSON shape with a single snapshot. Any accidental schema change — key rename, reordering, etc. — trips this test and forces explicit acknowledgement in the PR.
 
 **Files:**
-- Modify: `src/cli/doctor.rs`
+- Modify: `src/cli/setup.rs`
 
 - [ ] **Step 1: Generate the current snapshot**
 
@@ -798,13 +798,13 @@ Temporarily add this scratch test to `mod tests` to dump the current output:
     #[test]
     #[ignore]
     fn dump_snapshot() {
-        let v = build_doctor_output(FAKE_HOOK);
+        let v = build_setup_output(FAKE_HOOK);
         println!("{}", serde_json::to_string_pretty(&v).unwrap());
         panic!("dump");
     }
 ```
 
-Run: `cargo test --lib cli::doctor::tests::dump_snapshot -- --ignored --nocapture`
+Run: `cargo test --lib cli::setup::tests::dump_snapshot -- --ignored --nocapture`
 Expected: the test panics and prints the full JSON to stdout. Copy the printed JSON exactly.
 
 - [ ] **Step 2: Replace the scratch test with a real snapshot test**
@@ -814,7 +814,7 @@ Remove `dump_snapshot` and add:
 ```rust
     #[test]
     fn full_output_snapshot() {
-        let v = build_doctor_output(FAKE_HOOK);
+        let v = build_setup_output(FAKE_HOOK);
         let actual = serde_json::to_string_pretty(&v).unwrap();
         // Paste the exact dump from Step 1 between the raw string delimiters.
         // When adapter tables legitimately change, regenerate this by running
@@ -822,7 +822,7 @@ Remove `dump_snapshot` and add:
         let expected = r#"<<< PASTE FROM STEP 1 >>>"#;
         assert_eq!(
             actual, expected,
-            "doctor full output changed; regenerate the snapshot via the \
+            "setup full output changed; regenerate the snapshot via the \
              temporary dump_snapshot test and update this literal in the \
              same commit"
         );
@@ -833,7 +833,7 @@ Replace `<<< PASTE FROM STEP 1 >>>` with the literal JSON captured in Step 1. Th
 
 - [ ] **Step 3: Run the test**
 
-Run: `cargo test --lib cli::doctor::tests::full_output_snapshot`
+Run: `cargo test --lib cli::setup::tests::full_output_snapshot`
 Expected: PASS.
 
 - [ ] **Step 4: Run the full suite**
@@ -844,7 +844,7 @@ Expected: full green.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -u src/cli/doctor.rs
+git add -u src/cli/setup.rs
 git commit -m "test(cli): snapshot doctor full output"
 ```
 
@@ -859,7 +859,7 @@ Verify the command works end-to-end outside of tests, including clippy, formatti
 - [ ] **Step 1: Run clippy**
 
 Run: `cargo clippy --all-targets -- -D warnings`
-Expected: no warnings. If clippy flags something, fix it in `src/cli/doctor.rs` and re-run.
+Expected: no warnings. If clippy flags something, fix it in `src/cli/setup.rs` and re-run.
 
 - [ ] **Step 2: Run formatter**
 
@@ -876,23 +876,23 @@ git commit -m "style: cargo fmt doctor module"
 Run:
 ```bash
 cargo build --release
-./target/release/tmux-agent-sidebar doctor | head -20
+./target/release/tmux-agent-sidebar setup | head -20
 ```
 Expected: pretty-printed JSON starting with `{`, containing `"version"`, `"hook_script"`, and `"agents"` keys. The `hook_script` value should either be an absolute path ending in `hook.sh` (if run inside the repo checkout) or the `~/.tmux/plugins/...` fallback.
 
 Then:
 ```bash
-./target/release/tmux-agent-sidebar doctor claude | head -20
+./target/release/tmux-agent-sidebar setup claude | head -20
 ```
 Expected: JSON starting with `{ "hooks": {`. No `version` or `hook_script` keys at top level.
 
 ```bash
-./target/release/tmux-agent-sidebar doctor codex
+./target/release/tmux-agent-sidebar setup codex
 ```
 Expected: same shape as above, Codex hooks, `SessionStart` entry has `"matcher": "startup|resume"`.
 
 ```bash
-./target/release/tmux-agent-sidebar doctor gemini; echo "exit=$?"
+./target/release/tmux-agent-sidebar setup gemini; echo "exit=$?"
 ```
 Expected: stderr shows `error: unknown agent 'gemini' (expected 'claude' or 'codex')`, exit code `2`.
 
@@ -900,9 +900,9 @@ Expected: stderr shows `error: unknown agent 'gemini' (expected 'claude' or 'cod
 
 Run:
 ```bash
-./target/release/tmux-agent-sidebar doctor | python3 -m json.tool >/dev/null && echo ok
-./target/release/tmux-agent-sidebar doctor claude | python3 -m json.tool >/dev/null && echo ok
-./target/release/tmux-agent-sidebar doctor codex | python3 -m json.tool >/dev/null && echo ok
+./target/release/tmux-agent-sidebar setup | python3 -m json.tool >/dev/null && echo ok
+./target/release/tmux-agent-sidebar setup claude | python3 -m json.tool >/dev/null && echo ok
+./target/release/tmux-agent-sidebar setup codex | python3 -m json.tool >/dev/null && echo ok
 ```
 Expected: three `ok` lines. If `python3` is not available, substitute `jq .` or `node -e "JSON.parse(require('fs').readFileSync(0,'utf8'))"`.
 

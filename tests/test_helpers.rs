@@ -141,7 +141,7 @@ pub fn make_state(sessions: Vec<SessionInfo>) -> AppState {
     state.sessions = sessions;
     state.sidebar_focused = true;
     state.focused_pane_id = Some("%1".into());
-    state.notices_missing_hook_groups = vec![tmux_agent_sidebar::state::NoticesMissingHookGroup {
+    state.notices.missing_hook_groups = vec![tmux_agent_sidebar::state::NoticesMissingHookGroup {
         agent: "claude".into(),
         hooks: vec!["Stop".into()],
     }];

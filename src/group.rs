@@ -89,13 +89,21 @@ pub fn group_panes_by_repo(sessions: &[crate::tmux::SessionInfo]) -> Vec<RepoGro
     for session in sessions {
         for window in &session.windows {
             for pane in &window.panes {
-                let mut git_info = git_cache
-                    .entry(pane.path.clone())
-                    .or_insert_with(|| resolve_pane_git_info(&pane.path))
-                    .clone();
+                // Cache the base git info per path. `get` first avoids a key
+                // clone on cache hits; misses fall through to `insert` which
+                // owns the key plus the (expensive) git-command lookup.
+                let mut git_info = match git_cache.get(pane.path.as_str()) {
+                    Some(cached) => cached.clone(),
+                    None => {
+                        let resolved = resolve_pane_git_info(&pane.path);
+                        git_cache.insert(pane.path.clone(), resolved.clone());
+                        resolved
+                    }
+                };
 
-                // Override with hook-provided worktree info (Claude Code provides this;
-                // Codex does not, so git-command detection remains as fallback)
+                // Override with hook-provided worktree info (Claude Code
+                // provides this; Codex does not, so the git-command base
+                // remains as fallback).
                 if !pane.worktree_name.is_empty() {
                     git_info.worktree_name = Some(pane.worktree_name.clone());
                     git_info.is_worktree = true;
@@ -105,10 +113,10 @@ pub fn group_panes_by_repo(sessions: &[crate::tmux::SessionInfo]) -> Vec<RepoGro
                     git_info.is_worktree = true;
                 }
 
-                let group_key = git_info
-                    .repo_root
-                    .clone()
-                    .unwrap_or_else(|| pane.path.clone());
+                let group_key = match &git_info.repo_root {
+                    Some(root) => root.clone(),
+                    None => pane.path.clone(),
+                };
 
                 let display_name = group_key
                     .rsplit('/')

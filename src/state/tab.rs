@@ -41,11 +41,11 @@ impl AppState {
             return self.resolve_tab_for_focused_pane(new_agent_pane_ids);
         }
 
-        if let Some(ref fid) = self.focused_pane_id {
-            if new_agent_pane_ids.contains(fid) {
-                // Agent started in the currently focused pane.
-                return TabDecision::Set(BottomTab::Activity);
-            }
+        if let Some(ref fid) = self.focused_pane_id
+            && new_agent_pane_ids.contains(fid)
+        {
+            // Agent started in the currently focused pane.
+            return TabDecision::Set(BottomTab::Activity);
         }
 
         TabDecision::Keep

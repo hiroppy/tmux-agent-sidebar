@@ -47,36 +47,44 @@ fn sync_pane_location(
     worktree: &Option<WorktreeInfo>,
     session_id: &Option<String>,
 ) {
-    // Subagents share the parent's $TMUX_PANE and can fire their own
-    // SessionStart with a different session_id; skip pane-scoped writes
-    // so the parent's identity is preserved (mirrors the cwd guard).
+    // Subagents share the parent's $TMUX_PANE and can fire their own hook
+    // events with a different session_id, cwd, or worktree. While children
+    // are active, every pane-scoped write must be skipped so the parent's
+    // identity is preserved — including `@pane_worktree_*`, which used to
+    // leak through and misgroup the pane under the child's repo.
     let current_subagents = tmux::get_pane_option_value(pane, "@pane_subagents");
-    if should_update_cwd(&current_subagents) {
-        match session_id.as_deref() {
-            Some(sid) if !sid.is_empty() => tmux::set_pane_option(pane, "@pane_session_id", sid),
-            _ => tmux::unset_pane_option(pane, "@pane_session_id"),
-        }
-        if !cwd.is_empty() {
-            let effective_cwd = resolve_cwd(cwd, worktree);
-            tmux::set_pane_option(pane, "@pane_cwd", effective_cwd);
-        }
+    if !should_update_cwd(&current_subagents) {
+        return;
+    }
+    match session_id.as_deref() {
+        Some(sid) if !sid.is_empty() => tmux::set_pane_option(pane, "@pane_session_id", sid),
+        _ => tmux::unset_pane_option(pane, "@pane_session_id"),
+    }
+    if !cwd.is_empty() {
+        let effective_cwd = resolve_cwd(cwd, worktree);
+        tmux::set_pane_option(pane, "@pane_cwd", effective_cwd);
     }
     sync_worktree_meta(pane, worktree);
 }
 
-fn set_agent_meta(
-    pane: &str,
-    agent: &str,
-    cwd: &str,
-    permission_mode: &str,
-    worktree: &Option<WorktreeInfo>,
-    session_id: &Option<String>,
-) {
-    tmux::set_pane_option(pane, "@pane_agent", agent);
-    if !permission_mode.is_empty() {
-        tmux::set_pane_option(pane, "@pane_permission_mode", permission_mode);
+/// Bundle of hook-payload fields shared by 6 `AgentEvent` variants
+/// (SessionStart / UserPromptSubmit / Notification / Stop / StopFailure /
+/// PermissionDenied). Passing this as a single reference keeps each
+/// variant handler's signature short and avoids `too_many_arguments`.
+struct AgentContext<'a> {
+    agent: &'a str,
+    cwd: &'a str,
+    permission_mode: &'a str,
+    worktree: &'a Option<WorktreeInfo>,
+    session_id: &'a Option<String>,
+}
+
+fn set_agent_meta(pane: &str, ctx: &AgentContext<'_>) {
+    tmux::set_pane_option(pane, "@pane_agent", ctx.agent);
+    if !ctx.permission_mode.is_empty() {
+        tmux::set_pane_option(pane, "@pane_permission_mode", ctx.permission_mode);
     }
-    sync_pane_location(pane, cwd, worktree, session_id);
+    sync_pane_location(pane, ctx.cwd, ctx.worktree, ctx.session_id);
 }
 
 fn clear_run_state(pane: &str) {
@@ -209,22 +217,17 @@ fn handle_event(pane: &str, event: AgentEvent) -> i32 {
             worktree,
             session_id,
             ..
-        } => {
-            set_agent_meta(pane, &agent, &cwd, &permission_mode, &worktree, &session_id);
-            set_attention(pane, "clear");
-            clear_run_state(pane);
-            tmux::unset_pane_option(pane, "@pane_prompt");
-            tmux::unset_pane_option(pane, "@pane_prompt_source");
-            tmux::unset_pane_option(pane, "@pane_subagents");
-            set_status(pane, "idle");
-        }
-        AgentEvent::SessionEnd => {
-            set_attention(pane, "clear");
-            clear_all_meta(pane);
-            set_status(pane, "clear");
-            let log_path = crate::activity::log_file_path(pane);
-            let _ = std::fs::remove_file(log_path);
-        }
+        } => on_session_start(
+            pane,
+            &AgentContext {
+                agent: &agent,
+                cwd: &cwd,
+                permission_mode: &permission_mode,
+                worktree: &worktree,
+                session_id: &session_id,
+            },
+        ),
+        AgentEvent::SessionEnd => on_session_end(pane),
         AgentEvent::UserPromptSubmit {
             agent,
             cwd,
@@ -233,19 +236,17 @@ fn handle_event(pane: &str, event: AgentEvent) -> i32 {
             worktree,
             session_id,
             ..
-        } => {
-            set_agent_meta(pane, &agent, &cwd, &permission_mode, &worktree, &session_id);
-            set_attention(pane, "clear");
-            set_status(pane, "running");
-            if !prompt.is_empty() && !is_system_message(&prompt) {
-                let p = sanitize_tmux_value(&prompt);
-                tmux::set_pane_option(pane, "@pane_prompt", &p);
-                tmux::set_pane_option(pane, "@pane_prompt_source", "user");
-            }
-            let now = unsafe { libc::time(std::ptr::null_mut()) };
-            tmux::set_pane_option(pane, "@pane_started_at", &now.to_string());
-            tmux::unset_pane_option(pane, "@pane_wait_reason");
-        }
+        } => on_user_prompt_submit(
+            pane,
+            &AgentContext {
+                agent: &agent,
+                cwd: &cwd,
+                permission_mode: &permission_mode,
+                worktree: &worktree,
+                session_id: &session_id,
+            },
+            &prompt,
+        ),
         AgentEvent::Notification {
             agent,
             cwd,
@@ -255,17 +256,18 @@ fn handle_event(pane: &str, event: AgentEvent) -> i32 {
             worktree,
             session_id,
             ..
-        } => {
-            set_agent_meta(pane, &agent, &cwd, &permission_mode, &worktree, &session_id);
-            if meta_only {
-                return 0;
-            }
-            set_status(pane, "waiting");
-            set_attention(pane, "notification");
-            if !wait_reason.is_empty() {
-                tmux::set_pane_option(pane, "@pane_wait_reason", &wait_reason);
-            }
-        }
+        } => on_notification(
+            pane,
+            &AgentContext {
+                agent: &agent,
+                cwd: &cwd,
+                permission_mode: &permission_mode,
+                worktree: &worktree,
+                session_id: &session_id,
+            },
+            &wait_reason,
+            meta_only,
+        ),
         AgentEvent::Stop {
             agent,
             cwd,
@@ -275,20 +277,18 @@ fn handle_event(pane: &str, event: AgentEvent) -> i32 {
             worktree,
             session_id,
             ..
-        } => {
-            set_agent_meta(pane, &agent, &cwd, &permission_mode, &worktree, &session_id);
-            set_attention(pane, "clear");
-            if !last_message.is_empty() {
-                let msg = sanitize_tmux_value(&last_message);
-                tmux::set_pane_option(pane, "@pane_prompt", &msg);
-                tmux::set_pane_option(pane, "@pane_prompt_source", "response");
-            }
-            clear_run_state(pane);
-            set_status(pane, "idle");
-            if let Some(resp) = response {
-                println!("{resp}");
-            }
-        }
+        } => on_stop(
+            pane,
+            &AgentContext {
+                agent: &agent,
+                cwd: &cwd,
+                permission_mode: &permission_mode,
+                worktree: &worktree,
+                session_id: &session_id,
+            },
+            &last_message,
+            response.as_deref(),
+        ),
         AgentEvent::StopFailure {
             agent,
             cwd,
@@ -297,51 +297,27 @@ fn handle_event(pane: &str, event: AgentEvent) -> i32 {
             worktree,
             session_id,
             ..
-        } => {
-            set_agent_meta(pane, &agent, &cwd, &permission_mode, &worktree, &session_id);
-            set_attention(pane, "clear");
-            clear_run_state(pane);
-            if !error.is_empty() {
-                tmux::set_pane_option(pane, "@pane_wait_reason", &error);
-            }
-            set_status(pane, "error");
-        }
+        } => on_stop_failure(
+            pane,
+            &AgentContext {
+                agent: &agent,
+                cwd: &cwd,
+                permission_mode: &permission_mode,
+                worktree: &worktree,
+                session_id: &session_id,
+            },
+            &error,
+        ),
         AgentEvent::SubagentStart {
             agent_type,
             agent_id,
-        } => {
-            // Claude Code always sends agent_id per the hooks spec; drop the
-            // event silently if it's missing so the tree never gains an
-            // untrackable entry.
-            let Some(id) = agent_id.as_deref().filter(|s| !s.is_empty()) else {
-                return 0;
-            };
-            let current = tmux::get_pane_option_value(pane, "@pane_subagents");
-            let new_val = append_subagent(&current, &agent_type, id);
-            tmux::set_pane_option(pane, "@pane_subagents", &new_val);
-        }
-        AgentEvent::SubagentStop { agent_id, .. } => {
-            let Some(id) = agent_id.as_deref().filter(|s| !s.is_empty()) else {
-                return 0;
-            };
-            let current = tmux::get_pane_option_value(pane, "@pane_subagents");
-            match remove_subagent(&current, id) {
-                None => return 0,
-                Some(new_val) if new_val.is_empty() => {
-                    tmux::unset_pane_option(pane, "@pane_subagents");
-                }
-                Some(new_val) => {
-                    tmux::set_pane_option(pane, "@pane_subagents", &new_val);
-                }
-            }
-        }
+        } => on_subagent_start(pane, &agent_type, agent_id.as_deref()),
+        AgentEvent::SubagentStop { agent_id, .. } => on_subagent_stop(pane, agent_id.as_deref()),
         AgentEvent::ActivityLog {
             tool_name,
             tool_input,
             tool_response,
-        } => {
-            return handle_activity_log(pane, &tool_name, &tool_input, &tool_response);
-        }
+        } => handle_activity_log(pane, &tool_name, &tool_input, &tool_response),
         AgentEvent::PermissionDenied {
             agent,
             cwd,
@@ -349,12 +325,16 @@ fn handle_event(pane: &str, event: AgentEvent) -> i32 {
             worktree,
             session_id,
             ..
-        } => {
-            set_agent_meta(pane, &agent, &cwd, &permission_mode, &worktree, &session_id);
-            set_status(pane, "waiting");
-            set_attention(pane, "notification");
-            tmux::set_pane_option(pane, "@pane_wait_reason", "permission_denied");
-        }
+        } => on_permission_denied(
+            pane,
+            &AgentContext {
+                agent: &agent,
+                cwd: &cwd,
+                permission_mode: &permission_mode,
+                worktree: &worktree,
+                session_id: &session_id,
+            },
+        ),
         AgentEvent::CwdChanged {
             cwd,
             worktree,
@@ -362,28 +342,165 @@ fn handle_event(pane: &str, event: AgentEvent) -> i32 {
             ..
         } => {
             sync_pane_location(pane, &cwd, &worktree, &session_id);
+            0
         }
-        AgentEvent::TaskCreated { .. } => {
-            // Redundant with activity-log; TaskCreate tool use already recorded
-        }
+        AgentEvent::TaskCreated { .. } => 0,
         AgentEvent::TaskCompleted { .. } => {
             set_attention(pane, "notification");
+            0
         }
-        AgentEvent::TeammateIdle { teammate_name, .. } => {
-            set_attention(pane, "notification");
-            let reason = format!("teammate_idle:{}", teammate_name);
-            tmux::set_pane_option(pane, "@pane_wait_reason", &reason);
+        AgentEvent::TeammateIdle { teammate_name, .. } => on_teammate_idle(pane, &teammate_name),
+        AgentEvent::WorktreeCreate => 0,
+        AgentEvent::WorktreeRemove { .. } => on_worktree_remove(pane),
+    }
+}
+
+fn now_epoch_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn on_session_start(pane: &str, ctx: &AgentContext<'_>) -> i32 {
+    set_agent_meta(pane, ctx);
+    set_attention(pane, "clear");
+    clear_run_state(pane);
+    tmux::unset_pane_option(pane, "@pane_prompt");
+    tmux::unset_pane_option(pane, "@pane_prompt_source");
+    tmux::unset_pane_option(pane, "@pane_subagents");
+    set_status(pane, "idle");
+    0
+}
+
+fn on_session_end(pane: &str) -> i32 {
+    // Subagents share the parent's $TMUX_PANE, so a child emitting
+    // SessionEnd must NOT wipe the parent's metadata or activity log.
+    // Wait until `@pane_subagents` is empty (set by the parent's own
+    // SessionStart or by every child's SubagentStop) before tearing down.
+    let current_subagents = tmux::get_pane_option_value(pane, "@pane_subagents");
+    if !should_update_cwd(&current_subagents) {
+        return 0;
+    }
+    set_attention(pane, "clear");
+    clear_all_meta(pane);
+    set_status(pane, "clear");
+    let log_path = crate::activity::log_file_path(pane);
+    let _ = std::fs::remove_file(log_path);
+    0
+}
+
+fn on_user_prompt_submit(pane: &str, ctx: &AgentContext<'_>, prompt: &str) -> i32 {
+    set_agent_meta(pane, ctx);
+    set_attention(pane, "clear");
+    set_status(pane, "running");
+    if !prompt.is_empty() && !is_system_message(prompt) {
+        let p = sanitize_tmux_value(prompt);
+        tmux::set_pane_option(pane, "@pane_prompt", &p);
+        tmux::set_pane_option(pane, "@pane_prompt_source", "user");
+    }
+    tmux::set_pane_option(pane, "@pane_started_at", &now_epoch_secs().to_string());
+    tmux::unset_pane_option(pane, "@pane_wait_reason");
+    0
+}
+
+fn on_notification(pane: &str, ctx: &AgentContext<'_>, wait_reason: &str, meta_only: bool) -> i32 {
+    set_agent_meta(pane, ctx);
+    if meta_only {
+        return 0;
+    }
+    set_status(pane, "waiting");
+    set_attention(pane, "notification");
+    if !wait_reason.is_empty() {
+        tmux::set_pane_option(pane, "@pane_wait_reason", wait_reason);
+    }
+    0
+}
+
+fn on_stop(pane: &str, ctx: &AgentContext<'_>, last_message: &str, response: Option<&str>) -> i32 {
+    set_agent_meta(pane, ctx);
+    set_attention(pane, "clear");
+    if !last_message.is_empty() {
+        let msg = sanitize_tmux_value(last_message);
+        tmux::set_pane_option(pane, "@pane_prompt", &msg);
+        tmux::set_pane_option(pane, "@pane_prompt_source", "response");
+    }
+    clear_run_state(pane);
+    set_status(pane, "idle");
+    if let Some(resp) = response {
+        println!("{resp}");
+    }
+    0
+}
+
+fn on_stop_failure(pane: &str, ctx: &AgentContext<'_>, error: &str) -> i32 {
+    set_agent_meta(pane, ctx);
+    set_attention(pane, "clear");
+    clear_run_state(pane);
+    if !error.is_empty() {
+        tmux::set_pane_option(pane, "@pane_wait_reason", error);
+    }
+    set_status(pane, "error");
+    0
+}
+
+fn on_subagent_start(pane: &str, agent_type: &str, agent_id: Option<&str>) -> i32 {
+    // Claude Code always sends agent_id per the hooks spec; drop the
+    // event silently if it's missing so the tree never gains an
+    // untrackable entry.
+    let Some(id) = agent_id.filter(|s| !s.is_empty()) else {
+        return 0;
+    };
+    let current = tmux::get_pane_option_value(pane, "@pane_subagents");
+    let new_val = append_subagent(&current, agent_type, id);
+    tmux::set_pane_option(pane, "@pane_subagents", &new_val);
+    0
+}
+
+fn on_subagent_stop(pane: &str, agent_id: Option<&str>) -> i32 {
+    let Some(id) = agent_id.filter(|s| !s.is_empty()) else {
+        return 0;
+    };
+    let current = tmux::get_pane_option_value(pane, "@pane_subagents");
+    match remove_subagent(&current, id) {
+        None => {}
+        Some(new_val) if new_val.is_empty() => {
+            tmux::unset_pane_option(pane, "@pane_subagents");
         }
-        AgentEvent::WorktreeCreate => {
-            // No-op: worktree metadata arrives via SessionStart/CwdChanged
-        }
-        AgentEvent::WorktreeRemove { .. } => {
-            sync_worktree_meta(pane, &None);
-            // Clear hook-set cwd so query_sessions() falls back to
-            // pane_current_path, avoiding stale worktree path association.
-            tmux::unset_pane_option(pane, "@pane_cwd");
+        Some(new_val) => {
+            tmux::set_pane_option(pane, "@pane_subagents", &new_val);
         }
     }
+    0
+}
+
+fn on_permission_denied(pane: &str, ctx: &AgentContext<'_>) -> i32 {
+    set_agent_meta(pane, ctx);
+    set_status(pane, "waiting");
+    set_attention(pane, "notification");
+    tmux::set_pane_option(pane, "@pane_wait_reason", "permission_denied");
+    0
+}
+
+fn on_teammate_idle(pane: &str, teammate_name: &str) -> i32 {
+    set_attention(pane, "notification");
+    let reason = format!("teammate_idle:{teammate_name}");
+    tmux::set_pane_option(pane, "@pane_wait_reason", &reason);
+    0
+}
+
+fn on_worktree_remove(pane: &str) -> i32 {
+    // If subagents are active, the removed worktree may belong to one of
+    // them — we can't distinguish parent from child at this point, so the
+    // safe default is to leave the parent's pane-scoped metadata intact.
+    let current_subagents = tmux::get_pane_option_value(pane, "@pane_subagents");
+    if !should_update_cwd(&current_subagents) {
+        return 0;
+    }
+    sync_worktree_meta(pane, &None);
+    // Clear hook-set cwd so query_sessions() falls back to
+    // pane_current_path, avoiding stale worktree path association.
+    tmux::unset_pane_option(pane, "@pane_cwd");
     0
 }
 
@@ -408,8 +525,7 @@ fn handle_activity_log(
         }
         let existing_started = tmux::get_pane_option_value(pane, "@pane_started_at");
         if existing_started.is_empty() {
-            let now = unsafe { libc::time(std::ptr::null_mut()) };
-            tmux::set_pane_option(pane, "@pane_started_at", &now.to_string());
+            tmux::set_pane_option(pane, "@pane_started_at", &now_epoch_secs().to_string());
         }
     }
 
@@ -896,5 +1012,180 @@ mod tests {
             should_update_cwd(before_subagent_start_hook),
             "known limitation: if session-start races ahead of subagent-start, cwd is updated"
         );
+    }
+
+    // ─── parent-pane preservation regression tests ──────────────────
+    //
+    // These tests use the `tmux::test_mock` thread-local store to
+    // capture pane-option writes without shelling out to real tmux. They
+    // pin the invariant that subagent-emitted hook events must not
+    // overwrite or erase the parent pane's metadata.
+
+    #[test]
+    fn sync_pane_location_skips_worktree_writes_while_subagents_active() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%PARENT";
+        // Parent state: real worktree owned by the parent agent.
+        tmux::test_mock::set(pane, "@pane_subagents", "Explore:sub-1");
+        tmux::test_mock::set(pane, "@pane_worktree_name", "parent-feat");
+        tmux::test_mock::set(pane, "@pane_worktree_branch", "feat/parent");
+        tmux::test_mock::set(pane, "@pane_cwd", "/repo/parent");
+        tmux::test_mock::set(pane, "@pane_session_id", "parent-session");
+
+        // Subagent fires a hook with its own (different) worktree.
+        let child_wt = Some(WorktreeInfo {
+            name: "child-feat".into(),
+            path: "/wt/child".into(),
+            branch: "feat/child".into(),
+            original_repo_dir: "/repo/child".into(),
+        });
+        sync_pane_location(
+            pane,
+            "/repo/child",
+            &child_wt,
+            &Some("child-session".into()),
+        );
+
+        // Every parent pane-option must be untouched.
+        assert_eq!(
+            tmux::test_mock::get(pane, "@pane_worktree_name").as_deref(),
+            Some("parent-feat"),
+            "worktree name must not leak from subagent into parent"
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, "@pane_worktree_branch").as_deref(),
+            Some("feat/parent")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, "@pane_cwd").as_deref(),
+            Some("/repo/parent")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, "@pane_session_id").as_deref(),
+            Some("parent-session")
+        );
+    }
+
+    #[test]
+    fn sync_pane_location_writes_worktree_when_no_subagents() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%LONE";
+        let wt = Some(WorktreeInfo {
+            name: "feat-x".into(),
+            path: "/wt/feat-x".into(),
+            branch: "feat-x".into(),
+            original_repo_dir: "/repo".into(),
+        });
+
+        sync_pane_location(pane, "/wt/feat-x", &wt, &Some("sess-1".into()));
+
+        assert_eq!(
+            tmux::test_mock::get(pane, "@pane_worktree_name").as_deref(),
+            Some("feat-x")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, "@pane_worktree_branch").as_deref(),
+            Some("feat-x")
+        );
+        // resolve_cwd routes the original_repo_dir into @pane_cwd.
+        assert_eq!(
+            tmux::test_mock::get(pane, "@pane_cwd").as_deref(),
+            Some("/repo")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, "@pane_session_id").as_deref(),
+            Some("sess-1")
+        );
+    }
+
+    #[test]
+    fn on_session_end_preserves_parent_state_when_subagents_active() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%PARENT_END";
+        tmux::test_mock::set(pane, "@pane_subagents", "Explore:sub-1");
+        tmux::test_mock::set(pane, "@pane_agent", "claude");
+        tmux::test_mock::set(pane, "@pane_cwd", "/repo/parent");
+        tmux::test_mock::set(pane, "@pane_session_id", "parent-session");
+        tmux::test_mock::set(pane, "@pane_status", "running");
+        // Seed an activity log so we can prove the file is NOT removed.
+        let log_path = crate::activity::log_file_path(pane);
+        let _ = fs::create_dir_all(log_path.parent().unwrap());
+        fs::write(&log_path, "1234567890|Read|main.rs\n").unwrap();
+
+        let exit = on_session_end(pane);
+
+        assert_eq!(exit, 0);
+        assert!(
+            tmux::test_mock::contains(pane, "@pane_agent"),
+            "child SessionEnd must not clear parent @pane_agent"
+        );
+        assert!(tmux::test_mock::contains(pane, "@pane_cwd"));
+        assert!(tmux::test_mock::contains(pane, "@pane_session_id"));
+        assert!(tmux::test_mock::contains(pane, "@pane_subagents"));
+        assert!(
+            log_path.exists(),
+            "child SessionEnd must not delete parent activity log"
+        );
+
+        fs::remove_file(&log_path).ok();
+    }
+
+    #[test]
+    fn on_session_end_clears_state_when_no_subagents() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%LONE_END";
+        tmux::test_mock::set(pane, "@pane_agent", "claude");
+        tmux::test_mock::set(pane, "@pane_cwd", "/repo");
+        tmux::test_mock::set(pane, "@pane_status", "running");
+
+        let exit = on_session_end(pane);
+
+        assert_eq!(exit, 0);
+        assert!(
+            !tmux::test_mock::contains(pane, "@pane_agent"),
+            "lone SessionEnd should clear @pane_agent"
+        );
+        assert!(!tmux::test_mock::contains(pane, "@pane_cwd"));
+        assert!(!tmux::test_mock::contains(pane, "@pane_status"));
+    }
+
+    #[test]
+    fn on_worktree_remove_preserves_parent_state_when_subagents_active() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%PARENT_WT";
+        tmux::test_mock::set(pane, "@pane_subagents", "Explore:sub-1");
+        tmux::test_mock::set(pane, "@pane_worktree_name", "parent-feat");
+        tmux::test_mock::set(pane, "@pane_worktree_branch", "feat/parent");
+        tmux::test_mock::set(pane, "@pane_cwd", "/repo/parent");
+
+        on_worktree_remove(pane);
+
+        assert_eq!(
+            tmux::test_mock::get(pane, "@pane_worktree_name").as_deref(),
+            Some("parent-feat")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, "@pane_worktree_branch").as_deref(),
+            Some("feat/parent")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, "@pane_cwd").as_deref(),
+            Some("/repo/parent")
+        );
+    }
+
+    #[test]
+    fn on_worktree_remove_clears_state_when_no_subagents() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%LONE_WT";
+        tmux::test_mock::set(pane, "@pane_worktree_name", "old");
+        tmux::test_mock::set(pane, "@pane_worktree_branch", "old");
+        tmux::test_mock::set(pane, "@pane_cwd", "/wt/old");
+
+        on_worktree_remove(pane);
+
+        assert!(!tmux::test_mock::contains(pane, "@pane_worktree_name"));
+        assert!(!tmux::test_mock::contains(pane, "@pane_worktree_branch"));
+        assert!(!tmux::test_mock::contains(pane, "@pane_cwd"));
     }
 }

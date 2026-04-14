@@ -43,6 +43,7 @@ Pane options written to tmux:
 | `@pane_subagents` | SubagentStart/Stop | Comma-separated active subagent list |
 | `@pane_worktree_name` | SessionStart | Worktree name (if applicable) |
 | `@pane_worktree_branch` | SessionStart | Worktree branch (if applicable) |
+| `@pane_session_id` | SessionStart, UserPromptSubmit, Notification, Stop, StopFailure, PermissionDenied, CwdChanged | Agent-reported session id (skipped when subagents are active) |
 
 In-memory per-pane runtime state:
 
@@ -71,7 +72,7 @@ Per-pane file-based state:
 | `sidebar_focused` | Every 1s | Whether sidebar pane itself has focus |
 | `now` | Every 1s | Current Unix epoch |
 | `pane_row_targets` | Every 1s | Filtered pane list after applying filters |
-| `focus` | On user input | UI focus: `Filter` / `Agents` / `ActivityLog` |
+| `focus` | On user input | UI focus: `Filter` / `Panes` / `ActivityLog` |
 | `panes_scroll` | On user input / render | Agent list scroll position |
 | `activity_scroll` | On user input / render | Activity log scroll position |
 | `git_scroll` | On user input / render | Git status scroll position |
@@ -80,31 +81,29 @@ Per-pane file-based state:
 | `bottom_tab` | On user input / auto-switch | Current bottom panel tab |
 | `line_to_row` | Every frame (render) | Rendered line → agent row mapping for click routing |
 | `theme` | Once at startup | Color theme from tmux `@sidebar_color_*` variables |
-| `repo_popup_open` | On user input | Repo filter popup visibility |
-| `repo_popup_selected` | On user input | Selected index in repo popup |
-| `notices_popup_open` | On user input | Notices popup visibility |
-| `notices_popup_area` | Every frame (render) | Rendered area of notices popup (for click routing) |
-| `notices_button_col` | Every frame (render) | Notices indicator button column position |
-| `notices_missing_hook_groups` | Once at startup | Per-agent missing hook groups shown in the popup |
-| `claude_plugin_installed_version` | Once at startup | Version recorded in Claude Code's installed plugin registry |
-| `claude_settings_has_residual_hooks` | Once at startup | Whether `~/.claude/settings.json` still contains legacy Claude hook entries |
-| `claude_plugin_notice` | Once at startup | Derived Claude plugin notice shown in the popup |
-| `notices_copy_targets` | Every frame (render) | Click targets for `[copy]` / `[prompt]` labels in the notices popup |
-| `notices_copied_at` | On successful copy | Transient `[copied]` feedback state |
+| `popup` | On user input / render | `PopupState` enum: `None` / `Repo { selected, area }` / `Notices { area }`. Enforces "at most one popup open" via the type system |
+| `notices.button_col` | Every frame (render) | Notices indicator button column position |
+| `notices.missing_hook_groups` | Once at startup | Per-agent missing hook groups shown in the popup |
+| `notices.claude_plugin_installed_version` | Once at startup | Version recorded in Claude Code's installed plugin registry |
+| `notices.claude_settings_has_residual_hooks` | Once at startup | Whether `~/.claude/settings.json` still contains legacy Claude hook entries |
+| `notices.claude_plugin_notice` | Once at startup | Derived Claude plugin notice shown in the popup |
+| `notices.copy_targets` | Every frame (render) | Click targets for `[copy]` / `[prompt]` labels in the notices popup |
+| `notices.copied_at` | On successful copy | Transient `[copied]` feedback state |
 | `pending_osc52_copy` | On successful copy / frame flush | OSC 52 clipboard payload queued for terminal forwarding |
-| `cat_state` | Every 200ms (animation) | `Idle` / `WalkRight` / `Working` / `WalkLeft` |
-| `cat_x` | Every 200ms (animation) | Cat X position |
-| `cat_frame` | Every 200ms (animation) | Animation frame counter |
-| `cat_bob_timer` | Every 200ms (animation) | Idle bob motion timer |
 | `spinner_frame` | Every 200ms (animation) | Spinner animation frame counter |
+| `icons` | Once at startup | `StatusIcons` theme (overridable via tmux options) |
 | `tmux_pane` | Once at startup | This sidebar's own tmux pane ID |
 | `activity_max_entries` | Once at startup | Max activity log entries to display |
 | `prev_focused_pane_id` | Every 1s | Previous focused pane ID (for detecting focus changes) |
 | `last_filter_click` | On user input | Last filter bar click timestamp (debounce) |
-| `repo_popup_area` | Every frame (render) | Rendered area of repo popup (for click routing) |
 | `repo_button_col` | Every frame (render) | Repo filter button column position |
 | `hyperlink_overlays` | Every frame (render) | OSC 8 hyperlink overlays to write after render |
 | `seen_agent_panes` | Every 1s | Set of pane IDs that have been seen as agents |
+| `port_scan_initialized` | Every 10s (port scan) | Whether the first port scan has completed |
+| `last_port_refresh` | Every 10s (port scan) | Timestamp of the last port/command scan |
+| `version_notice` | Once at startup (bg fetch) | GitHub release update notice, `None` when up-to-date |
+| `session_names` | Periodic refresh | `session_id → session name` map from `~/.claude/sessions/*.json` |
+| `last_session_refresh` | Periodic refresh | Timestamp of the last `session_names` refresh |
 
 ---
 
@@ -113,7 +112,7 @@ Per-pane file-based state:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Every frame (~200ms)                                       │
-│  line_to_row, scroll dimensions, cat animation              │
+│  line_to_row, scroll dimensions, spinner animation          │
 ├─────────────────────────────────────────────────────────────┤
 │  Every 1s (refresh cycle)                                   │
 │  sessions, repo_groups, focused_pane_id, pane_row_targets, │
@@ -123,9 +122,9 @@ Per-pane file-based state:
 │  pane_states.ports, agent liveness cleanup                  │
 ├─────────────────────────────────────────────────────────────┤
 │  Once at startup                                             │
-│  theme, bottom_panel_height, claude_plugin_installed_version │
-│  claude_settings_has_residual_hooks, claude_plugin_notice,   │
-│  notices_missing_hook_groups                                 │
+│  theme, bottom_panel_height, notices.claude_plugin_*,       │
+│  notices.claude_settings_has_residual_hooks,                │
+│  notices.claude_plugin_notice, notices.missing_hook_groups  │
 ├─────────────────────────────────────────────────────────────┤
 │  Every 2s (git background thread)                           │
 │  git (branch, diff, ahead/behind, PR)                       │
@@ -138,11 +137,11 @@ Per-pane file-based state:
 ├─────────────────────────────────────────────────────────────┤
 │  On user input                                              │
 │  focus, scroll offsets, bottom_tab, GlobalState fields,     │
-│  repo_popup_*, notices_popup_open                           │
+│  popup (PopupState enum)                                    │
 ├─────────────────────────────────────────────────────────────┤
 │  Every frame (render)                                       │
-│  line_to_row, repo_popup_area, notices_popup_area,         │
-│  notices_button_col, notices_copy_targets, hyperlink_overlays
+│  line_to_row, popup.area (Repo/Notices variants),           │
+│  notices.button_col, notices.copy_targets, hyperlink_overlays
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -181,14 +180,13 @@ TUI main loop (main.rs)
 ## Key Types
 
 ```rust
-enum Focus { Filter, Agents, ActivityLog }
+enum Focus { Filter, Panes, ActivityLog }
 enum StatusFilter { All, Running, Waiting, Idle, Error }
 enum RepoFilter { All, Repo(String) }
 enum BottomTab { Activity, GitStatus }
 enum PaneStatus { Running, Waiting, Idle, Error, Unknown }
-enum AgentType { Claude, Codex }
-enum PermissionMode { Default, Plan, AcceptEdits, Auto, BypassPermissions }
-enum CatState { Idle, WalkRight, Working, WalkLeft }
+enum AgentType { Claude, Codex, Unknown }
+enum PermissionMode { Default, Plan, AcceptEdits, Auto, DontAsk, BypassPermissions }
 
 struct ScrollState {
     offset: usize,
