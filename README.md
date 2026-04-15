@@ -11,6 +11,7 @@
 - **Task & subagent tracking** — Displays task progress (e.g. `3/7`) and spawned subagents as a parent-child tree
 - **Git integration** — Shows branch name, ahead/behind counts, PR number (`gh`), and per-file diff stats
 - **Worktree-aware grouping** — Groups agents by the same repo, including worktrees, so related panes stay together
+- **Spawn & remove worktrees from the sidebar** — Press `n` (or click `+` next to a repo header) to create a new `git worktree`, open a tmux window in it, and launch an agent in one step. Remove it later with `x`, or click the red `×` next to the branch on any spawn-created row
 - **Pane metadata** — Shows listening localhost ports and execution command info for each pane
 
 ## Agent Pane
@@ -226,11 +227,39 @@ Run ~/.tmux/plugins/tmux-agent-sidebar/target/release/tmux-agent-sidebar setup c
 | `h` / `Left` | Previous status filter when the filter bar is focused |
 | `l` / `Right` | Next status filter when the filter bar is focused |
 | `r` | Open repo filter popup (filter bar only) |
+| `n` | Spawn a new worktree + agent for the selected row's repo |
+| `x` | Remove the selected spawn-created pane (opens the close modal) |
 | `Enter` | Jump to the selected agent's pane / confirm the repo popup |
 | `Tab` | Cycle status filter (All → Running → Waiting → Idle → Error) |
 | `Shift+Tab` | Switch bottom panel tab (Activity / Git) |
 | `Esc` | Return focus to the agents panel / close the repo popup |
+| Mouse click `+` | Open the spawn modal for that repo (right edge of each repo header) |
+| Mouse click `×` | Open the close-pane modal for that spawn-created worktree (red `×` next to the branch) |
 | Mouse click | Jump to an agent's pane / filter by status / open the repo popup |
+
+### Spawn worktree modal
+
+Opened with `n` or by clicking the `+` button next to a repo header.
+
+| Key | Action |
+|---|---|
+| Text keys | Type the name (used as the branch slug and tmux window name, e.g. `add login form` → `agent/add-login-form`) |
+| `↑` / `↓` / `Tab` / `Shift+Tab` | Move focus between `NAME` / `AGENT` / `MODE` fields |
+| `←` / `→` | Cycle the value when the agent or mode field has focus |
+| `Enter` | Create the worktree + window and launch the agent |
+| `Esc` / click outside | Cancel |
+
+### Close pane modal
+
+Opened with `x` on a spawn-created pane.
+
+| Key | Action |
+|---|---|
+| `y` / `Enter` | Close the tmux window, remove the git worktree (`--force`), **and** delete the branch the spawn created (`git branch -D`) |
+| `c` | Close the tmux window only, keep the worktree and branch on disk |
+| `n` / `Esc` | Cancel |
+
+Branches are force-deleted because the sidebar auto-generates them under the `agent/` prefix for short-lived explorations; squash/rebase-merged work would otherwise be refused by the non-forced `git branch -d` check. Recover via `git reflog` if needed.
 
 
 ## Feature Support by Agent
@@ -267,6 +296,10 @@ set -g @sidebar_key_all Y                # keybinding for all windows (default: 
 set -g @sidebar_width 32                 # width in columns or % (default: 15%)
 set -g @sidebar_bottom_height 20         # bottom panel height in lines (default: 20, 0 to hide)
 set -g @sidebar_auto_create off          # disable auto-create on new windows (default: on)
+
+# Spawn worktree modal defaults (optional)
+set -g @agent-sidebar-default-agent codex  # agent launched by `n` (default: claude)
+set -g @agent-sidebar-branch-prefix wip/   # branch prefix for new worktrees (default: agent/)
 
 # Colors (256-color palette numbers) — all defaults live in src/ui/colors.rs
 set -g @sidebar_color_all 111            # selected "all" filter icon (default: 111 sky blue)

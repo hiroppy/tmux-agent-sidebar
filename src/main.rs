@@ -179,6 +179,26 @@ fn run_app(
                             state.close_notices_popup();
                         }
                     }
+                    Event::Key(key) if state.is_spawn_input_open() => match key.code {
+                        KeyCode::Esc => state.close_spawn_input(),
+                        KeyCode::Enter => state.confirm_spawn_input(),
+                        KeyCode::Tab | KeyCode::Down => state.spawn_input_next_field(),
+                        KeyCode::BackTab | KeyCode::Up => state.spawn_input_prev_field(),
+                        KeyCode::Left => state.spawn_input_cycle(-1),
+                        KeyCode::Right => state.spawn_input_cycle(1),
+                        KeyCode::Backspace => state.spawn_input_pop_char(),
+                        KeyCode::Char(c) => state.spawn_input_push_char(c),
+                        _ => {}
+                    },
+                    Event::Key(key) if state.is_remove_confirm_open() => match key.code {
+                        KeyCode::Esc | KeyCode::Char('n') => state.close_remove_confirm(),
+                        KeyCode::Char('c') => state
+                            .confirm_remove(tmux_agent_sidebar::worktree::RemoveMode::WindowOnly),
+                        KeyCode::Enter | KeyCode::Char('y') => state.confirm_remove(
+                            tmux_agent_sidebar::worktree::RemoveMode::WindowAndWorktree,
+                        ),
+                        _ => {}
+                    },
                     Event::Key(key) if state.is_repo_popup_open() => match key.code {
                         KeyCode::Esc => state.close_repo_popup(),
                         KeyCode::Char('j') | KeyCode::Down => {
@@ -258,6 +278,16 @@ fn run_app(
                         KeyCode::Char('r') => {
                             if state.focus == Focus::Filter {
                                 state.toggle_repo_popup();
+                            }
+                        }
+                        KeyCode::Char('n') => {
+                            if state.focus == Focus::Panes {
+                                state.open_spawn_input_from_selection();
+                            }
+                        }
+                        KeyCode::Char('x') => {
+                            if state.focus == Focus::Panes {
+                                state.open_remove_confirm();
                             }
                         }
                         KeyCode::Enter => {

@@ -5,9 +5,10 @@ use test_helpers::*;
 use tmux_agent_sidebar::activity::ActivityEntry;
 use tmux_agent_sidebar::group::{PaneGitInfo, RepoGroup};
 use tmux_agent_sidebar::state::{
-    AppState, BottomTab, Focus, GlobalState, RepoFilter, RowTarget, StatusFilter,
+    AppState, BottomTab, Focus, GlobalState, PopupState, RepoFilter, RowTarget, StatusFilter,
 };
 use tmux_agent_sidebar::tmux::{AgentType, PaneInfo, PaneStatus, SessionInfo, WindowInfo};
+use tmux_agent_sidebar::worktree;
 
 // ─── State Transition Tests ────────────────────────────────────────
 
@@ -116,6 +117,7 @@ fn test_line_to_row_two_agents() {
         worktree_branch: String::new(),
         session_id: None,
         session_name: String::new(),
+        sidebar_spawned: false,
     };
     let pane2 = PaneInfo {
         pane_id: "%2".into(),
@@ -136,6 +138,7 @@ fn test_line_to_row_two_agents() {
         worktree_branch: String::new(),
         session_id: None,
         session_name: String::new(),
+        sidebar_spawned: false,
     };
 
     let mut state = make_state(vec![SessionInfo {
@@ -849,4 +852,249 @@ fn window_activation_syncs_all_fields() {
     assert_eq!(g.status_filter, StatusFilter::Idle);
     assert_eq!(g.selected_pane_row, 4);
     assert_eq!(g.repo_filter, RepoFilter::Repo("my-app".into()));
+}
+
+// ─── Spawn / Remove Popup State ───────────────────────────────────
+
+fn spawn_state_with_repo() -> AppState {
+    let mut state = make_state(vec![]);
+    state.open_spawn_input_for_repo("myproj".into(), "/home/u/myproj".into(), None);
+    state
+}
+
+#[test]
+fn open_spawn_input_initialises_fields_to_defaults() {
+    let state = spawn_state_with_repo();
+    match &state.popup {
+        PopupState::SpawnInput {
+            input,
+            target_repo,
+            target_repo_root,
+            agent_idx,
+            mode_idx,
+            field,
+            ..
+        } => {
+            assert_eq!(input, "");
+            assert_eq!(target_repo, "myproj");
+            assert_eq!(target_repo_root, "/home/u/myproj");
+            assert_eq!(*agent_idx, 0);
+            assert_eq!(*mode_idx, 0);
+            assert_eq!(*field, tmux_agent_sidebar::state::SpawnField::Task);
+        }
+        _ => panic!("expected SpawnInput popup"),
+    }
+}
+
+#[test]
+fn spawn_input_push_char_only_types_into_input_field() {
+    let mut state = spawn_state_with_repo();
+    state.spawn_input_push_char('h');
+    state.spawn_input_push_char('i');
+    // Move to agent field — pushing chars there must be a no-op.
+    state.spawn_input_next_field();
+    state.spawn_input_push_char('x');
+    // Back to mode field — still a no-op.
+    state.spawn_input_next_field();
+    state.spawn_input_push_char('y');
+    match &state.popup {
+        PopupState::SpawnInput { input, .. } => assert_eq!(input, "hi"),
+        _ => panic!(),
+    }
+}
+
+#[test]
+fn spawn_input_pop_char_removes_trailing_char_only_on_input_field() {
+    let mut state = spawn_state_with_repo();
+    for c in "abc".chars() {
+        state.spawn_input_push_char(c);
+    }
+    state.spawn_input_pop_char();
+    match &state.popup {
+        PopupState::SpawnInput { input, .. } => assert_eq!(input, "ab"),
+        _ => panic!(),
+    }
+
+    // On a non-input field, pop is a no-op.
+    state.spawn_input_next_field();
+    state.spawn_input_pop_char();
+    match &state.popup {
+        PopupState::SpawnInput { input, .. } => assert_eq!(input, "ab"),
+        _ => panic!(),
+    }
+}
+
+#[test]
+fn spawn_input_field_wraps_forward_and_backward() {
+    let mut state = spawn_state_with_repo();
+    state.spawn_input_next_field();
+    state.spawn_input_next_field();
+    state.spawn_input_next_field(); // wraps back to Task
+    match &state.popup {
+        PopupState::SpawnInput { field, .. } => {
+            assert_eq!(*field, tmux_agent_sidebar::state::SpawnField::Task)
+        }
+        _ => panic!(),
+    }
+    state.spawn_input_prev_field(); // should land on Mode
+    match &state.popup {
+        PopupState::SpawnInput { field, .. } => {
+            assert_eq!(*field, tmux_agent_sidebar::state::SpawnField::Mode)
+        }
+        _ => panic!(),
+    }
+}
+
+#[test]
+fn spawn_input_cycle_changes_agent_and_resets_mode() {
+    let mut state = spawn_state_with_repo();
+    state.spawn_input_next_field(); // field = 1 (agent)
+    // Cycle agent forward — expect agent_idx to advance.
+    state.spawn_input_cycle(1);
+    match &state.popup {
+        PopupState::SpawnInput {
+            agent_idx,
+            mode_idx,
+            ..
+        } => {
+            assert_eq!(*agent_idx, 1, "agent should advance");
+            assert_eq!(*mode_idx, 0, "mode should reset when agent changes");
+        }
+        _ => panic!(),
+    }
+    // Cycle back — wraps to 0.
+    state.spawn_input_cycle(-1);
+    match &state.popup {
+        PopupState::SpawnInput { agent_idx, .. } => assert_eq!(*agent_idx, 0),
+        _ => panic!(),
+    }
+}
+
+#[test]
+fn spawn_input_cycle_on_mode_field_increments_mode_only() {
+    let mut state = spawn_state_with_repo();
+    state.spawn_input_next_field(); // agent
+    state.spawn_input_next_field(); // mode
+    state.spawn_input_cycle(1);
+    match &state.popup {
+        PopupState::SpawnInput {
+            agent_idx,
+            mode_idx,
+            ..
+        } => {
+            assert_eq!(*agent_idx, 0);
+            assert_eq!(*mode_idx, 1);
+        }
+        _ => panic!(),
+    }
+}
+
+#[test]
+fn spawn_input_cycle_on_input_field_is_noop() {
+    let mut state = spawn_state_with_repo();
+    // field 0 (input) — cycle should not touch agent/mode.
+    state.spawn_input_cycle(1);
+    state.spawn_input_cycle(-1);
+    match &state.popup {
+        PopupState::SpawnInput {
+            agent_idx,
+            mode_idx,
+            ..
+        } => {
+            assert_eq!(*agent_idx, 0);
+            assert_eq!(*mode_idx, 0);
+        }
+        _ => panic!(),
+    }
+}
+
+#[test]
+fn close_spawn_input_resets_popup() {
+    let mut state = spawn_state_with_repo();
+    state.close_spawn_input();
+    assert!(matches!(state.popup, PopupState::None));
+    assert!(!state.is_spawn_input_open());
+}
+
+#[test]
+fn set_flash_and_take_flash_returns_then_clears_after_deadline() {
+    let mut state = make_state(vec![]);
+    state.set_flash("hello");
+    assert_eq!(state.take_flash().as_deref(), Some("hello"));
+    // Flash is still valid because expiry is 4s in the future.
+    assert_eq!(state.take_flash().as_deref(), Some("hello"));
+    // Expire manually and verify take_flash clears it.
+    if let Some((_, exp)) = state.flash.as_mut() {
+        *exp = std::time::Instant::now() - std::time::Duration::from_secs(1);
+    }
+    assert_eq!(state.take_flash(), None);
+    assert!(state.flash.is_none());
+}
+
+#[test]
+fn agent_cycle_keeps_mode_in_bounds_for_codex() {
+    // Codex has only 3 modes; cycling to codex with a high mode_idx
+    // should be safe because agent switch resets mode_idx to 0.
+    let mut state = spawn_state_with_repo();
+    state.spawn_input_next_field(); // mode moved away from 0? no, field=1 (agent)
+    // First cycle past the claude mode list (5 entries) to exercise
+    // wrapping, then jump to codex.
+    state.spawn_input_next_field(); // field = 2 (mode)
+    for _ in 0..worktree::CLAUDE_MODES.len() {
+        state.spawn_input_cycle(1);
+    }
+    // Now go back to agent field and pick codex.
+    state.spawn_input_prev_field(); // field = 1
+    state.spawn_input_cycle(1); // agent → codex
+    match &state.popup {
+        PopupState::SpawnInput {
+            agent_idx,
+            mode_idx,
+            ..
+        } => {
+            assert_eq!(*agent_idx, 1);
+            // Mode must have reset to 0 (< codex mode list length).
+            assert!(*mode_idx < worktree::CODEX_MODES.len());
+        }
+        _ => panic!(),
+    }
+}
+
+#[test]
+fn open_remove_confirm_for_unknown_pane_sets_flash_and_keeps_popup_closed() {
+    // Without a real tmux environment `display_message` returns an
+    // empty string, so the "not spawned" branch should fire, set the
+    // flash banner, and leave the popup state untouched.
+    let mut state = make_state(vec![]);
+    assert!(state.flash.is_none());
+    state.open_remove_confirm_for_pane("%nonexistent".into());
+    assert!(matches!(state.popup, PopupState::None));
+    let flash = state.flash.as_ref().expect("flash must be set");
+    assert!(
+        flash.0.contains("not spawned"),
+        "flash should mention the unspawned pane: {:?}",
+        flash.0
+    );
+}
+
+#[test]
+fn handle_mouse_click_routes_spawn_remove_targets_to_open_remove_confirm() {
+    // Stuff a synthetic × click target into layout.spawn_remove_targets
+    // and verify the click handler routes to
+    // `open_remove_confirm_for_pane`. Without a tmux env the call
+    // flashes "not spawned", which still proves the routing worked
+    // (otherwise flash would stay None).
+    use tmux_agent_sidebar::state::SpawnRemoveTarget;
+    let mut state = make_state(vec![]);
+    state.layout.spawn_remove_targets = vec![SpawnRemoveTarget {
+        rect: ratatui::layout::Rect::new(4, 5, 3, 1),
+        pane_id: "%42".into(),
+    }];
+    state.handle_mouse_click(5, 5);
+    let flash = state.flash.as_ref().expect("click should have fired");
+    assert!(
+        flash.0.contains("not spawned"),
+        "click on × target should call open_remove_confirm_for_pane: {:?}",
+        flash.0
+    );
 }

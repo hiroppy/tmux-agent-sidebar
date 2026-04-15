@@ -143,6 +143,57 @@ pub struct RowTarget {
     pub pane_id: String,
 }
 
+/// Click target for the `+` button rendered at the right edge of each
+/// repo-group header in the agents panel. Clicking it opens the spawn
+/// modal prefilled for that repo.
+#[derive(Debug, Clone)]
+pub struct RepoSpawnTarget {
+    pub rect: ratatui::layout::Rect,
+    pub repo_name: String,
+    pub repo_root: String,
+}
+
+/// Click target for the red `×` rendered next to the branch of a
+/// sidebar-spawned pane. Clicking it opens the close-pane confirmation
+/// for that specific pane.
+#[derive(Debug, Clone)]
+pub struct SpawnRemoveTarget {
+    pub rect: ratatui::layout::Rect,
+    pub pane_id: String,
+}
+
+/// Focus target inside the spawn input popup. Tab / Shift+Tab / arrow
+/// keys cycle through these in order; only `Task` accepts text input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SpawnField {
+    #[default]
+    Task,
+    Agent,
+    Mode,
+}
+
+impl SpawnField {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Task => Self::Agent,
+            Self::Agent => Self::Mode,
+            Self::Mode => Self::Task,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            Self::Task => Self::Mode,
+            Self::Agent => Self::Task,
+            Self::Mode => Self::Agent,
+        }
+    }
+}
+
+fn point_in_rect(row: u16, col: u16, rect: ratatui::layout::Rect) -> bool {
+    rect.contains(ratatui::layout::Position { x: col, y: row })
+}
+
 /// At-most-one popup state for the sidebar. The enum variant encodes
 /// both which popup is open and its per-popup data, so the "only one
 /// popup open at a time" invariant is checked by the type system.
@@ -157,6 +208,37 @@ pub enum PopupState {
     Notices {
         area: Option<ratatui::layout::Rect>,
     },
+    /// Modal text input shown when the user presses `n` (or clicks `+`)
+    /// to spawn a new worktree. `target_repo` / `target_repo_root` pin
+    /// the spawn target; `agent_idx` / `mode_idx` index into
+    /// [`crate::worktree::AGENTS`] / [`crate::worktree::modes_for`] so
+    /// arrow keys can cycle the user's agent and permission-mode picks.
+    SpawnInput {
+        input: String,
+        target_repo: String,
+        target_repo_root: String,
+        agent_idx: usize,
+        mode_idx: usize,
+        field: SpawnField,
+        /// Screen Y of the repo header row that owns the `+` button
+        /// this modal was opened from. Renderer anchors the popup just
+        /// below it; `None` falls back to a centered layout.
+        anchor_y: Option<u16>,
+        /// Inline error message rendered at the bottom of the popup
+        /// so spawn failures stay visually attached to the input the
+        /// user was editing. Cleared on the next edit / field change.
+        error: Option<String>,
+        area: Option<ratatui::layout::Rect>,
+    },
+    /// Confirmation prompt shown when the user presses `x` on a
+    /// spawn-created pane. `pane_id` feeds `worktree::remove`; `branch`
+    /// is shown in the modal title.
+    RemoveConfirm {
+        pane_id: String,
+        branch: String,
+        error: Option<String>,
+        area: Option<ratatui::layout::Rect>,
+    },
 }
 
 impl PopupState {
@@ -168,6 +250,18 @@ impl PopupState {
 
     pub fn set_notices_area(&mut self, rect: Option<ratatui::layout::Rect>) {
         if let Self::Notices { area } = self {
+            *area = rect;
+        }
+    }
+
+    pub fn set_spawn_input_area(&mut self, rect: Option<ratatui::layout::Rect>) {
+        if let Self::SpawnInput { area, .. } = self {
+            *area = rect;
+        }
+    }
+
+    pub fn set_remove_confirm_area(&mut self, rect: Option<ratatui::layout::Rect>) {
+        if let Self::RemoveConfirm { area, .. } = self {
             *area = rect;
         }
     }
@@ -310,6 +404,12 @@ pub struct FrameLayout {
     /// X column of the repo filter button in the secondary header. `None`
     /// when the button is hidden. Used for click hit-testing.
     pub repo_button_col: Option<u16>,
+    /// Click regions for the `[+]` spawn button rendered at the right
+    /// edge of each repo-group header. One entry per visible repo group.
+    pub repo_spawn_targets: Vec<RepoSpawnTarget>,
+    /// Click regions for the red `×` remove marker rendered next to the
+    /// branch of each sidebar-spawned pane. One entry per visible row.
+    pub spawn_remove_targets: Vec<SpawnRemoveTarget>,
     /// OSC 8 hyperlink overlays the main loop writes after each frame so
     /// terminals can recognise PR numbers as clickable links.
     pub hyperlink_overlays: Vec<HyperlinkOverlay>,
@@ -388,6 +488,9 @@ pub struct AppState {
     pub repo_groups: Vec<crate::group::RepoGroup>,
     pub sidebar_focused: bool,
     pub focus: Focus,
+    /// Transient one-line status banner (message + expiry) for spawn /
+    /// remove feedback. Cleared by `take_flash` once the deadline passes.
+    pub flash: Option<(String, Instant)>,
     pub spinner_frame: usize,
     /// Frame-scoped render output (pane_row_targets, line_to_row,
     /// repo_button_col, hyperlink_overlays). Rewritten every frame by
@@ -490,6 +593,7 @@ impl AppState {
             repo_groups: vec![],
             sidebar_focused: false,
             focus: Focus::Panes,
+            flash: None,
             spinner_frame: 0,
             layout: FrameLayout::default(),
             activity_entries: vec![],
@@ -676,6 +780,20 @@ impl AppState {
         }
     }
 
+    pub fn spawn_input_popup_area(&self) -> Option<ratatui::layout::Rect> {
+        match &self.popup {
+            PopupState::SpawnInput { area, .. } => *area,
+            _ => None,
+        }
+    }
+
+    pub fn remove_confirm_popup_area(&self) -> Option<ratatui::layout::Rect> {
+        match &self.popup {
+            PopupState::RemoveConfirm { area, .. } => *area,
+            _ => None,
+        }
+    }
+
     pub fn notices_popup_area(&self) -> Option<ratatui::layout::Rect> {
         match &self.popup {
             PopupState::Notices { area } => *area,
@@ -695,6 +813,289 @@ impl AppState {
         self.popup = PopupState::None;
         self.notices.copy_targets.clear();
         self.notices.copied_at = None;
+    }
+
+    // ─── Spawn input popup (n key / + click) ─────────────────────────────
+
+    pub fn is_spawn_input_open(&self) -> bool {
+        matches!(self.popup, PopupState::SpawnInput { .. })
+    }
+
+    pub fn open_spawn_input_for_repo(
+        &mut self,
+        repo_name: String,
+        repo_root: String,
+        anchor_y: Option<u16>,
+    ) {
+        self.popup = PopupState::SpawnInput {
+            input: String::new(),
+            target_repo: repo_name,
+            target_repo_root: repo_root,
+            agent_idx: 0,
+            mode_idx: 0,
+            field: SpawnField::Task,
+            anchor_y,
+            error: None,
+            area: None,
+        };
+    }
+
+    pub fn open_spawn_input_from_selection(&mut self) {
+        let Some(pane) = self.selected_pane() else {
+            self.set_flash("spawn: no pane selected");
+            return;
+        };
+        let pane_id = pane.pane_id.clone();
+        let Some(group) = self
+            .repo_groups
+            .iter()
+            .find(|g| g.panes.iter().any(|(p, _)| p.pane_id == pane_id))
+        else {
+            self.set_flash("spawn: could not find repo group for selection");
+            return;
+        };
+        let Some(root) = group
+            .panes
+            .iter()
+            .find_map(|(_, git)| git.repo_root.clone())
+        else {
+            self.set_flash("spawn: selected pane is not in a git repo");
+            return;
+        };
+        let name = group.name.clone();
+        // Anchor the popup directly below the repo header row so it
+        // matches what the mouse `+` click flow does.
+        let anchor = self
+            .layout
+            .repo_spawn_targets
+            .iter()
+            .find(|t| t.repo_name == name)
+            .map(|t| t.rect.y);
+        self.open_spawn_input_for_repo(name, root, anchor);
+    }
+
+    pub fn close_spawn_input(&mut self) {
+        if matches!(self.popup, PopupState::SpawnInput { .. }) {
+            self.popup = PopupState::None;
+        }
+    }
+
+    pub fn spawn_input_next_field(&mut self) {
+        if let PopupState::SpawnInput { field, error, .. } = &mut self.popup {
+            *field = field.next();
+            *error = None;
+        }
+    }
+
+    pub fn spawn_input_prev_field(&mut self) {
+        if let PopupState::SpawnInput { field, error, .. } = &mut self.popup {
+            *field = field.prev();
+            *error = None;
+        }
+    }
+
+    /// Cycle the value under the focused agent or mode field. No-op on
+    /// the task input field so typing isn't interfered with.
+    pub fn spawn_input_cycle(&mut self, delta: isize) {
+        let PopupState::SpawnInput {
+            field,
+            agent_idx,
+            mode_idx,
+            error,
+            ..
+        } = &mut self.popup
+        else {
+            return;
+        };
+        match *field {
+            SpawnField::Agent => {
+                let len = crate::worktree::AGENTS.len() as isize;
+                *agent_idx = ((*agent_idx as isize + delta).rem_euclid(len)) as usize;
+                // Mode list is agent-specific.
+                *mode_idx = 0;
+                *error = None;
+            }
+            SpawnField::Mode => {
+                let agent = crate::worktree::AGENTS
+                    .get(*agent_idx)
+                    .copied()
+                    .unwrap_or("");
+                let len = crate::worktree::modes_for(agent).len() as isize;
+                if len > 0 {
+                    *mode_idx = ((*mode_idx as isize + delta).rem_euclid(len)) as usize;
+                    *error = None;
+                }
+            }
+            SpawnField::Task => {}
+        }
+    }
+
+    pub fn spawn_input_push_char(&mut self, c: char) {
+        if let PopupState::SpawnInput {
+            input,
+            field,
+            error,
+            ..
+        } = &mut self.popup
+            && *field == SpawnField::Task
+        {
+            input.push(c);
+            *error = None;
+        }
+    }
+
+    pub fn spawn_input_pop_char(&mut self) {
+        if let PopupState::SpawnInput {
+            input,
+            field,
+            error,
+            ..
+        } = &mut self.popup
+            && *field == SpawnField::Task
+        {
+            input.pop();
+            *error = None;
+        }
+    }
+
+    fn set_spawn_error(&mut self, msg: impl Into<String>) {
+        if let PopupState::SpawnInput { error, .. } = &mut self.popup {
+            *error = Some(msg.into());
+        }
+    }
+
+    fn set_remove_error(&mut self, msg: impl Into<String>) {
+        if let PopupState::RemoveConfirm { error, .. } = &mut self.popup {
+            *error = Some(msg.into());
+        }
+    }
+
+    /// Run the spawn flow against the repo stored in the popup, using
+    /// the agent / mode the user picked. On success the popup closes
+    /// silently (the new window appearing in the sidebar is the
+    /// feedback). On failure the error is surfaced inside the popup
+    /// and the modal stays open so the user can retry.
+    pub fn confirm_spawn_input(&mut self) {
+        let PopupState::SpawnInput {
+            input,
+            target_repo_root,
+            agent_idx,
+            mode_idx,
+            ..
+        } = &self.popup
+        else {
+            return;
+        };
+        let task_name = input.trim().to_string();
+        if task_name.is_empty() {
+            self.set_spawn_error("name is empty");
+            return;
+        }
+        let agent = crate::worktree::AGENTS
+            .get(*agent_idx)
+            .copied()
+            .unwrap_or(crate::worktree::DEFAULT_AGENT)
+            .to_string();
+        let mode = crate::worktree::modes_for(&agent)
+            .get(*mode_idx)
+            .copied()
+            .unwrap_or(crate::worktree::DEFAULT_MODE)
+            .to_string();
+        let repo_root = std::path::PathBuf::from(target_repo_root.clone());
+
+        let Some(session) = crate::tmux::pane_session_name(&self.tmux_pane) else {
+            self.set_spawn_error("could not resolve tmux session");
+            return;
+        };
+
+        let req = crate::worktree::SpawnRequest {
+            repo_root,
+            task_name,
+            session,
+            agent,
+            mode,
+        };
+        match crate::worktree::spawn(&req) {
+            Ok(_) => self.popup = PopupState::None,
+            Err(e) => self.set_spawn_error(e),
+        }
+    }
+
+    // ─── Remove confirm popup (x key) ────────────────────────────────────
+
+    pub fn is_remove_confirm_open(&self) -> bool {
+        matches!(self.popup, PopupState::RemoveConfirm { .. })
+    }
+
+    pub fn close_remove_confirm(&mut self) {
+        if matches!(self.popup, PopupState::RemoveConfirm { .. }) {
+            self.popup = PopupState::None;
+        }
+    }
+
+    /// Open the remove confirmation popup for the currently selected pane,
+    /// but only if it was created by the sidebar's spawn flow. Otherwise
+    /// flashes an error so the user knows nothing happened.
+    pub fn open_remove_confirm(&mut self) {
+        let Some(pane) = self.selected_pane() else {
+            self.set_flash("remove: no pane selected");
+            return;
+        };
+        self.open_remove_confirm_for_pane(pane.pane_id.clone());
+    }
+
+    pub fn open_remove_confirm_for_pane(&mut self, pane_id: String) {
+        let markers = crate::worktree::read_spawn_markers(&pane_id);
+        if !markers.is_spawned() {
+            self.set_flash("remove: selected pane was not spawned by sidebar");
+            return;
+        }
+        let branch = std::path::Path::new(&markers.worktree_path)
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        self.popup = PopupState::RemoveConfirm {
+            pane_id,
+            branch,
+            error: None,
+            area: None,
+        };
+    }
+
+    /// Run the remove flow on the pane stored in the confirmation popup.
+    /// Success silently closes the popup; failures are surfaced inside
+    /// the popup so the user can retry.
+    pub fn confirm_remove(&mut self, mode: crate::worktree::RemoveMode) {
+        let pane_id = match &self.popup {
+            PopupState::RemoveConfirm { pane_id, .. } => pane_id.clone(),
+            _ => return,
+        };
+        match crate::worktree::remove(&pane_id, mode) {
+            Ok(_) => self.popup = PopupState::None,
+            Err(e) => self.set_remove_error(e),
+        }
+    }
+
+    // ─── Flash banner ────────────────────────────────────────────────────
+
+    pub fn set_flash(&mut self, msg: impl Into<String>) {
+        self.flash = Some((
+            msg.into(),
+            Instant::now() + std::time::Duration::from_secs(4),
+        ));
+    }
+
+    /// Return the current flash text if still valid, clearing it once the
+    /// deadline passes. Called by the UI once per frame.
+    pub fn take_flash(&mut self) -> Option<String> {
+        match &self.flash {
+            Some((text, exp)) if Instant::now() < *exp => Some(text.clone()),
+            Some(_) => {
+                self.flash = None;
+                None
+            }
+            None => None,
+        }
     }
 
     /// Return the agent name if the given (row, col) hits a `[copy]` label
@@ -938,13 +1339,9 @@ impl AppState {
     /// via line_to_row (adjusted for scroll offset) and activates that pane.
     /// Row 0 is the fixed filter bar, row 1+ maps to the scrollable agent list.
     pub fn handle_mouse_click(&mut self, row: u16, col: u16) {
-        // Handle popup interactions first
         if self.is_notices_popup_open() {
-            if let Some(popup_area) = self.notices_popup_area()
-                && row >= popup_area.y
-                && row < popup_area.y + popup_area.height
-                && col >= popup_area.x
-                && col < popup_area.x + popup_area.width
+            if let Some(area) = self.notices_popup_area()
+                && point_in_rect(row, col, area)
             {
                 if let Some(agent) = self.notices_copy_target_at(row, col).map(str::to_string) {
                     self.copy_notices_prompt(&agent);
@@ -955,23 +1352,35 @@ impl AppState {
             return;
         }
         if self.is_repo_popup_open() {
-            if let Some(popup_area) = self.repo_popup_area()
-                && row >= popup_area.y
-                && row < popup_area.y + popup_area.height
-                && col >= popup_area.x
-                && col < popup_area.x + popup_area.width
+            if let Some(area) = self.repo_popup_area()
+                && point_in_rect(row, col, area)
             {
-                // Click inside popup — select item (subtract 1 for top border)
-                let item_index = (row - popup_area.y).saturating_sub(1) as usize;
-                let repos = self.repo_names();
-                if item_index < repos.len() {
+                let item_index = (row - area.y).saturating_sub(1) as usize;
+                if item_index < self.repo_names().len() {
                     self.set_repo_popup_selected(item_index);
                     self.confirm_repo_popup();
                 }
                 return;
             }
-            // Click outside popup — close it
             self.close_repo_popup();
+            return;
+        }
+        if self.is_spawn_input_open() {
+            if let Some(area) = self.spawn_input_popup_area()
+                && point_in_rect(row, col, area)
+            {
+                return;
+            }
+            self.close_spawn_input();
+            return;
+        }
+        if self.is_remove_confirm_open() {
+            if let Some(area) = self.remove_confirm_popup_area()
+                && point_in_rect(row, col, area)
+            {
+                return;
+            }
+            self.close_remove_confirm();
             return;
         }
 
@@ -983,6 +1392,32 @@ impl AppState {
             self.handle_secondary_header_click(col);
             return;
         }
+
+        // Check the `+` spawn buttons before the pane-row fallback so a
+        // click on the button doesn't also shift the pane selection.
+        if let Some((repo_name, repo_root, anchor_y)) = self
+            .layout
+            .repo_spawn_targets
+            .iter()
+            .find(|t| point_in_rect(row, col, t.rect))
+            .map(|t| (t.repo_name.clone(), t.repo_root.clone(), t.rect.y))
+        {
+            self.open_spawn_input_for_repo(repo_name, repo_root, Some(anchor_y));
+            return;
+        }
+
+        // Check the red `×` remove markers next to spawn-created branches.
+        if let Some(pane_id) = self
+            .layout
+            .spawn_remove_targets
+            .iter()
+            .find(|t| point_in_rect(row, col, t.rect))
+            .map(|t| t.pane_id.clone())
+        {
+            self.open_remove_confirm_for_pane(pane_id);
+            return;
+        }
+
         let line_index = (row as usize - 2) + self.panes_scroll.offset;
         if let Some(Some(agent_row)) = self.layout.line_to_row.get(line_index) {
             self.global.selected_pane_row = *agent_row;
@@ -1399,6 +1834,7 @@ mod tests {
             worktree_branch: String::new(),
             session_id: None,
             session_name: String::new(),
+            sidebar_spawned: false,
         }
     }
 

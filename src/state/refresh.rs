@@ -277,7 +277,11 @@ impl AppState {
 
     pub(crate) fn refresh_activity_log(&mut self) {
         if let Some(ref pane_id) = self.focused_pane_id {
-            self.activity_entries = activity::read_activity_log(pane_id, self.activity_max_entries);
+            // Task-reset markers are internal bookkeeping for parse_task_progress;
+            // they should never appear in the user-facing Activity tab.
+            let mut entries = activity::read_activity_log(pane_id, self.activity_max_entries);
+            entries.retain(|e| e.tool != activity::TASK_RESET_MARKER);
+            self.activity_entries = entries;
         } else {
             self.activity_entries.clear();
         }
@@ -309,6 +313,7 @@ mod tests {
             worktree_branch: String::new(),
             session_id: None,
             session_name: String::new(),
+            sidebar_spawned: false,
         }
     }
 

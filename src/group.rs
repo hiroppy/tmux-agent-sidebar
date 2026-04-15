@@ -231,6 +231,7 @@ mod tests {
             worktree_branch: String::new(),
             session_id: None,
             session_name: String::new(),
+            sidebar_spawned: false,
         }
     }
 

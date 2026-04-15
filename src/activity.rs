@@ -117,6 +117,11 @@ impl TaskProgress {
     }
 }
 
+/// Sentinel tool name written to the activity log at assistant-turn boundaries.
+/// Acts as a hard reset barrier for task progress parsing so state from a
+/// previous run cannot leak into a new one.
+pub const TASK_RESET_MARKER: &str = "__task_reset__";
+
 /// Parse task progress from activity log entries.
 /// Entries are in reverse chronological order (newest first), so we reverse to process in order.
 pub fn parse_task_progress(entries: &[ActivityEntry]) -> TaskProgress {
@@ -125,6 +130,9 @@ pub fn parse_task_progress(entries: &[ActivityEntry]) -> TaskProgress {
     // Process in chronological order (entries are newest-first)
     for entry in entries.iter().rev() {
         match entry.tool.as_str() {
+            TASK_RESET_MARKER => {
+                tasks.clear();
+            }
             "TaskCreate" => {
                 // Label format: "#1 subject" or just "subject"
                 let (id, subject) = if entry.label.starts_with('#') {
@@ -396,6 +404,27 @@ mod tests {
         let progress = parse_task_progress(&entries);
         // Should keep all 3 since task #2 is still in_progress
         assert_eq!(progress.total(), 3);
+    }
+
+    #[test]
+    fn test_parse_task_progress_resets_on_marker() {
+        // Previous run left #1 completed and #2 in_progress.
+        // A task-reset marker is written at turn boundary, then new run creates #3.
+        // The marker must drop everything before it.
+        let entries = vec![
+            task_entry("TaskUpdate", "in_progress #3"),
+            task_entry("TaskCreate", "#3 Fresh task"),
+            task_entry(TASK_RESET_MARKER, ""),
+            task_entry("TaskUpdate", "in_progress #2"),
+            task_entry("TaskUpdate", "completed #1"),
+            task_entry("TaskUpdate", "in_progress #1"),
+            task_entry("TaskCreate", "#2 Stale task B"),
+            task_entry("TaskCreate", "#1 Stale task A"),
+        ];
+        let progress = parse_task_progress(&entries);
+        assert_eq!(progress.total(), 1);
+        assert_eq!(progress.tasks[0].0, "Fresh task");
+        assert_eq!(progress.tasks[0].1, TaskStatus::InProgress);
     }
 
     #[test]

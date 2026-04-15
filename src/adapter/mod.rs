@@ -79,7 +79,7 @@ pub(crate) fn assert_table_drift_free(agent: &str, table: &[HookRegistration]) {
             .is_some();
         let in_table = table.iter().any(|r| r.kind == *kind);
         assert!(
-            !(accepted && !in_table),
+            !accepted || in_table,
             "{agent}: parse() accepts {:?} but HOOK_REGISTRATIONS does not list it — add it to the table",
             kind
         );

@@ -696,7 +696,7 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
             .draw(|frame| {
-                let area = frame.size();
+                let area = frame.area();
                 render_notices_popup(frame, state, area);
             })
             .unwrap();

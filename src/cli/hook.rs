@@ -493,6 +493,7 @@ fn on_stop(pane: &str, ctx: &AgentContext<'_>, last_message: &str, response: Opt
         tmux::set_pane_option(pane, "@pane_prompt_source", "response");
     }
     clear_run_state(pane);
+    mark_task_reset(pane);
     set_status(pane, "idle");
     if let Some(resp) = response {
         println!("{resp}");
@@ -504,11 +505,26 @@ fn on_stop_failure(pane: &str, ctx: &AgentContext<'_>, error: &str) -> i32 {
     set_agent_meta(pane, ctx);
     set_attention(pane, "clear");
     clear_run_state(pane);
+    mark_task_reset(pane);
     if !error.is_empty() {
         tmux::set_pane_option(pane, "@pane_wait_reason", error);
     }
     set_status(pane, "error");
     0
+}
+
+/// Write a task-reset marker to the activity log so `parse_task_progress`
+/// treats the upcoming run as a fresh batch — otherwise in-progress or
+/// abandoned tasks from a previous run would accumulate into the next one.
+///
+/// Skipped while subagents are still active so a parent Stop event doesn't
+/// wipe task state children are still driving.
+fn mark_task_reset(pane: &str) {
+    let current_subagents = tmux::get_pane_option_value(pane, "@pane_subagents");
+    if !current_subagents.is_empty() {
+        return;
+    }
+    write_activity_entry(pane, crate::activity::TASK_RESET_MARKER, "");
 }
 
 fn on_subagent_start(pane: &str, agent_type: &str, agent_id: Option<&str>) -> i32 {
@@ -932,6 +948,35 @@ mod tests {
         let content = fs::read_to_string(&path).unwrap();
         assert!(content.contains("|UnknownTool|"));
         fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn mark_task_reset_writes_marker_when_no_subagents() {
+        let _guard = crate::tmux::test_mock::install();
+        let pane_id = "%CLI_MARK_RESET";
+        let path = crate::activity::log_file_path(pane_id);
+        let _ = fs::remove_file(&path);
+
+        mark_task_reset(pane_id);
+
+        let content = fs::read_to_string(&path).unwrap();
+        let marker = format!("|{}|", crate::activity::TASK_RESET_MARKER);
+        assert!(content.contains(&marker), "marker not written: {content:?}");
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn mark_task_reset_skips_while_subagents_active() {
+        let _guard = crate::tmux::test_mock::install();
+        let pane_id = "%CLI_MARK_RESET_SUBAGENT";
+        crate::tmux::test_mock::set(pane_id, "@pane_subagents", "Explore:abc");
+        let path = crate::activity::log_file_path(pane_id);
+        let _ = fs::remove_file(&path);
+
+        mark_task_reset(pane_id);
+
+        // No marker should be written because subagents are still active.
+        assert!(!path.exists(), "log file created while subagents active");
     }
 
     #[test]

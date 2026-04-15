@@ -24,6 +24,11 @@ pub struct PaneInfo {
     pub worktree_branch: String,
     pub session_id: Option<String>,
     pub session_name: String,
+    /// `true` when the window this pane lives in was created by the
+    /// sidebar's spawn flow (via the `@agent-sidebar-spawned` window
+    /// option). Used by the row renderer to show a clickable red `×`
+    /// in place of the usual `+` worktree marker.
+    pub sidebar_spawned: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -151,9 +156,29 @@ pub fn run_tmux(args: &[&str]) -> Option<String> {
     }
 }
 
+/// Run a tmux command, returning trimmed stdout on success and stderr on failure.
+/// Used by the spawn/remove flow so the UI can surface a meaningful error message
+/// instead of a silent fallthrough.
+pub fn run_tmux_capture(args: &[&str]) -> Result<String, String> {
+    let output = Command::new("tmux")
+        .args(args)
+        .output()
+        .map_err(|e| format!("failed to spawn tmux: {e}"))?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(if stderr.is_empty() {
+            format!("tmux exited with status {}", output.status)
+        } else {
+            stderr
+        })
+    }
+}
+
 /// tmux `list-panes -F` format used by [`query_sessions`]. Every field is
 /// quoted with `#{q:...}` so embedded pipes in user content survive the split.
-const PANE_FORMAT: &str = "#{q:session_name}|#{q:window_id}|#{q:window_index}|#{q:window_name}|#{q:window_active}|#{q:automatic-rename}|#{q:pane_active}|#{q:@pane_status}|#{q:@pane_attention}|#{q:@pane_agent}|#{q:@pane_name}|#{q:pane_current_path}|#{q:pane_current_command}|#{q:@pane_role}|#{q:pane_id}|#{q:@pane_prompt}|#{q:@pane_prompt_source}|#{q:@pane_started_at}|#{q:@pane_wait_reason}|#{q:pane_pid}|#{q:@pane_subagents}|#{q:@pane_cwd}|#{q:@pane_permission_mode}|#{q:@pane_worktree_name}|#{q:@pane_worktree_branch}|#{q:@pane_session_id}";
+const PANE_FORMAT: &str = "#{q:session_name}|#{q:window_id}|#{q:window_index}|#{q:window_name}|#{q:window_active}|#{q:automatic-rename}|#{q:pane_active}|#{q:@pane_status}|#{q:@pane_attention}|#{q:@pane_agent}|#{q:@pane_name}|#{q:pane_current_path}|#{q:pane_current_command}|#{q:@pane_role}|#{q:pane_id}|#{q:@pane_prompt}|#{q:@pane_prompt_source}|#{q:@pane_started_at}|#{q:@pane_wait_reason}|#{q:pane_pid}|#{q:@pane_subagents}|#{q:@pane_cwd}|#{q:@pane_permission_mode}|#{q:@pane_worktree_name}|#{q:@pane_worktree_branch}|#{q:@pane_session_id}|#{q:@agent-sidebar-spawned}";
 
 type SessionMap = indexmap::IndexMap<String, indexmap::IndexMap<String, WindowInfo>>;
 
@@ -186,7 +211,7 @@ fn build_session_hierarchy(all_panes_output: &str) -> (SessionMap, Vec<CodexPidE
 
     for line in all_panes_output.lines() {
         let parts = split_tmux_fields(line, '|');
-        if parts.len() < 26 {
+        if parts.len() < 27 {
             continue;
         }
 
@@ -277,7 +302,7 @@ fn finalize_sessions(sessions_map: SessionMap) -> Vec<SessionInfo> {
 /// Returns None if the line has fewer than 20 fields, is a sidebar, or has no agent.
 pub(crate) fn parse_pane_line(line: &str) -> Option<PaneInfo> {
     let parts = split_tmux_fields(line, '|');
-    if parts.len() < 20 {
+    if parts.len() < 21 {
         return None;
     }
 
@@ -344,6 +369,7 @@ pub(crate) fn parse_pane_line(line: &str) -> Option<PaneInfo> {
         worktree_branch: parts[18].to_string(),
         session_id,
         session_name: String::new(),
+        sidebar_spawned: parts[20] == "1",
     })
 }
 
@@ -817,6 +843,67 @@ pub fn display_message(target: &str, format: &str) -> String {
         .unwrap_or_default()
 }
 
+/// Resolve the session name containing `pane_id`. Returns `None` when tmux
+/// can't find the pane (e.g. it has just been closed).
+pub fn pane_session_name(pane_id: &str) -> Option<String> {
+    run_tmux(&["display-message", "-t", pane_id, "-p", "#{session_name}"])
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Create a new tmux window in `session` whose initial cwd is `cwd` and whose
+/// title is `name`. Returns `(pane_id, window_id)` on success — the window id
+/// is used by the spawn flow to set markers at window scope so split panes
+/// (e.g. Claude Code subagents) inherit them.
+pub fn new_window(session: &str, cwd: &str, name: &str) -> Result<(String, String), String> {
+    let out = run_tmux_capture(&[
+        "new-window",
+        "-t",
+        session,
+        "-c",
+        cwd,
+        "-n",
+        name,
+        "-P",
+        "-F",
+        "#{pane_id} #{window_id}",
+    ])?;
+    let mut parts = out.split_whitespace();
+    let pane = parts
+        .next()
+        .ok_or_else(|| "new-window returned no pane id".to_string())?
+        .to_string();
+    let window = parts
+        .next()
+        .ok_or_else(|| "new-window returned no window id".to_string())?
+        .to_string();
+    Ok((pane, window))
+}
+
+/// Set a user option at window scope. Needed so markers survive through
+/// split panes that inherit from the window. Returns an error so the
+/// spawn flow can roll back when a marker the remove path relies on
+/// cannot be written — silently dropping the failure would leave an
+/// un-removable pane.
+pub fn set_window_option(window: &str, key: &str, value: &str) -> Result<(), String> {
+    run_tmux_capture(&["set", "-w", "-t", window, key, value]).map(|_| ())
+}
+
+/// Send a command line to `target` (a pane id) and press Enter so the shell
+/// executes it. Used to launch the agent binary right after window creation.
+/// The text is sent with `-l` (literal) so nothing in `command` can collide
+/// with tmux key names (e.g. `Tab`, `BSpace`); Enter is issued as a
+/// separate invocation so it's interpreted as the Return key.
+pub fn send_command(target: &str, command: &str) -> Result<(), String> {
+    run_tmux_capture(&["send-keys", "-t", target, "-l", command])?;
+    run_tmux_capture(&["send-keys", "-t", target, "Enter"]).map(|_| ())
+}
+
+/// Kill the tmux window identified by `window_id` (e.g. `@7`).
+pub fn kill_window(window_id: &str) -> Result<(), String> {
+    run_tmux_capture(&["kill-window", "-t", window_id]).map(|_| ())
+}
+
 pub fn select_pane(pane_id: &str) {
     // Find the session containing this pane and switch to it first
     if let Some(session_id) = run_tmux(&["display-message", "-t", pane_id, "-p", "#{session_id}"]) {
@@ -965,6 +1052,7 @@ mod tests {
             worktree_branch: String::new(),
             session_id: None,
             session_name: String::new(),
+            sidebar_spawned: false,
         }];
         let pids = vec![(0, 101)];
         let ps_out = "101 1 bash /bin/bash\n102 101 codex /bin/codex --full-auto\n";
@@ -995,6 +1083,7 @@ mod tests {
             worktree_branch: String::new(),
             session_id: None,
             session_name: String::new(),
+            sidebar_spawned: false,
         }];
         let pids = vec![(0, 101)];
         let ps_out = "101 1 bash /bin/bash\n102 101 sh -c wrapper\n103 102 codex /usr/local/bin/codex --yolo\n";
@@ -1146,6 +1235,7 @@ mod tests {
             "",                   // 17: @pane_worktree_name
             "",                   // 18: @pane_worktree_branch
             "",                   // 19: @pane_session_id
+            "",                   // 20: @agent-sidebar-spawned
         ]
     }
 
@@ -1168,6 +1258,25 @@ mod tests {
     }
 
     #[test]
+    fn parse_pane_line_sidebar_spawned_field() {
+        let mut fields = full_fields();
+        fields[20] = "1";
+        let pane = parse_pane_line(&make_pane_line(&fields)).unwrap();
+        assert!(pane.sidebar_spawned);
+
+        fields[20] = "";
+        let pane = parse_pane_line(&make_pane_line(&fields)).unwrap();
+        assert!(!pane.sidebar_spawned);
+
+        fields[20] = "0";
+        let pane = parse_pane_line(&make_pane_line(&fields)).unwrap();
+        assert!(
+            !pane.sidebar_spawned,
+            "any value other than `1` is treated as false"
+        );
+    }
+
+    #[test]
     fn parse_pane_line_response_prompt_source() {
         let mut fields = full_fields();
         fields[10] = "response"; // @pane_prompt_source
@@ -1177,7 +1286,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_pane_line_rejects_fewer_than_20_fields() {
+    fn parse_pane_line_rejects_fewer_than_21_fields() {
         // Only 15 fields — should be rejected
         let fields_15 =
             "1|running||claude|name|/path|fish||%1|prompt|1700000000||12345|Explore|/cwd";
@@ -1186,11 +1295,11 @@ mod tests {
             "15 fields should be rejected"
         );
 
-        // 19 fields — still rejected (need 20)
-        let fields_19 = "1|running||claude|name|/path|fish||%1|prompt|user|1700000000||12345|Explore|/cwd|auto||";
+        // 20 fields — still rejected (need 21)
+        let fields_20 = "1|running||claude|name|/path|fish||%1|prompt|user|1700000000||12345|Explore|/cwd|auto|||";
         assert!(
-            parse_pane_line(fields_19).is_none(),
-            "19 fields should be rejected"
+            parse_pane_line(fields_20).is_none(),
+            "20 fields should be rejected"
         );
     }
 
@@ -1426,6 +1535,7 @@ mod tests {
                     worktree_branch: String::new(),
                     session_id: None,
                     session_name: String::new(),
+                    sidebar_spawned: false,
                 }],
             },
         );
