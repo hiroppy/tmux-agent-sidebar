@@ -230,7 +230,7 @@ Branches are force-deleted because the sidebar auto-generates them under the `ag
 
 - **Waiting status (Claude Code)** — After you approve a permission prompt, the status stays `waiting` until the next hook event fires. This is a limitation of the Claude Code hook system.
 - **Codex hook coverage** — Codex emits `SessionStart`, `UserPromptSubmit`, `Stop`, and `PostToolUse`. `PostToolUse` is limited to the `Bash` tool (Codex's schema types `tool_input` as `{ command: string }`), so the Codex activity log shows only Bash commands. Waiting status, task progress, subagent display, and worktree tracking remain unavailable.
-- **Desktop notifications** — macOS requires `osascript`; Linux requires `notify-send`. If those commands are missing, notifications stay silent even when `@sidebar_notifications` is enabled. Notifications currently cover Claude task lifecycle and permission events only.
+- **Desktop notifications** — macOS requires `osascript`; Linux requires `notify-send`. If those commands are missing, notifications stay silent even when `@sidebar_notifications` is enabled. Notifications cover Claude Code hooks only (`Stop`, `Notification`, `TaskCompleted`, `StopFailure`, `PermissionDenied`).
 
 ## Customization
 
@@ -244,6 +244,7 @@ set -g @sidebar_width 32                 # width in columns or % (default: 15%)
 set -g @sidebar_bottom_height 20         # bottom panel height in lines (default: 20, 0 to hide)
 set -g @sidebar_auto_create off          # disable auto-create on new windows (default: on)
 set -g @sidebar_notifications off        # desktop notifications for task completion/failure and permission prompts (default: on)
+set -g @sidebar_notifications_events "stop,notification" # limit desktop notifications to selected hook events (default: all)
 
 # Spawn worktree modal defaults (optional)
 set -g @agent-sidebar-default-agent codex  # agent launched by `n` (default: claude)
@@ -302,9 +303,20 @@ set -g @sidebar_notifications on
 
 Supported events:
 
-- `TaskCompleted`
-- `StopFailure`
-- `PermissionDenied`
+- `stop` — assistant finished responding (Claude Code `Stop` hook)
+- `notification` — permission prompt or other attention request (`Notification` hook)
+- `task_completed` — subagent / Task tool completion (`TaskCompleted` hook)
+- `stop_failure` — assistant ended with an error (`StopFailure` hook)
+- `permission_denied` — permission explicitly denied (`PermissionDenied` hook)
+
+Restrict which events fire notifications with `@sidebar_notifications_events` (comma-separated event names; `all` or unset = every event):
+
+```tmux
+set -g @sidebar_notifications_events "stop,notification"  # drop subagent + error notifications
+set -g @sidebar_notifications_events all                  # explicit "fire everything" (default)
+```
+
+Setting an empty value disables every event without touching the master `@sidebar_notifications` switch.
 
 Delivery depends on the platform:
 

@@ -525,6 +525,7 @@ fn on_notification(
     let _ = notify_desktop(
         pane,
         DesktopNotificationKind::PermissionRequired,
+        desktop_notification::DesktopNotificationEvent::Notification,
         notifications,
         &fingerprint,
         &desktop_notification::format_title(repo.as_deref(), ctx.agent),
@@ -556,6 +557,7 @@ fn on_stop(
     let _ = notify_desktop(
         pane,
         DesktopNotificationKind::TaskCompleted,
+        desktop_notification::DesktopNotificationEvent::Stop,
         notifications,
         &fingerprint,
         &desktop_notification::format_title(repo.as_deref(), ctx.agent),
@@ -590,6 +592,7 @@ fn on_stop_failure(
     let _ = notify_desktop(
         pane,
         DesktopNotificationKind::TaskFailed,
+        desktop_notification::DesktopNotificationEvent::StopFailure,
         notifications,
         &fingerprint,
         &desktop_notification::format_title(repo.as_deref(), ctx.agent),
@@ -666,6 +669,7 @@ fn on_permission_denied(
     let _ = notify_desktop(
         pane,
         DesktopNotificationKind::PermissionRequired,
+        desktop_notification::DesktopNotificationEvent::PermissionDenied,
         &notifications,
         &fingerprint,
         &desktop_notification::format_title(repo.as_deref(), ctx.agent),
@@ -712,6 +716,7 @@ fn on_task_completed(
     let _ = notify_desktop(
         pane,
         DesktopNotificationKind::TaskCompleted,
+        desktop_notification::DesktopNotificationEvent::TaskCompleted,
         notifications,
         &fingerprint,
         &desktop_notification::format_title(repo.as_deref(), agent_name),
@@ -723,12 +728,13 @@ fn on_task_completed(
 fn notify_desktop(
     pane: &str,
     kind: DesktopNotificationKind,
+    event: desktop_notification::DesktopNotificationEvent,
     settings: &desktop_notification::DesktopNotificationSettings,
     fingerprint: &str,
     title: &str,
     body: &str,
 ) -> bool {
-    desktop_notification::notify_if_allowed(settings, pane, kind, fingerprint, title, body)
+    desktop_notification::notify_if_allowed(settings, pane, kind, event, fingerprint, title, body)
 }
 
 fn notification_settings() -> desktop_notification::DesktopNotificationSettings {
