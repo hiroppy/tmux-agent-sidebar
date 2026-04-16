@@ -13,6 +13,7 @@
 - **Worktree-aware grouping** — Groups agents by the same repo, including worktrees, so related panes stay together
 - **Spawn & remove worktrees from the sidebar** — Press `n` (or click `+` next to a repo header) to create a new `git worktree`, open a tmux window in it, and launch an agent in one step. Remove it later with `x`, or click the red `×` next to the branch on any spawn-created row
 - **Pane metadata** — Shows listening localhost ports and execution command info for each pane
+- **Desktop notifications** — High-signal alerts for task completion/failure, permission prompts, long waits, and newly opened ports
 
 ## Agent Pane
 
@@ -220,7 +221,7 @@ Branches are force-deleted because the sidebar auto-generates them under the `ag
 | Git branch display | :white_check_mark: | :white_check_mark: | Uses the pane `cwd`; Claude updates dynamically via `CwdChanged` |
 | Elapsed time | :white_check_mark: | :white_check_mark: | Since the last prompt |
 | Task progress | :white_check_mark: | :x: | Requires `PostToolUse`; Codex fires `PostToolUse` only for `Bash`, so task progress from tools is unavailable |
-| Task lifecycle notifications | :white_check_mark: | :x: | Requires `TaskCreated` / `TaskCompleted` |
+| Task lifecycle notifications | :white_check_mark: | :x: | Claude only. Codex only emits `Stop`, so it does not produce task-completed notifications |
 | Subagent display | :white_check_mark: | :x: | Requires `SubagentStart` / `SubagentStop` |
 | Activity log | :white_check_mark: | :white_check_mark: (Bash only) | Codex's `PostToolUse` fires only for `Bash` tool calls; `Read`/`Edit`/`Write`/`Grep`/`Glob`/etc. are not reported |
 | Worktree lifecycle tracking | :white_check_mark: | :x: | Requires `WorktreeCreate` / `WorktreeRemove` |
@@ -229,6 +230,7 @@ Branches are force-deleted because the sidebar auto-generates them under the `ag
 
 - **Waiting status (Claude Code)** — After you approve a permission prompt, the status stays `waiting` until the next hook event fires. This is a limitation of the Claude Code hook system.
 - **Codex hook coverage** — Codex emits `SessionStart`, `UserPromptSubmit`, `Stop`, and `PostToolUse`. `PostToolUse` is limited to the `Bash` tool (Codex's schema types `tool_input` as `{ command: string }`), so the Codex activity log shows only Bash commands. Waiting status, task progress, subagent display, and worktree tracking remain unavailable.
+- **Desktop notifications** — macOS requires `osascript`; Linux requires `notify-send`. If those commands are missing, notifications stay silent even when `@sidebar_os_notifications` is enabled. Task/permission/wait notifications are Claude-only; Codex currently only contributes port-open notifications.
 
 ## Customization
 
@@ -241,6 +243,9 @@ set -g @sidebar_key_all Y                # keybinding for all windows (default: 
 set -g @sidebar_width 32                 # width in columns or % (default: 15%)
 set -g @sidebar_bottom_height 20         # bottom panel height in lines (default: 20, 0 to hide)
 set -g @sidebar_auto_create off          # disable auto-create on new windows (default: on)
+set -g @sidebar_os_notifications on      # desktop notifications for high-signal events (default: on)
+set -g @sidebar_os_notification_cooldown 120 # per-pane cooldown in seconds (default: 120)
+set -g @sidebar_os_notification_wait_threshold 300 # waiting-too-long threshold in seconds (default: 300)
 
 # Spawn worktree modal defaults (optional)
 set -g @agent-sidebar-default-agent codex  # agent launched by `n` (default: claude)
@@ -287,6 +292,36 @@ set -g @sidebar_icon_unknown ·           # unknown status icon
 run-shell ~/.tmux/plugins/tmux-agent-sidebar/tmux-agent-sidebar.tmux
 ```
 
+## Desktop Notifications
+
+Desktop notifications are enabled by default.
+
+Enable them with tmux global options:
+
+```tmux
+set -g @sidebar_os_notifications on
+set -g @sidebar_os_notification_cooldown 120
+set -g @sidebar_os_notification_wait_threshold 300
+```
+
+Supported events:
+
+- `TaskCompleted`
+- `StopFailure`
+- `PermissionDenied`
+- panes that stay `waiting` too long
+- newly opened listening ports
+
+Delivery depends on the platform:
+
+- macOS uses `osascript`
+- Linux uses `notify-send`
+- Windows is not supported yet
+
+If the required notification command is missing, the feature quietly disables itself.
+
+Notifications are titled `repo / agent` when repo information is available, with the event summary in the body.
+
 ## Accessing Agent Status from Scripts
 
 The sidebar stores agent status in tmux pane options, which you can read from your own scripts or status bar:
@@ -302,6 +337,8 @@ tmux show -t "$pane_id" -pv @pane_agent
 ```
 
 This is useful for integrating agent status into your tmux status bar, custom scripts, or notifications.
+
+If you build your own notifications, the same pane options can be used to drive them.
 
 ## Uninstalling
 
