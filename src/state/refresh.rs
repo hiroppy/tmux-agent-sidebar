@@ -172,14 +172,13 @@ impl AppState {
                         if !scanned.live_agent_panes.contains(&pane.pane_id) {
                             dead_panes.push(pane.pane_id.clone());
                         }
-                        let new_ports = scanned
-                            .ports_by_pane
-                            .get(&pane.pane_id)
-                            .cloned()
-                            .unwrap_or_default();
                         updates.push((
                             pane.pane_id.clone(),
-                            new_ports,
+                            scanned
+                                .ports_by_pane
+                                .get(&pane.pane_id)
+                                .cloned()
+                                .unwrap_or_default(),
                             scanned.command_by_pane.get(&pane.pane_id).cloned(),
                         ));
                     }
@@ -288,6 +287,7 @@ impl AppState {
         }
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;

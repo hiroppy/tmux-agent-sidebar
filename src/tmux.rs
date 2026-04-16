@@ -211,7 +211,7 @@ fn build_session_hierarchy(all_panes_output: &str) -> (SessionMap, Vec<CodexPidE
 
     for line in all_panes_output.lines() {
         let parts = split_tmux_fields(line, '|');
-        if parts.len() < 28 {
+        if parts.len() < 27 {
             continue;
         }
 
@@ -299,7 +299,7 @@ fn finalize_sessions(sessions_map: SessionMap) -> Vec<SessionInfo> {
 }
 
 /// Parse a single pane line from `tmux list-panes -F`.
-/// Returns None if the line has fewer than 21 fields, is a sidebar, or has no agent.
+/// Returns None if the line has fewer than 20 fields, is a sidebar, or has no agent.
 pub(crate) fn parse_pane_line(line: &str) -> Option<PaneInfo> {
     let parts = split_tmux_fields(line, '|');
     if parts.len() < 21 {
@@ -1242,7 +1242,7 @@ mod tests {
     #[test]
     fn parse_pane_line_full_fields() {
         let line = make_pane_line(&full_fields());
-        let pane = parse_pane_line(&line).expect("should parse 21 fields");
+        let pane = parse_pane_line(&line).expect("should parse 17 fields");
         assert!(pane.pane_active);
         assert_eq!(pane.status, PaneStatus::Running);
         assert_eq!(pane.agent, AgentType::Claude);
@@ -1296,7 +1296,7 @@ mod tests {
         );
 
         // 20 fields — still rejected (need 21)
-        let fields_20 = "1|running||claude|name|/path|fish||%1|prompt|user|1700000000|12345|Explore|/cwd|auto|||";
+        let fields_20 = "1|running||claude|name|/path|fish||%1|prompt|user|1700000000||12345|Explore|/cwd|auto|||";
         assert!(
             parse_pane_line(fields_20).is_none(),
             "20 fields should be rejected"

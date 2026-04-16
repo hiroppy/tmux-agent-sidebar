@@ -528,19 +528,12 @@ fn on_stop_failure(
         tmux::set_pane_option(pane, "@pane_wait_reason", error);
     }
     set_status(pane, "error");
-    let fingerprint = if error.is_empty() {
-        "task-failed"
-    } else {
-        error
-    };
-    let fingerprint =
-        desktop_notification::run_scoped_fingerprint(pane_started_at(pane), fingerprint);
+    let fingerprint = desktop_notification::run_scoped_fingerprint(
+        pane_started_at(pane),
+        stop_failure_fingerprint(error),
+    );
     let repo = repo_label_from_ctx(ctx);
-    let body = if error.is_empty() {
-        "Task failed".to_string()
-    } else {
-        format!("Task failed: {error}")
-    };
+    let body = stop_failure_body(error);
     let _ = notify_desktop(
         pane,
         DesktopNotificationKind::TaskFailed,
@@ -655,21 +648,12 @@ fn on_task_completed(
     task_subject: &str,
     notifications: &desktop_notification::DesktopNotificationSettings,
 ) -> i32 {
-    let fingerprint = if !task_id.is_empty() {
-        task_id
-    } else if !task_subject.is_empty() {
-        task_subject
-    } else {
-        "task-completed"
-    };
-    let fingerprint =
-        desktop_notification::run_scoped_fingerprint(pane_started_at(pane), fingerprint);
+    let fingerprint = desktop_notification::run_scoped_fingerprint(
+        pane_started_at(pane),
+        task_completed_fingerprint(task_id, task_subject),
+    );
     let repo = repo_label_from_pane(pane);
-    let body = if task_subject.is_empty() {
-        "Task completed".to_string()
-    } else {
-        format!("Task completed: {task_subject}")
-    };
+    let body = task_completed_body(task_subject);
     let _ = notify_desktop(
         pane,
         DesktopNotificationKind::TaskCompleted,
@@ -696,6 +680,40 @@ fn pane_started_at(pane: &str) -> Option<u64> {
     tmux::get_pane_option_value(pane, "@pane_started_at")
         .parse::<u64>()
         .ok()
+}
+
+fn task_completed_fingerprint<'a>(task_id: &'a str, task_subject: &'a str) -> &'a str {
+    if !task_id.is_empty() {
+        task_id
+    } else if !task_subject.is_empty() {
+        task_subject
+    } else {
+        "task-completed"
+    }
+}
+
+fn task_completed_body(task_subject: &str) -> String {
+    if task_subject.is_empty() {
+        "Task completed".to_string()
+    } else {
+        format!("Task completed: {task_subject}")
+    }
+}
+
+fn stop_failure_fingerprint(error: &str) -> &str {
+    if error.is_empty() {
+        "task-failed"
+    } else {
+        error
+    }
+}
+
+fn stop_failure_body(error: &str) -> String {
+    if error.is_empty() {
+        "Task failed".to_string()
+    } else {
+        format!("Task failed: {error}")
+    }
 }
 
 fn repo_label_from_ctx(ctx: &AgentContext<'_>) -> Option<String> {
@@ -806,6 +824,63 @@ mod tests {
             original_repo_dir: "".into(),
         };
         assert_eq!(resolve_cwd("/tmp/wt/src", &Some(wt)), "/tmp/wt/src");
+    }
+
+    #[test]
+    fn repo_label_from_ctx_prefers_worktree_original_repo_dir() {
+        let wt = Some(crate::event::WorktreeInfo {
+            name: "feat".into(),
+            path: "/tmp/wt".into(),
+            branch: "feat".into(),
+            original_repo_dir: "/home/user/repo".into(),
+        });
+        let session_id = None;
+        let ctx = AgentContext {
+            agent: "claude",
+            cwd: "/tmp/wt/src",
+            permission_mode: "default",
+            worktree: &wt,
+            session_id: &session_id,
+        };
+        assert_eq!(repo_label_from_ctx(&ctx), Some("repo".into()));
+    }
+
+    #[test]
+    fn repo_label_from_pane_prefers_pane_cwd_then_worktree_name() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%PANE_REPO";
+        tmux::test_mock::set(pane, "@pane_cwd", "/home/user/app");
+        tmux::test_mock::set(pane, "@pane_worktree_name", "wt-name");
+
+        assert_eq!(repo_label_from_pane(pane), Some("app".into()));
+
+        tmux::test_mock::set(pane, "@pane_cwd", "");
+        assert_eq!(repo_label_from_pane(pane), Some("wt-name".into()));
+    }
+
+    #[test]
+    fn pane_started_at_reads_tmux_option() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%PANE_STARTED";
+        tmux::test_mock::set(pane, "@pane_started_at", "1700000000");
+        assert_eq!(pane_started_at(pane), Some(1_700_000_000));
+    }
+
+    #[test]
+    fn notification_task_completed_helpers_choose_expected_values() {
+        assert_eq!(task_completed_fingerprint("id-1", "subject"), "id-1");
+        assert_eq!(task_completed_fingerprint("", "subject"), "subject");
+        assert_eq!(task_completed_fingerprint("", ""), "task-completed");
+        assert_eq!(task_completed_body("subject"), "Task completed: subject");
+        assert_eq!(task_completed_body(""), "Task completed");
+    }
+
+    #[test]
+    fn notification_stop_failure_helpers_choose_expected_values() {
+        assert_eq!(stop_failure_fingerprint("boom"), "boom");
+        assert_eq!(stop_failure_fingerprint(""), "task-failed");
+        assert_eq!(stop_failure_body("boom"), "Task failed: boom");
+        assert_eq!(stop_failure_body(""), "Task failed");
     }
 
     // ─── append_subagent tests ──────────────────────────────────────
