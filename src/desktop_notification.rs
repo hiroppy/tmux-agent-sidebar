@@ -102,8 +102,8 @@ pub fn notify_if_allowed(
 fn read_bool(opts: &HashMap<String, String>, key: &str) -> Option<bool> {
     let raw = opts.get(key)?.trim().to_ascii_lowercase();
     match raw.as_str() {
-        "1" | "true" | "on" | "yes" | "y" => Some(true),
-        "0" | "false" | "off" | "no" | "n" => Some(false),
+        "on" => Some(true),
+        "off" => Some(false),
         _ => None,
     }
 }
@@ -291,6 +291,15 @@ mod tests {
 
         let settings = DesktopNotificationSettings::from_tmux_options_with_backend(&opts, true);
         assert!(settings.enabled);
+    }
+
+    #[test]
+    fn settings_disable_when_off() {
+        let mut opts = HashMap::new();
+        opts.insert("@sidebar_notifications".into(), "off".into());
+
+        let settings = DesktopNotificationSettings::from_tmux_options_with_backend(&opts, true);
+        assert!(!settings.enabled);
     }
 
     #[test]
