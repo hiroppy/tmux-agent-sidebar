@@ -244,8 +244,6 @@ set -g @sidebar_width 32                 # width in columns or % (default: 15%)
 set -g @sidebar_bottom_height 20         # bottom panel height in lines (default: 20, 0 to hide)
 set -g @sidebar_auto_create off          # disable auto-create on new windows (default: on)
 set -g @sidebar_os_notifications on      # desktop notifications for high-signal events (default: on)
-set -g @sidebar_os_notification_cooldown 120 # per-pane cooldown in seconds (default: 120)
-set -g @sidebar_os_notification_wait_threshold 300 # waiting-too-long threshold in seconds (default: 300)
 
 # Spawn worktree modal defaults (optional)
 set -g @agent-sidebar-default-agent codex  # agent launched by `n` (default: claude)
@@ -300,8 +298,6 @@ Enable them with tmux global options:
 
 ```tmux
 set -g @sidebar_os_notifications on
-set -g @sidebar_os_notification_cooldown 120
-set -g @sidebar_os_notification_wait_threshold 300
 ```
 
 Supported events:

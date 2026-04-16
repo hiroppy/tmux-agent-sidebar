@@ -197,6 +197,8 @@ impl AppState {
                                     .map(|p| p.to_string())
                                     .collect::<Vec<_>>()
                                     .join(",");
+                                let fingerprint =
+                                    run_scoped_fingerprint(pane.started_at, &fingerprint);
                                 let title = desktop_notification::format_title(
                                     repo_label_for_pane(pane).as_deref(),
                                     pane.agent.label(),
@@ -337,11 +339,11 @@ impl AppState {
                     continue;
                 };
                 if self.now.saturating_sub(started_at)
-                    < self.desktop_notifications.wait_threshold_secs
+                    < desktop_notification::WAIT_TOO_LONG_THRESHOLD_SECS
                 {
                     continue;
                 }
-                let fingerprint = format!("{}:{}", started_at, pane.wait_reason);
+                let fingerprint = run_scoped_fingerprint(Some(started_at), &pane.wait_reason);
                 let title =
                     desktop_notification::format_title(Some(&group.name), pane.agent.label());
                 let body = format!("Waiting too long: {}", wait_reason_label(&pane.wait_reason));
@@ -367,6 +369,13 @@ fn format_ports(ports: &[u16]) -> String {
             .map(|p| p.to_string())
             .collect::<Vec<_>>()
             .join(", "),
+    }
+}
+
+fn run_scoped_fingerprint(started_at: Option<u64>, fingerprint: &str) -> String {
+    match started_at {
+        Some(started_at) => format!("{started_at}:{fingerprint}"),
+        None => fingerprint.to_string(),
     }
 }
 

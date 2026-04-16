@@ -5,6 +5,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::tmux;
 
+pub(crate) const DESKTOP_NOTIFICATION_COOLDOWN_SECS: u64 = 120;
+pub(crate) const WAIT_TOO_LONG_THRESHOLD_SECS: u64 = 300;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DesktopNotificationKind {
     TaskCompleted,
@@ -17,17 +20,11 @@ pub enum DesktopNotificationKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DesktopNotificationSettings {
     pub enabled: bool,
-    pub cooldown_secs: u64,
-    pub wait_threshold_secs: u64,
 }
 
 impl Default for DesktopNotificationSettings {
     fn default() -> Self {
-        Self {
-            enabled: true,
-            cooldown_secs: 120,
-            wait_threshold_secs: 300,
-        }
+        Self { enabled: true }
     }
 }
 
@@ -42,10 +39,6 @@ impl DesktopNotificationSettings {
     ) -> Self {
         let mut settings = Self::default();
         settings.enabled = read_bool(opts, "@sidebar_os_notifications").unwrap_or(true);
-        settings.cooldown_secs =
-            read_u64(opts, "@sidebar_os_notification_cooldown").unwrap_or(settings.cooldown_secs);
-        settings.wait_threshold_secs = read_u64(opts, "@sidebar_os_notification_wait_threshold")
-            .unwrap_or(settings.wait_threshold_secs);
         if settings.enabled && !backend_available {
             settings.enabled = false;
         }
@@ -77,17 +70,26 @@ pub fn notify_if_allowed(
     }
 
     let key = stamp_option_key(kind);
+    let normalized_fingerprint = normalize_fingerprint(fingerprint);
     let now = now_epoch_secs();
     let current = tmux::get_pane_option_value(pane_id, key);
     if let Some(stamp) = parse_stamp(&current)
-        && stamp.fingerprint == fingerprint
-        && now.saturating_sub(stamp.timestamp) < settings.cooldown_secs
+        && stamp.fingerprint == normalized_fingerprint
+        && now.saturating_sub(stamp.timestamp) < DESKTOP_NOTIFICATION_COOLDOWN_SECS
     {
         return false;
     }
 
-    tmux::set_pane_option(pane_id, key, &encode_stamp(now, fingerprint));
-    send_desktop_notification(title, body)
+    match send_desktop_notification(title, body) {
+        Ok(()) => {
+            tmux::set_pane_option(pane_id, key, &encode_stamp(now, &normalized_fingerprint));
+            true
+        }
+        Err(err) => {
+            eprintln!("desktop notification failed: {err}");
+            false
+        }
+    }
 }
 
 fn read_bool(opts: &HashMap<String, String>, key: &str) -> Option<bool> {
@@ -97,10 +99,6 @@ fn read_bool(opts: &HashMap<String, String>, key: &str) -> Option<bool> {
         "0" | "false" | "off" | "no" | "n" => Some(false),
         _ => None,
     }
-}
-
-fn read_u64(opts: &HashMap<String, String>, key: &str) -> Option<u64> {
-    opts.get(key)?.trim().parse::<u64>().ok()
 }
 
 struct NotificationStamp {
@@ -119,7 +117,7 @@ fn stamp_option_key(kind: DesktopNotificationKind) -> &'static str {
 }
 
 fn encode_stamp(timestamp: u64, fingerprint: &str) -> String {
-    format!("{}|{}", timestamp, sanitize_fingerprint(fingerprint))
+    format!("{}|{}", timestamp, fingerprint)
 }
 
 fn parse_stamp(raw: &str) -> Option<NotificationStamp> {
@@ -130,7 +128,7 @@ fn parse_stamp(raw: &str) -> Option<NotificationStamp> {
     })
 }
 
-fn sanitize_fingerprint(value: &str) -> String {
+fn normalize_fingerprint(value: &str) -> String {
     value.replace(['|', '\n', '\r'], " ")
 }
 
@@ -141,7 +139,7 @@ fn now_epoch_secs() -> u64 {
         .unwrap_or(0)
 }
 
-fn send_desktop_notification(title: &str, body: &str) -> bool {
+fn send_desktop_notification(title: &str, body: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         let script = format!(
@@ -149,37 +147,53 @@ fn send_desktop_notification(title: &str, body: &str) -> bool {
             escape_applescript(body),
             escape_applescript(title)
         );
-        return Command::new("osascript")
+        let output = Command::new("osascript")
             .args(["-e", &script])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
+            .output()
+            .map_err(|err| format!("failed to spawn osascript: {err}"))?;
+        if output.status.success() {
+            return Ok(());
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            format!("osascript exited with status {}", output.status)
+        } else {
+            stderr
+        });
     }
 
     #[cfg(target_os = "linux")]
     {
-        return Command::new("notify-send")
+        let output = Command::new("notify-send")
             .args([
                 "--app-name=tmux-agent-sidebar",
                 "--urgency=normal",
                 title,
                 body,
             ])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
+            .output()
+            .map_err(|err| format!("failed to spawn notify-send: {err}"))?;
+        if output.status.success() {
+            return Ok(());
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            format!("notify-send exited with status {}", output.status)
+        } else {
+            stderr
+        });
     }
 
     #[cfg(target_os = "windows")]
     {
         let _ = (title, body);
-        return false;
+        return Err("desktop notifications are not supported on Windows yet".into());
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
         let _ = (title, body);
-        false
+        Err("desktop notifications are not supported on this platform".into())
     }
 }
 
@@ -232,28 +246,18 @@ mod tests {
     fn settings_parse_bool_and_numbers() {
         let mut opts = HashMap::new();
         opts.insert("@sidebar_os_notifications".into(), "on".into());
-        opts.insert("@sidebar_os_notification_cooldown".into(), "30".into());
-        opts.insert(
-            "@sidebar_os_notification_wait_threshold".into(),
-            "90".into(),
-        );
 
         let settings = DesktopNotificationSettings::from_tmux_options_with_backend(&opts, true);
         assert!(settings.enabled);
-        assert_eq!(settings.cooldown_secs, 30);
-        assert_eq!(settings.wait_threshold_secs, 90);
     }
 
     #[test]
     fn settings_default_when_invalid() {
         let mut opts = HashMap::new();
         opts.insert("@sidebar_os_notifications".into(), "maybe".into());
-        opts.insert("@sidebar_os_notification_cooldown".into(), "abc".into());
 
         let settings = DesktopNotificationSettings::from_tmux_options_with_backend(&opts, true);
         assert!(settings.enabled);
-        assert_eq!(settings.cooldown_secs, 120);
-        assert_eq!(settings.wait_threshold_secs, 300);
     }
 
     #[test]
@@ -265,9 +269,17 @@ mod tests {
 
     #[test]
     fn stamp_round_trip() {
-        let stamp = encode_stamp(123, "foo|bar");
+        let stamp = encode_stamp(123, "foo bar");
         let parsed = parse_stamp(&stamp).unwrap();
         assert_eq!(parsed.timestamp, 123);
         assert_eq!(parsed.fingerprint, "foo bar");
+    }
+
+    #[test]
+    fn fingerprint_is_normalized() {
+        assert_eq!(
+            normalize_fingerprint("foo|bar\nbaz\rqux"),
+            "foo bar baz qux"
+        );
     }
 }

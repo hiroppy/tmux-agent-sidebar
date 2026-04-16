@@ -533,6 +533,7 @@ fn on_stop_failure(
     } else {
         error
     };
+    let fingerprint = run_scoped_fingerprint(pane, fingerprint);
     let repo = repo_label_from_ctx(ctx);
     let body = if error.is_empty() {
         "Task failed".to_string()
@@ -543,7 +544,7 @@ fn on_stop_failure(
         pane,
         DesktopNotificationKind::TaskFailed,
         notifications,
-        fingerprint,
+        &fingerprint,
         &desktop_notification::format_title(repo.as_deref(), ctx.agent),
         &body,
     );
@@ -611,11 +612,12 @@ fn on_permission_denied(
     set_attention(pane, "notification");
     tmux::set_pane_option(pane, "@pane_wait_reason", "permission_denied");
     let repo = repo_label_from_ctx(ctx);
+    let fingerprint = run_scoped_fingerprint(pane, "permission_denied");
     let _ = notify_desktop(
         pane,
         DesktopNotificationKind::PermissionRequired,
         &notifications,
-        "permission_denied",
+        &fingerprint,
         &desktop_notification::format_title(repo.as_deref(), ctx.agent),
         "Permission required",
     );
@@ -658,6 +660,7 @@ fn on_task_completed(
     } else {
         "task-completed"
     };
+    let fingerprint = run_scoped_fingerprint(pane, fingerprint);
     let repo = repo_label_from_pane(pane);
     let body = if task_subject.is_empty() {
         "Task completed".to_string()
@@ -668,7 +671,7 @@ fn on_task_completed(
         pane,
         DesktopNotificationKind::TaskCompleted,
         notifications,
-        fingerprint,
+        &fingerprint,
         &desktop_notification::format_title(repo.as_deref(), agent_name),
         &body,
     );
@@ -684,6 +687,15 @@ fn notify_desktop(
     body: &str,
 ) -> bool {
     desktop_notification::notify_if_allowed(settings, pane, kind, fingerprint, title, body)
+}
+
+fn run_scoped_fingerprint(pane: &str, fingerprint: &str) -> String {
+    let started_at = tmux::get_pane_option_value(pane, "@pane_started_at");
+    if started_at.is_empty() {
+        fingerprint.to_string()
+    } else {
+        format!("{started_at}:{fingerprint}")
+    }
 }
 
 fn repo_label_from_ctx(ctx: &AgentContext<'_>) -> Option<String> {
