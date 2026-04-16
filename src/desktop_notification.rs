@@ -7,7 +7,6 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::tmux;
 
 pub(crate) const DESKTOP_NOTIFICATION_COOLDOWN_SECS: u64 = 120;
-pub(crate) const WAIT_TOO_LONG_THRESHOLD_SECS: u64 = 300;
 const DESKTOP_NOTIFICATION_TIMEOUT: Duration = Duration::from_secs(3);
 const DESKTOP_NOTIFICATION_PROBE_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -16,8 +15,6 @@ pub enum DesktopNotificationKind {
     TaskCompleted,
     TaskFailed,
     PermissionRequired,
-    WaitingTooLong,
-    PortOpened,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,8 +118,6 @@ fn stamp_option_key(kind: DesktopNotificationKind) -> &'static str {
         DesktopNotificationKind::TaskCompleted => "@pane_os_notify_task_completed",
         DesktopNotificationKind::TaskFailed => "@pane_os_notify_task_failed",
         DesktopNotificationKind::PermissionRequired => "@pane_os_notify_permission_required",
-        DesktopNotificationKind::WaitingTooLong => "@pane_os_notify_waiting_too_long",
-        DesktopNotificationKind::PortOpened => "@pane_os_notify_port_opened",
     }
 }
 
@@ -142,7 +137,7 @@ fn normalize_fingerprint(value: &str) -> String {
     value.replace(['|', '\n', '\r'], " ")
 }
 
-pub(crate) fn now_epoch_secs() -> u64 {
+fn now_epoch_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())

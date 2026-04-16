@@ -16,7 +16,6 @@ pub struct PaneInfo {
     pub prompt: String,
     pub prompt_is_response: bool,
     pub started_at: Option<u64>,
-    pub wait_started_at: Option<u64>,
     pub wait_reason: String,
     pub permission_mode: PermissionMode,
     pub subagents: Vec<String>,
@@ -179,7 +178,7 @@ pub fn run_tmux_capture(args: &[&str]) -> Result<String, String> {
 
 /// tmux `list-panes -F` format used by [`query_sessions`]. Every field is
 /// quoted with `#{q:...}` so embedded pipes in user content survive the split.
-const PANE_FORMAT: &str = "#{q:session_name}|#{q:window_id}|#{q:window_index}|#{q:window_name}|#{q:window_active}|#{q:automatic-rename}|#{q:pane_active}|#{q:@pane_status}|#{q:@pane_attention}|#{q:@pane_agent}|#{q:@pane_name}|#{q:pane_current_path}|#{q:pane_current_command}|#{q:@pane_role}|#{q:pane_id}|#{q:@pane_prompt}|#{q:@pane_prompt_source}|#{q:@pane_started_at}|#{q:@pane_wait_started_at}|#{q:@pane_wait_reason}|#{q:pane_pid}|#{q:@pane_subagents}|#{q:@pane_cwd}|#{q:@pane_permission_mode}|#{q:@pane_worktree_name}|#{q:@pane_worktree_branch}|#{q:@pane_session_id}|#{q:@agent-sidebar-spawned}";
+const PANE_FORMAT: &str = "#{q:session_name}|#{q:window_id}|#{q:window_index}|#{q:window_name}|#{q:window_active}|#{q:automatic-rename}|#{q:pane_active}|#{q:@pane_status}|#{q:@pane_attention}|#{q:@pane_agent}|#{q:@pane_name}|#{q:pane_current_path}|#{q:pane_current_command}|#{q:@pane_role}|#{q:pane_id}|#{q:@pane_prompt}|#{q:@pane_prompt_source}|#{q:@pane_started_at}|#{q:@pane_wait_reason}|#{q:pane_pid}|#{q:@pane_subagents}|#{q:@pane_cwd}|#{q:@pane_permission_mode}|#{q:@pane_worktree_name}|#{q:@pane_worktree_branch}|#{q:@pane_session_id}|#{q:@agent-sidebar-spawned}";
 
 type SessionMap = indexmap::IndexMap<String, indexmap::IndexMap<String, WindowInfo>>;
 
@@ -300,10 +299,10 @@ fn finalize_sessions(sessions_map: SessionMap) -> Vec<SessionInfo> {
 }
 
 /// Parse a single pane line from `tmux list-panes -F`.
-/// Returns None if the line has fewer than 22 fields, is a sidebar, or has no agent.
+/// Returns None if the line has fewer than 21 fields, is a sidebar, or has no agent.
 pub(crate) fn parse_pane_line(line: &str) -> Option<PaneInfo> {
     let parts = split_tmux_fields(line, '|');
-    if parts.len() < 22 {
+    if parts.len() < 21 {
         return None;
     }
 
@@ -321,10 +320,10 @@ pub(crate) fn parse_pane_line(line: &str) -> Option<PaneInfo> {
         return None;
     }
 
-    let pane_pid: Option<u32> = parts[14].parse().ok();
+    let pane_pid: Option<u32> = parts[13].parse().ok();
 
     // Prefer @pane_cwd (set by hook from agent's cwd) over pane_current_path
-    let pane_cwd = &parts[16];
+    let pane_cwd = &parts[15];
     let path = if !pane_cwd.is_empty() {
         pane_cwd.to_string()
     } else {
@@ -334,7 +333,7 @@ pub(crate) fn parse_pane_line(line: &str) -> Option<PaneInfo> {
     // Claude: read permission_mode from hook-set tmux variable
     // Codex: no permission_mode in hooks, detect from process args later
     let permission_mode = if agent == AgentType::Claude {
-        PermissionMode::from_label(&parts[17])
+        PermissionMode::from_label(&parts[16])
     } else {
         PermissionMode::Default
     };
@@ -345,10 +344,10 @@ pub(crate) fn parse_pane_line(line: &str) -> Option<PaneInfo> {
     // Sanitize prompt: replace pipes/newlines, filter system-injected messages, truncate
     let prompt = sanitize_prompt(&parts[9]);
 
-    let session_id = if parts[20].is_empty() {
+    let session_id = if parts[19].is_empty() {
         None
     } else {
-        Some(parts[20].to_string())
+        Some(parts[19].to_string())
     };
 
     Some(PaneInfo {
@@ -362,16 +361,15 @@ pub(crate) fn parse_pane_line(line: &str) -> Option<PaneInfo> {
         prompt,
         prompt_is_response,
         started_at: parts[11].parse().ok(),
-        wait_started_at: parts[12].parse().ok(),
-        wait_reason: parts[13].to_string(),
+        wait_reason: parts[12].to_string(),
         permission_mode,
-        subagents: parse_subagents(&parts[15]),
+        subagents: parse_subagents(&parts[14]),
         pane_pid,
-        worktree_name: parts[18].to_string(),
-        worktree_branch: parts[19].to_string(),
+        worktree_name: parts[17].to_string(),
+        worktree_branch: parts[18].to_string(),
         session_id,
         session_name: String::new(),
-        sidebar_spawned: parts[21] == "1",
+        sidebar_spawned: parts[20] == "1",
     })
 }
 
@@ -1046,7 +1044,6 @@ mod tests {
             prompt: String::new(),
             prompt_is_response: false,
             started_at: None,
-            wait_started_at: None,
             wait_reason: String::new(),
             permission_mode: PermissionMode::Default,
             subagents: vec![],
@@ -1078,7 +1075,6 @@ mod tests {
             prompt: String::new(),
             prompt_is_response: false,
             started_at: None,
-            wait_started_at: None,
             wait_reason: String::new(),
             permission_mode: PermissionMode::Default,
             subagents: vec![],
@@ -1231,23 +1227,22 @@ mod tests {
             "fix the bug",        // 9: @pane_prompt
             "user",               // 10: @pane_prompt_source
             "1700000000",         // 11: @pane_started_at
-            "",                   // 12: @pane_wait_started_at
-            "",                   // 13: @pane_wait_reason
-            "12345",              // 14: pane_pid
-            "Explore,Plan",       // 15: @pane_subagents
-            "/custom/cwd",        // 16: @pane_cwd
-            "auto",               // 17: @pane_permission_mode
-            "",                   // 18: @pane_worktree_name
-            "",                   // 19: @pane_worktree_branch
-            "",                   // 20: @pane_session_id
-            "",                   // 21: @agent-sidebar-spawned
+            "",                   // 12: @pane_wait_reason
+            "12345",              // 13: pane_pid
+            "Explore,Plan",       // 14: @pane_subagents
+            "/custom/cwd",        // 15: @pane_cwd
+            "auto",               // 16: @pane_permission_mode
+            "",                   // 17: @pane_worktree_name
+            "",                   // 18: @pane_worktree_branch
+            "",                   // 19: @pane_session_id
+            "",                   // 20: @agent-sidebar-spawned
         ]
     }
 
     #[test]
     fn parse_pane_line_full_fields() {
         let line = make_pane_line(&full_fields());
-        let pane = parse_pane_line(&line).expect("should parse 22 fields");
+        let pane = parse_pane_line(&line).expect("should parse 21 fields");
         assert!(pane.pane_active);
         assert_eq!(pane.status, PaneStatus::Running);
         assert_eq!(pane.agent, AgentType::Claude);
@@ -1257,7 +1252,6 @@ mod tests {
         assert_eq!(pane.prompt, "fix the bug");
         assert!(!pane.prompt_is_response);
         assert_eq!(pane.started_at, Some(1700000000));
-        assert_eq!(pane.wait_started_at, None);
         assert_eq!(pane.pane_pid, Some(12345));
         assert_eq!(pane.subagents, vec!["Explore", "Plan"]);
         assert_eq!(pane.permission_mode, PermissionMode::Auto);
@@ -1266,15 +1260,15 @@ mod tests {
     #[test]
     fn parse_pane_line_sidebar_spawned_field() {
         let mut fields = full_fields();
-        fields[21] = "1";
+        fields[20] = "1";
         let pane = parse_pane_line(&make_pane_line(&fields)).unwrap();
         assert!(pane.sidebar_spawned);
 
-        fields[21] = "";
+        fields[20] = "";
         let pane = parse_pane_line(&make_pane_line(&fields)).unwrap();
         assert!(!pane.sidebar_spawned);
 
-        fields[21] = "0";
+        fields[20] = "0";
         let pane = parse_pane_line(&make_pane_line(&fields)).unwrap();
         assert!(
             !pane.sidebar_spawned,
@@ -1292,7 +1286,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_pane_line_rejects_fewer_than_22_fields() {
+    fn parse_pane_line_rejects_fewer_than_21_fields() {
         // Only 15 fields — should be rejected
         let fields_15 =
             "1|running||claude|name|/path|fish||%1|prompt|1700000000||12345|Explore|/cwd";
@@ -1301,11 +1295,11 @@ mod tests {
             "15 fields should be rejected"
         );
 
-        // 21 fields — still rejected (need 22)
-        let fields_20 = "1|running||claude|name|/path|fish||%1|prompt|user|1700000000||12345|Explore|/cwd|auto|||";
+        // 20 fields — still rejected (need 21)
+        let fields_20 = "1|running||claude|name|/path|fish||%1|prompt|user|1700000000|12345|Explore|/cwd|auto|||";
         assert!(
             parse_pane_line(fields_20).is_none(),
-            "21 fields should be rejected"
+            "20 fields should be rejected"
         );
     }
 
@@ -1334,7 +1328,7 @@ mod tests {
     #[test]
     fn parse_pane_line_falls_back_to_pane_current_path() {
         let mut fields = full_fields();
-        fields[16] = ""; // empty pane_cwd
+        fields[15] = ""; // empty pane_cwd
         let line = make_pane_line(&fields);
         let pane = parse_pane_line(&line).unwrap();
         assert_eq!(
@@ -1347,7 +1341,7 @@ mod tests {
     fn parse_pane_line_preserves_pipe_in_path() {
         let mut fields = full_fields();
         fields[5] = "/home/user/a\\|b";
-        fields[16] = "";
+        fields[15] = "";
         let line = make_pane_line(&fields);
         let pane = parse_pane_line(&line).unwrap();
         assert_eq!(pane.path, "/home/user/a|b");
@@ -1470,7 +1464,7 @@ mod tests {
         let mut fields = full_fields();
         fields[3] = "codex";
         fields[6] = "node";
-        fields[17] = "auto"; // should be ignored for codex
+        fields[16] = "auto"; // should be ignored for codex
         let line = make_pane_line(&fields);
         let pane = parse_pane_line(&line).unwrap();
         assert_eq!(
@@ -1533,7 +1527,6 @@ mod tests {
                     prompt: String::new(),
                     prompt_is_response: false,
                     started_at: None,
-                    wait_started_at: None,
                     wait_reason: String::new(),
                     permission_mode: PermissionMode::Default,
                     subagents: vec![],

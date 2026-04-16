@@ -230,7 +230,7 @@ Branches are force-deleted because the sidebar auto-generates them under the `ag
 
 - **Waiting status (Claude Code)** — After you approve a permission prompt, the status stays `waiting` until the next hook event fires. This is a limitation of the Claude Code hook system.
 - **Codex hook coverage** — Codex emits `SessionStart`, `UserPromptSubmit`, `Stop`, and `PostToolUse`. `PostToolUse` is limited to the `Bash` tool (Codex's schema types `tool_input` as `{ command: string }`), so the Codex activity log shows only Bash commands. Waiting status, task progress, subagent display, and worktree tracking remain unavailable.
-- **Desktop notifications** — macOS requires `osascript`; Linux requires `notify-send`. If those commands are missing, notifications stay silent even when `@sidebar_os_notifications` is enabled. Task/permission/wait notifications are Claude-only; Codex currently only contributes port-open notifications.
+- **Desktop notifications** — macOS requires `osascript`; Linux requires `notify-send`. If those commands are missing, notifications stay silent even when `@sidebar_os_notifications` is enabled. Notifications currently cover Claude task lifecycle and permission events only.
 
 ## Customization
 
@@ -305,8 +305,6 @@ Supported events:
 - `TaskCompleted`
 - `StopFailure`
 - `PermissionDenied`
-- panes that stay `waiting` too long
-- newly opened listening ports
 
 Delivery depends on the platform:
 

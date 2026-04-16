@@ -534,7 +534,6 @@ mod tests {
             prompt: prompt.into(),
             prompt_is_response: is_response,
             started_at: None,
-            wait_started_at: None,
             wait_reason: String::new(),
             permission_mode,
             subagents: vec![],
