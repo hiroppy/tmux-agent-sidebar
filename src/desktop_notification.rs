@@ -1,12 +1,15 @@
 use std::collections::HashMap;
 use std::process::Command;
 use std::process::Stdio;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::thread::sleep;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::tmux;
 
 pub(crate) const DESKTOP_NOTIFICATION_COOLDOWN_SECS: u64 = 120;
 pub(crate) const WAIT_TOO_LONG_THRESHOLD_SECS: u64 = 300;
+const DESKTOP_NOTIFICATION_TIMEOUT: Duration = Duration::from_secs(3);
+const DESKTOP_NOTIFICATION_PROBE_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DesktopNotificationKind {
@@ -147,41 +150,27 @@ fn send_desktop_notification(title: &str, body: &str) -> Result<(), String> {
             escape_applescript(body),
             escape_applescript(title)
         );
-        let output = Command::new("osascript")
+        let mut command = Command::new("osascript");
+        command
             .args(["-e", &script])
-            .output()
-            .map_err(|err| format!("failed to spawn osascript: {err}"))?;
-        if output.status.success() {
-            return Ok(());
-        }
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if stderr.is_empty() {
-            format!("osascript exited with status {}", output.status)
-        } else {
-            stderr
-        });
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        return run_notification_command(&mut command, "osascript", DESKTOP_NOTIFICATION_TIMEOUT);
     }
 
     #[cfg(target_os = "linux")]
     {
-        let output = Command::new("notify-send")
+        let mut command = Command::new("notify-send");
+        command
             .args([
                 "--app-name=tmux-agent-sidebar",
                 "--urgency=normal",
                 title,
                 body,
             ])
-            .output()
-            .map_err(|err| format!("failed to spawn notify-send: {err}"))?;
-        if output.status.success() {
-            return Ok(());
-        }
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if stderr.is_empty() {
-            format!("notify-send exited with status {}", output.status)
-        } else {
-            stderr
-        });
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        return run_notification_command(&mut command, "notify-send", DESKTOP_NOTIFICATION_TIMEOUT);
     }
 
     #[cfg(target_os = "windows")]
@@ -200,22 +189,32 @@ fn send_desktop_notification(title: &str, body: &str) -> Result<(), String> {
 fn notification_backend_available() -> bool {
     #[cfg(target_os = "macos")]
     {
-        return Command::new("osascript")
+        let mut command = Command::new("osascript");
+        command
             .args(["-e", "return 0"])
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .output()
-            .is_ok();
+            .stderr(Stdio::null());
+        return run_notification_command(
+            &mut command,
+            "osascript",
+            DESKTOP_NOTIFICATION_PROBE_TIMEOUT,
+        )
+        .is_ok();
     }
 
     #[cfg(target_os = "linux")]
     {
-        return Command::new("notify-send")
+        let mut command = Command::new("notify-send");
+        command
             .arg("--version")
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .output()
-            .is_ok();
+            .stderr(Stdio::null());
+        return run_notification_command(
+            &mut command,
+            "notify-send",
+            DESKTOP_NOTIFICATION_PROBE_TIMEOUT,
+        )
+        .is_ok();
     }
 
     #[cfg(target_os = "windows")]
@@ -236,6 +235,38 @@ fn escape_applescript(value: &str) -> String {
         .replace('"', "\\\"")
         .replace('\n', " ")
         .replace('\r', " ")
+}
+
+fn run_notification_command(
+    command: &mut Command,
+    command_name: &str,
+    timeout: Duration,
+) -> Result<(), String> {
+    let mut child = command
+        .spawn()
+        .map_err(|err| format!("failed to spawn {command_name}: {err}"))?;
+    let start = Instant::now();
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => return Ok(()),
+            Ok(Some(status)) => {
+                return Err(format!("{command_name} exited with status {status}"));
+            }
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!(
+                        "{command_name} timed out after {}s",
+                        timeout.as_secs()
+                    ));
+                }
+                sleep(Duration::from_millis(25));
+            }
+            Err(err) => return Err(format!("failed to wait on {command_name}: {err}")),
+        }
+    }
 }
 
 #[cfg(test)]
