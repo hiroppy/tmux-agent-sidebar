@@ -60,6 +60,13 @@ pub fn format_title(repo: Option<&str>, agent: &str) -> String {
     }
 }
 
+pub fn run_scoped_fingerprint(started_at: Option<u64>, fingerprint: &str) -> String {
+    match started_at {
+        Some(started_at) => format!("{started_at}:{fingerprint}"),
+        None => fingerprint.to_string(),
+    }
+}
+
 pub fn notify_if_allowed(
     settings: &DesktopNotificationSettings,
     pane_id: &str,

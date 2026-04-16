@@ -533,7 +533,8 @@ fn on_stop_failure(
     } else {
         error
     };
-    let fingerprint = run_scoped_fingerprint(pane, fingerprint);
+    let fingerprint =
+        desktop_notification::run_scoped_fingerprint(pane_started_at(pane), fingerprint);
     let repo = repo_label_from_ctx(ctx);
     let body = if error.is_empty() {
         "Task failed".to_string()
@@ -612,7 +613,8 @@ fn on_permission_denied(
     set_attention(pane, "notification");
     tmux::set_pane_option(pane, "@pane_wait_reason", "permission_denied");
     let repo = repo_label_from_ctx(ctx);
-    let fingerprint = run_scoped_fingerprint(pane, "permission_denied");
+    let fingerprint =
+        desktop_notification::run_scoped_fingerprint(pane_started_at(pane), "permission_denied");
     let _ = notify_desktop(
         pane,
         DesktopNotificationKind::PermissionRequired,
@@ -660,7 +662,8 @@ fn on_task_completed(
     } else {
         "task-completed"
     };
-    let fingerprint = run_scoped_fingerprint(pane, fingerprint);
+    let fingerprint =
+        desktop_notification::run_scoped_fingerprint(pane_started_at(pane), fingerprint);
     let repo = repo_label_from_pane(pane);
     let body = if task_subject.is_empty() {
         "Task completed".to_string()
@@ -689,13 +692,10 @@ fn notify_desktop(
     desktop_notification::notify_if_allowed(settings, pane, kind, fingerprint, title, body)
 }
 
-fn run_scoped_fingerprint(pane: &str, fingerprint: &str) -> String {
-    let started_at = tmux::get_pane_option_value(pane, "@pane_started_at");
-    if started_at.is_empty() {
-        fingerprint.to_string()
-    } else {
-        format!("{started_at}:{fingerprint}")
-    }
+fn pane_started_at(pane: &str) -> Option<u64> {
+    tmux::get_pane_option_value(pane, "@pane_started_at")
+        .parse::<u64>()
+        .ok()
 }
 
 fn repo_label_from_ctx(ctx: &AgentContext<'_>) -> Option<String> {
