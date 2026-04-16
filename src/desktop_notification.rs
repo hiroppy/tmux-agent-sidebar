@@ -38,7 +38,7 @@ impl DesktopNotificationSettings {
         backend_available: bool,
     ) -> Self {
         let mut settings = Self::default();
-        settings.enabled = read_bool(opts, "@sidebar_os_notifications").unwrap_or(true);
+        settings.enabled = read_bool(opts, "@sidebar_notifications").unwrap_or(true);
         if settings.enabled && !backend_available {
             settings.enabled = false;
         }
@@ -278,7 +278,7 @@ mod tests {
     #[test]
     fn settings_parse_bool_and_numbers() {
         let mut opts = HashMap::new();
-        opts.insert("@sidebar_os_notifications".into(), "on".into());
+        opts.insert("@sidebar_notifications".into(), "on".into());
 
         let settings = DesktopNotificationSettings::from_tmux_options_with_backend(&opts, true);
         assert!(settings.enabled);
@@ -287,7 +287,7 @@ mod tests {
     #[test]
     fn settings_default_when_invalid() {
         let mut opts = HashMap::new();
-        opts.insert("@sidebar_os_notifications".into(), "maybe".into());
+        opts.insert("@sidebar_notifications".into(), "maybe".into());
 
         let settings = DesktopNotificationSettings::from_tmux_options_with_backend(&opts, true);
         assert!(settings.enabled);

@@ -230,7 +230,7 @@ Branches are force-deleted because the sidebar auto-generates them under the `ag
 
 - **Waiting status (Claude Code)** — After you approve a permission prompt, the status stays `waiting` until the next hook event fires. This is a limitation of the Claude Code hook system.
 - **Codex hook coverage** — Codex emits `SessionStart`, `UserPromptSubmit`, `Stop`, and `PostToolUse`. `PostToolUse` is limited to the `Bash` tool (Codex's schema types `tool_input` as `{ command: string }`), so the Codex activity log shows only Bash commands. Waiting status, task progress, subagent display, and worktree tracking remain unavailable.
-- **Desktop notifications** — macOS requires `osascript`; Linux requires `notify-send`. If those commands are missing, notifications stay silent even when `@sidebar_os_notifications` is enabled. Notifications currently cover Claude task lifecycle and permission events only.
+- **Desktop notifications** — macOS requires `osascript`; Linux requires `notify-send`. If those commands are missing, notifications stay silent even when `@sidebar_notifications` is enabled. Notifications currently cover Claude task lifecycle and permission events only.
 
 ## Customization
 
@@ -243,7 +243,7 @@ set -g @sidebar_key_all Y                # keybinding for all windows (default: 
 set -g @sidebar_width 32                 # width in columns or % (default: 15%)
 set -g @sidebar_bottom_height 20         # bottom panel height in lines (default: 20, 0 to hide)
 set -g @sidebar_auto_create off          # disable auto-create on new windows (default: on)
-set -g @sidebar_os_notifications on      # desktop notifications for high-signal events (default: on)
+set -g @sidebar_notifications on         # desktop notifications for high-signal events (default: on)
 
 # Spawn worktree modal defaults (optional)
 set -g @agent-sidebar-default-agent codex  # agent launched by `n` (default: claude)
@@ -297,7 +297,7 @@ Desktop notifications are enabled by default.
 Enable them with tmux global options:
 
 ```tmux
-set -g @sidebar_os_notifications on
+set -g @sidebar_notifications on
 ```
 
 Supported events:
