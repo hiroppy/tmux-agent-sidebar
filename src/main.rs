@@ -97,6 +97,7 @@ fn run_app(
     state.theme = tmux_agent_sidebar::ui::colors::ColorTheme::from_tmux();
     state.icons = tmux_agent_sidebar::ui::icons::StatusIcons::from_tmux();
     state.bottom_panel_height = tmux_agent_sidebar::ui::bottom_panel_height_from_tmux();
+    state.reload_desktop_notifications();
     state.global.load_from_tmux();
     state.refresh();
     let mut window_inactive_count: u32 = 0;
@@ -347,6 +348,7 @@ fn run_app(
             if is_window_active {
                 if window_inactive_count >= 2 {
                     state.global.load_from_tmux();
+                    state.reload_desktop_notifications();
                     state.rebuild_row_targets();
                 }
                 window_inactive_count = 0;

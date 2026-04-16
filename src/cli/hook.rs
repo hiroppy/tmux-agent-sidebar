@@ -1,5 +1,6 @@
 use crate::event::{AgentEvent, WorktreeInfo, resolve_adapter};
 use crate::tmux;
+use crate::{desktop_notification, desktop_notification::DesktopNotificationKind};
 
 use super::label::extract_tool_label;
 use super::{
@@ -262,17 +263,24 @@ pub(crate) fn cmd_hook(args: &[String]) -> i32 {
         return 0;
     }
 
+    let notifications = desktop_notification::DesktopNotificationSettings::from_tmux();
+
     let input = read_stdin_json();
     let Some(event) = adapter.parse(event_name, &input) else {
         return 0;
     };
 
-    handle_event(&pane, event)
+    handle_event(&pane, agent_name, event, &notifications)
 }
 
 // ─── event handler ──────────────────────────────────────────────────────────
 
-fn handle_event(pane: &str, event: AgentEvent) -> i32 {
+fn handle_event(
+    pane: &str,
+    agent_name: &str,
+    event: AgentEvent,
+    notifications: &desktop_notification::DesktopNotificationSettings,
+) -> i32 {
     match event {
         AgentEvent::SessionStart {
             agent,
@@ -371,6 +379,7 @@ fn handle_event(pane: &str, event: AgentEvent) -> i32 {
                 session_id: &session_id,
             },
             &error,
+            notifications,
         ),
         AgentEvent::SubagentStart {
             agent_type,
@@ -398,6 +407,7 @@ fn handle_event(pane: &str, event: AgentEvent) -> i32 {
                 worktree: &worktree,
                 session_id: &session_id,
             },
+            notifications,
         ),
         AgentEvent::CwdChanged {
             cwd,
@@ -409,9 +419,12 @@ fn handle_event(pane: &str, event: AgentEvent) -> i32 {
             0
         }
         AgentEvent::TaskCreated { .. } => 0,
-        AgentEvent::TaskCompleted { .. } => {
+        AgentEvent::TaskCompleted {
+            task_id,
+            task_subject,
+        } => {
             set_attention(pane, "notification");
-            0
+            on_task_completed(pane, agent_name, &task_id, &task_subject, notifications)
         }
         AgentEvent::TeammateIdle { teammate_name, .. } => on_teammate_idle(pane, &teammate_name),
         AgentEvent::WorktreeCreate => 0,
@@ -501,7 +514,12 @@ fn on_stop(pane: &str, ctx: &AgentContext<'_>, last_message: &str, response: Opt
     0
 }
 
-fn on_stop_failure(pane: &str, ctx: &AgentContext<'_>, error: &str) -> i32 {
+fn on_stop_failure(
+    pane: &str,
+    ctx: &AgentContext<'_>,
+    error: &str,
+    notifications: &desktop_notification::DesktopNotificationSettings,
+) -> i32 {
     set_agent_meta(pane, ctx);
     set_attention(pane, "clear");
     clear_run_state(pane);
@@ -510,6 +528,25 @@ fn on_stop_failure(pane: &str, ctx: &AgentContext<'_>, error: &str) -> i32 {
         tmux::set_pane_option(pane, "@pane_wait_reason", error);
     }
     set_status(pane, "error");
+    let fingerprint = if error.is_empty() {
+        "task-failed"
+    } else {
+        error
+    };
+    let repo = repo_label_from_ctx(ctx);
+    let body = if error.is_empty() {
+        "Task failed".to_string()
+    } else {
+        format!("Task failed: {error}")
+    };
+    let _ = notify_desktop(
+        pane,
+        DesktopNotificationKind::TaskFailed,
+        notifications,
+        fingerprint,
+        &desktop_notification::format_title(repo.as_deref(), ctx.agent),
+        &body,
+    );
     0
 }
 
@@ -564,11 +601,24 @@ fn on_subagent_stop(pane: &str, agent_id: Option<&str>) -> i32 {
     0
 }
 
-fn on_permission_denied(pane: &str, ctx: &AgentContext<'_>) -> i32 {
+fn on_permission_denied(
+    pane: &str,
+    ctx: &AgentContext<'_>,
+    notifications: &desktop_notification::DesktopNotificationSettings,
+) -> i32 {
     set_agent_meta(pane, ctx);
     set_status(pane, "waiting");
     set_attention(pane, "notification");
     tmux::set_pane_option(pane, "@pane_wait_reason", "permission_denied");
+    let repo = repo_label_from_ctx(ctx);
+    let _ = notify_desktop(
+        pane,
+        DesktopNotificationKind::PermissionRequired,
+        &notifications,
+        "permission_denied",
+        &desktop_notification::format_title(repo.as_deref(), ctx.agent),
+        "Permission required",
+    );
     0
 }
 
@@ -592,6 +642,78 @@ fn on_worktree_remove(pane: &str) -> i32 {
     }
     run_worktree_remove_teardown(pane);
     0
+}
+
+fn on_task_completed(
+    pane: &str,
+    agent_name: &str,
+    task_id: &str,
+    task_subject: &str,
+    notifications: &desktop_notification::DesktopNotificationSettings,
+) -> i32 {
+    let fingerprint = if !task_id.is_empty() {
+        task_id
+    } else if !task_subject.is_empty() {
+        task_subject
+    } else {
+        "task-completed"
+    };
+    let repo = repo_label_from_pane(pane);
+    let body = if task_subject.is_empty() {
+        "Task completed".to_string()
+    } else {
+        format!("Task completed: {task_subject}")
+    };
+    let _ = notify_desktop(
+        pane,
+        DesktopNotificationKind::TaskCompleted,
+        notifications,
+        fingerprint,
+        &desktop_notification::format_title(repo.as_deref(), agent_name),
+        &body,
+    );
+    0
+}
+
+fn notify_desktop(
+    pane: &str,
+    kind: DesktopNotificationKind,
+    settings: &desktop_notification::DesktopNotificationSettings,
+    fingerprint: &str,
+    title: &str,
+    body: &str,
+) -> bool {
+    desktop_notification::notify_if_allowed(settings, pane, kind, fingerprint, title, body)
+}
+
+fn repo_label_from_ctx(ctx: &AgentContext<'_>) -> Option<String> {
+    let cwd = resolve_cwd(ctx.cwd, ctx.worktree);
+    repo_label_from_path(cwd)
+}
+
+fn repo_label_from_pane(pane: &str) -> Option<String> {
+    let cwd = tmux::get_pane_option_value(pane, "@pane_cwd");
+    if !cwd.is_empty() {
+        return repo_label_from_path(&cwd);
+    }
+    let worktree = tmux::get_pane_option_value(pane, "@pane_worktree_name");
+    if !worktree.is_empty() {
+        return Some(worktree);
+    }
+    None
+}
+
+fn repo_label_from_path(path: &str) -> Option<String> {
+    let trimmed = path.trim_matches('/');
+    if trimmed.is_empty() {
+        return None;
+    }
+    let label = trimmed.rsplit('/').next().unwrap_or(trimmed).trim();
+    if label.is_empty() {
+        None
+    } else {
+        Some(label.to_string())
+    }
 }
 
 // ─── activity-log logic ─────────────────────────────────────────────────────

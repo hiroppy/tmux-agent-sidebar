@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use crate::activity::{ActivityEntry, TaskProgress};
+use crate::desktop_notification::DesktopNotificationSettings;
 use crate::tmux;
 use crate::ui::colors::ColorTheme;
 use crate::ui::icons::StatusIcons;
@@ -535,6 +536,8 @@ pub struct AppState {
     /// Height of the bottom panel in lines. Loaded once at startup from
     /// the `@sidebar_bottom_height` tmux option. A value of 0 hides the panel.
     pub bottom_panel_height: u16,
+    /// Desktop notification settings loaded from tmux global options.
+    pub desktop_notifications: DesktopNotificationSettings,
     /// Maps session_id → session name, refreshed periodically from
     /// `~/.claude/sessions/*.json` files.
     pub session_names: HashMap<String, String>,
@@ -617,6 +620,7 @@ impl AppState {
             version_notice: None,
             global: GlobalState::new(),
             bottom_panel_height: crate::ui::BOTTOM_PANEL_HEIGHT,
+            desktop_notifications: DesktopNotificationSettings::default(),
             session_names: HashMap::new(),
         }
     }
@@ -692,6 +696,11 @@ impl AppState {
 
     pub fn clear_pane_state(&mut self, pane_id: &str) {
         self.pane_states.remove(pane_id);
+    }
+
+    pub fn reload_desktop_notifications(&mut self) {
+        self.desktop_notifications =
+            DesktopNotificationSettings::from_tmux_options(&tmux::get_all_global_options());
     }
 
     /// Resolve the notices popup inputs once.

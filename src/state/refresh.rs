@@ -2,7 +2,9 @@ use std::collections::HashSet;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::activity::{self, TaskProgress};
+use crate::desktop_notification::{self, DesktopNotificationKind};
 use crate::tmux::{self, PaneStatus, SessionInfo};
+use crate::ui::text::wait_reason_label;
 
 use super::AppState;
 
@@ -131,6 +133,7 @@ impl AppState {
         }
         self.refresh_session_names();
         self.refresh_activity_data();
+        self.refresh_desktop_notifications();
         window_active
     }
 
@@ -157,6 +160,7 @@ impl AppState {
         sessions: &[SessionInfo],
     ) -> Option<crate::port::PaneProcessSnapshot> {
         const PORT_REFRESH_INTERVAL: Duration = Duration::from_secs(10);
+        let initial_scan = !self.timers.port_scan_initialized;
 
         if !self.timers.port_scan_initialized
             || self.timers.last_port_refresh.elapsed() >= PORT_REFRESH_INTERVAL
@@ -172,13 +176,45 @@ impl AppState {
                         if !scanned.live_agent_panes.contains(&pane.pane_id) {
                             dead_panes.push(pane.pane_id.clone());
                         }
+                        let previous_ports = self
+                            .pane_state(&pane.pane_id)
+                            .map(|s| s.ports.clone())
+                            .unwrap_or_default();
+                        let new_ports = scanned
+                            .ports_by_pane
+                            .get(&pane.pane_id)
+                            .cloned()
+                            .unwrap_or_default();
+                        if !initial_scan {
+                            let newly_opened: Vec<u16> = new_ports
+                                .iter()
+                                .copied()
+                                .filter(|port| !previous_ports.contains(port))
+                                .collect();
+                            if !newly_opened.is_empty() {
+                                let fingerprint = newly_opened
+                                    .iter()
+                                    .map(|p| p.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(",");
+                                let title = desktop_notification::format_title(
+                                    repo_label_for_pane(pane).as_deref(),
+                                    pane.agent.label(),
+                                );
+                                let body = format!("Port opened: {}", format_ports(&newly_opened));
+                                let _ = desktop_notification::notify_if_allowed(
+                                    &self.desktop_notifications,
+                                    &pane.pane_id,
+                                    DesktopNotificationKind::PortOpened,
+                                    &fingerprint,
+                                    &title,
+                                    &body,
+                                );
+                            }
+                        }
                         updates.push((
                             pane.pane_id.clone(),
-                            scanned
-                                .ports_by_pane
-                                .get(&pane.pane_id)
-                                .cloned()
-                                .unwrap_or_default(),
+                            new_ports,
                             scanned.command_by_pane.get(&pane.pane_id).cloned(),
                         ));
                     }
@@ -285,6 +321,72 @@ impl AppState {
         } else {
             self.activity_entries.clear();
         }
+    }
+
+    pub(crate) fn refresh_desktop_notifications(&mut self) {
+        if !self.desktop_notifications.enabled {
+            return;
+        }
+
+        for group in &self.repo_groups {
+            for (pane, _) in &group.panes {
+                if pane.status != PaneStatus::Waiting || pane.wait_reason.is_empty() {
+                    continue;
+                }
+                let Some(started_at) = pane.started_at else {
+                    continue;
+                };
+                if self.now.saturating_sub(started_at)
+                    < self.desktop_notifications.wait_threshold_secs
+                {
+                    continue;
+                }
+                let fingerprint = format!("{}:{}", started_at, pane.wait_reason);
+                let title =
+                    desktop_notification::format_title(Some(&group.name), pane.agent.label());
+                let body = format!("Waiting too long: {}", wait_reason_label(&pane.wait_reason));
+                let _ = desktop_notification::notify_if_allowed(
+                    &self.desktop_notifications,
+                    &pane.pane_id,
+                    DesktopNotificationKind::WaitingTooLong,
+                    &fingerprint,
+                    &title,
+                    &body,
+                );
+            }
+        }
+    }
+}
+
+fn format_ports(ports: &[u16]) -> String {
+    match ports {
+        [] => String::new(),
+        [single] => single.to_string(),
+        many => many
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<_>>()
+            .join(", "),
+    }
+}
+
+fn repo_label_for_pane(pane: &crate::tmux::PaneInfo) -> Option<String> {
+    if !pane.worktree_name.is_empty() {
+        return Some(pane.worktree_name.clone());
+    }
+    repo_label_from_path(&pane.path)
+}
+
+fn repo_label_from_path(path: &str) -> Option<String> {
+    let trimmed = path.trim_matches('/');
+    if trimmed.is_empty() {
+        return None;
+    }
+    let label = trimmed.rsplit('/').next().unwrap_or(trimmed).trim();
+    if label.is_empty() {
+        None
+    } else {
+        Some(label.to_string())
     }
 }
 
