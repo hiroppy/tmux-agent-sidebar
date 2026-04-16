@@ -113,6 +113,7 @@ pub fn make_pane(agent: AgentType, status: PaneStatus) -> PaneInfo {
         prompt: String::new(),
         prompt_is_response: false,
         started_at: None,
+        wait_started_at: None,
         wait_reason: String::new(),
         permission_mode: tmux_agent_sidebar::tmux::PermissionMode::Default,
         subagents: vec![],

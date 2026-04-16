@@ -60,11 +60,22 @@ fn set_status(pane: &str, status: &str) {
     if status == "clear" {
         tmux::unset_pane_option(pane, "@pane_status");
         tmux::unset_pane_option(pane, "@pane_attention");
+        tmux::unset_pane_option(pane, "@pane_wait_started_at");
     } else {
         tmux::set_pane_option(pane, "@pane_status", status);
         match status {
             "running" | "idle" => {
                 tmux::unset_pane_option(pane, "@pane_attention");
+                tmux::unset_pane_option(pane, "@pane_wait_started_at");
+            }
+            "waiting" => {
+                if tmux::get_pane_option_value(pane, "@pane_wait_started_at").is_empty() {
+                    tmux::set_pane_option(
+                        pane,
+                        "@pane_wait_started_at",
+                        &crate::desktop_notification::now_epoch_secs().to_string(),
+                    );
+                }
             }
             _ => {}
         }

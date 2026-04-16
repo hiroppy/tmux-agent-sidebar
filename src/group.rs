@@ -223,6 +223,7 @@ mod tests {
             prompt: String::new(),
             prompt_is_response: false,
             started_at: None,
+            wait_started_at: None,
             wait_reason: String::new(),
             permission_mode: crate::tmux::PermissionMode::Default,
             subagents: vec![],

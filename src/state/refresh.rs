@@ -337,16 +337,16 @@ impl AppState {
                 if pane.status != PaneStatus::Waiting || pane.wait_reason.is_empty() {
                     continue;
                 }
-                let Some(started_at) = pane.started_at else {
+                let Some(wait_started_at) = pane.wait_started_at else {
                     continue;
                 };
-                if self.now.saturating_sub(started_at)
+                if self.now.saturating_sub(wait_started_at)
                     < desktop_notification::WAIT_TOO_LONG_THRESHOLD_SECS
                 {
                     continue;
                 }
                 let fingerprint = desktop_notification::run_scoped_fingerprint(
-                    Some(started_at),
+                    Some(wait_started_at),
                     &pane.wait_reason,
                 );
                 let title =
@@ -414,6 +414,7 @@ mod tests {
             prompt: String::new(),
             prompt_is_response: false,
             started_at: None,
+            wait_started_at: None,
             wait_reason: String::new(),
             permission_mode: PermissionMode::Default,
             subagents: vec![],
