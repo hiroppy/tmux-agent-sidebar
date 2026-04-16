@@ -129,6 +129,26 @@ pub fn run_scoped_fingerprint(started_at: Option<u64>, fingerprint: &str) -> Str
     }
 }
 
+/// Returns true if a notification of `kind` has already fired for the
+/// current `run_id` on this pane. Use to dedupe events that share a kind
+/// but use distinct fingerprints (e.g. `Stop` vs explicit `TaskCompleted`
+/// in the same run).
+pub fn has_run_scoped_stamp(
+    pane_id: &str,
+    kind: DesktopNotificationKind,
+    run_id: Option<u64>,
+) -> bool {
+    let Some(run_id) = run_id else { return false };
+    if pane_id.is_empty() {
+        return false;
+    }
+    let raw = tmux::get_pane_option_value(pane_id, stamp_option_key(kind));
+    let Some(stamp) = parse_stamp(&raw) else {
+        return false;
+    };
+    stamp.fingerprint.starts_with(&format!("{run_id}:"))
+}
+
 pub fn notify_if_allowed(
     settings: &DesktopNotificationSettings,
     pane_id: &str,
@@ -446,5 +466,70 @@ mod tests {
         assert!(settings.event_enabled(DesktopNotificationEvent::Stop));
         assert!(settings.event_enabled(DesktopNotificationEvent::TaskCompleted));
         assert!(!settings.event_enabled(DesktopNotificationEvent::Notification));
+    }
+
+    #[test]
+    fn has_run_scoped_stamp_returns_false_without_stamp() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%PANE_NO_STAMP";
+        assert!(!has_run_scoped_stamp(
+            pane,
+            DesktopNotificationKind::TaskCompleted,
+            Some(1_700_000_000_000),
+        ));
+    }
+
+    #[test]
+    fn has_run_scoped_stamp_matches_current_run() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%PANE_CURRENT_RUN";
+        let run_id = 1_700_000_000_000_u64;
+        let stamp = encode_stamp(42, &format!("{run_id}:task-xyz"));
+        tmux::test_mock::set(
+            pane,
+            stamp_option_key(DesktopNotificationKind::TaskCompleted),
+            &stamp,
+        );
+        assert!(has_run_scoped_stamp(
+            pane,
+            DesktopNotificationKind::TaskCompleted,
+            Some(run_id),
+        ));
+    }
+
+    #[test]
+    fn has_run_scoped_stamp_rejects_stale_run() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%PANE_STALE_RUN";
+        let old_run = 1_600_000_000_000_u64;
+        let new_run = 1_700_000_000_000_u64;
+        let stamp = encode_stamp(42, &format!("{old_run}:task-xyz"));
+        tmux::test_mock::set(
+            pane,
+            stamp_option_key(DesktopNotificationKind::TaskCompleted),
+            &stamp,
+        );
+        assert!(!has_run_scoped_stamp(
+            pane,
+            DesktopNotificationKind::TaskCompleted,
+            Some(new_run),
+        ));
+    }
+
+    #[test]
+    fn has_run_scoped_stamp_requires_run_id() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%PANE_NO_RUN_ID";
+        let stamp = encode_stamp(42, "1700000000000:task-xyz");
+        tmux::test_mock::set(
+            pane,
+            stamp_option_key(DesktopNotificationKind::TaskCompleted),
+            &stamp,
+        );
+        assert!(!has_run_scoped_stamp(
+            pane,
+            DesktopNotificationKind::TaskCompleted,
+            None,
+        ));
     }
 }

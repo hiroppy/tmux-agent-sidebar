@@ -551,18 +551,29 @@ fn on_stop(
     clear_run_state(pane);
     mark_task_reset(pane);
     set_status(pane, "idle");
-    let repo = repo_label_from_ctx(ctx);
-    let fingerprint =
-        desktop_notification::run_scoped_fingerprint(notification_run_id(pane), "stop");
-    let _ = notify_desktop(
+    let run_id = notification_run_id(pane);
+    // Skip the generic Stop notification if an explicit TaskCompleted
+    // stamp from the current run has already fired — otherwise Claude
+    // Code's `TaskCompleted` → `Stop` sequence produces two desktop
+    // notifications for the same logical completion.
+    let already_notified = desktop_notification::has_run_scoped_stamp(
         pane,
         DesktopNotificationKind::TaskCompleted,
-        desktop_notification::DesktopNotificationEvent::Stop,
-        notifications,
-        &fingerprint,
-        &desktop_notification::format_title(repo.as_deref(), ctx.agent),
-        &task_completed_body(""),
+        run_id,
     );
+    if !already_notified {
+        let repo = repo_label_from_ctx(ctx);
+        let fingerprint = desktop_notification::run_scoped_fingerprint(run_id, "stop");
+        let _ = notify_desktop(
+            pane,
+            DesktopNotificationKind::TaskCompleted,
+            desktop_notification::DesktopNotificationEvent::Stop,
+            notifications,
+            &fingerprint,
+            &desktop_notification::format_title(repo.as_deref(), ctx.agent),
+            &task_completed_body(""),
+        );
+    }
     if let Some(resp) = response {
         println!("{resp}");
     }
