@@ -50,8 +50,10 @@ impl GlobalState {
         }
     }
 
-    /// Save cursor position to tmux global variable.
-    pub fn save_cursor(&mut self) {
+    /// Save cursor position to tmux global variable. Returns `true` when
+    /// tmux accepted the write so callers can decide whether to clear a
+    /// queued save or keep retrying.
+    pub fn save_cursor(&mut self) -> bool {
         if tmux::run_tmux(&[
             "set",
             "-g",
@@ -61,6 +63,9 @@ impl GlobalState {
         .is_some()
         {
             self.last_saved_cursor = self.selected_pane_row;
+            true
+        } else {
+            false
         }
     }
 
@@ -79,9 +84,15 @@ impl GlobalState {
         if queued_at.elapsed() < debounce {
             return false;
         }
-        self.pending_cursor_save_since = None;
-        self.save_cursor();
-        true
+        // Only clear the pending marker on successful tmux write — otherwise
+        // a transient failure would silently drop the queued save instead of
+        // retrying on the next flush tick.
+        if self.save_cursor() {
+            self.pending_cursor_save_since = None;
+            true
+        } else {
+            false
+        }
     }
 
     /// Save repo filter to tmux global variable.

@@ -267,7 +267,11 @@ fn build_session_hierarchy(all_panes_output: &str) -> (SessionMap, Vec<CodexPidE
 
         let session_name = parts[session_line_field::SESSION_NAME].as_str();
         let window_id = parts[session_line_field::WINDOW_ID].as_str();
-        let pane_line = parts[session_line_field::PANE_LINE_OFFSET..].join("|");
+        // Pass the unescaped pane fields directly instead of re-joining
+        // with `|` and re-splitting, which would turn any literal pipe
+        // inside a pane field (cwd, prompt, branch) back into a field
+        // separator and shift every downstream index.
+        let pane_fields = &parts[session_line_field::PANE_LINE_OFFSET..];
 
         let sessions_entry = sessions_map.entry(session_name.to_string()).or_default();
 
@@ -281,7 +285,7 @@ fn build_session_hierarchy(all_panes_output: &str) -> (SessionMap, Vec<CodexPidE
                 panes: Vec::new(),
             });
 
-        if let Some(pane) = parse_pane_line(&pane_line) {
+        if let Some(pane) = parse_pane_fields(pane_fields) {
             if pane.agent == AgentType::Codex
                 && let Some(pid) = pane.pane_pid
             {
@@ -350,8 +354,18 @@ fn finalize_sessions(sessions_map: SessionMap) -> Vec<SessionInfo> {
 
 /// Parse a single pane line from `tmux list-panes -F`.
 /// Returns None if the line has fewer than 20 fields, is a sidebar, or has no agent.
+/// Thin wrapper used by the unit tests, which still construct a raw
+/// `|`-joined fixture line. Production callers go through
+/// `parse_pane_fields` directly to avoid re-joining and re-splitting
+/// fields that may themselves contain literal `|` characters (cwd,
+/// prompt, branch) — see `build_session_hierarchy`.
+#[cfg(test)]
 pub(crate) fn parse_pane_line(line: &str) -> Option<PaneInfo> {
     let parts = split_tmux_fields(line, '|');
+    parse_pane_fields(&parts)
+}
+
+pub(crate) fn parse_pane_fields(parts: &[String]) -> Option<PaneInfo> {
     if parts.len() < pane_line_field::MIN_FIELDS {
         return None;
     }

@@ -597,7 +597,11 @@ fn snapshot_git_more_than_5_files() {
     ╰──────────────────────────╯
     ");
 
-    // Scroll to bottom; no overflow at 7 files with a 10-file cap.
+    // Setting `offset = 5` when the viewport can show all 8 content
+    // rows (no overflow) is clamped back to 0 by `ScrollState::scroll(0)`
+    // in `draw_git_content`, so the rendered view still includes the
+    // whole file list. The clamp guards against stale over-scroll state
+    // when the file list shrinks between frames.
     state.scrolls.git.offset = 5;
     let scrolled = render_to_string(&mut state, 28, 40);
     insta::assert_snapshot!(scrolled, @"
@@ -609,6 +613,11 @@ fn snapshot_git_more_than_5_files() {
     │main                      │
     │                   7 files│
     │──────────────────────────│
+    │Unstaged (7)              │
+    │M a.rs             +100/-0│
+    │M b.rs              +80/-0│
+    │M c.rs              +60/-0│
+    │M d.rs              +40/-0│
     │M e.rs              +20/-0│
     │M f.rs              +10/-0│
     │M g.rs               +5/-0│

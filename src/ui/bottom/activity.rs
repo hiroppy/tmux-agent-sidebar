@@ -53,6 +53,10 @@ pub(super) fn draw_activity_content(frame: &mut Frame, state: &mut AppState, inn
 
     state.activity.scroll.total_lines = lines.len();
     state.activity.scroll.visible_height = inner.height as usize;
+    // Clamp `offset` to the new total/visible. When entries shrink
+    // (focus change, log trim) the stale offset would otherwise produce
+    // an empty or over-scrolled paragraph.
+    state.activity.scroll.scroll(0);
 
     let scroll_offset = state.activity.scroll.offset as u16;
     let paragraph = Paragraph::new(lines).scroll((scroll_offset, 0));

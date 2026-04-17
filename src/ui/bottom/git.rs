@@ -386,6 +386,10 @@ pub(super) fn draw_git_content(frame: &mut Frame, state: &mut AppState, inner: R
 
     state.scrolls.git.total_lines = lines.len();
     state.scrolls.git.visible_height = content_height as usize;
+    // Clamp `offset` to the new viewport. Without this, shrinking
+    // content (e.g. the diff list drops entries between frames) can
+    // leave the paragraph scrolled past its last line.
+    state.scrolls.git.scroll(0);
 
     let scroll_offset = state.scrolls.git.offset as u16;
     let paragraph = Paragraph::new(lines).scroll((scroll_offset, 0));
