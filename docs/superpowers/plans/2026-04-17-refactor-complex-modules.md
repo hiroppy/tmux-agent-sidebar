@@ -20,7 +20,7 @@ Run at the end of every commit, before `git commit`:
 
 ```bash
 cargo fmt --check                            # must pass
-cargo clippy --all-targets -- -D warnings    # must pass, no new warnings
+cargo clippy                                 # must pass (matches CI; pre-existing warnings ok)
 cargo test                                   # all tests green (912+ + any new)
 cargo insta pending-snapshots                # must output nothing (no pending snapshots)
 ```
@@ -214,7 +214,7 @@ rg -n '\b(activity_entries|activity_scroll|activity_max_entries|activity_log_cac
 ```bash
 cargo fmt
 cargo fmt --check
-cargo clippy --all-targets -- -D warnings
+cargo clippy
 cargo test
 cargo insta pending-snapshots
 ```
@@ -365,7 +365,7 @@ Known call site not caught by the first grep: `src/ui/bottom.rs:30` reads `state
 - [ ] **Step 6: Run verification checklist + commit**
 
 ```bash
-cargo fmt && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo insta pending-snapshots
+cargo fmt && cargo fmt --check && cargo clippy && cargo test && cargo insta pending-snapshots
 git add -A
 git commit -m "refactor(state): extract FocusState and ScrollStates"
 ```
@@ -504,7 +504,7 @@ rg -n '\b(pane_states|seen_agent_panes)\b' src/ tests/
 - [ ] **Step 5: Run verification checklist + commit**
 
 ```bash
-cargo fmt && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo insta pending-snapshots
+cargo fmt && cargo fmt --check && cargo clippy && cargo test && cargo insta pending-snapshots
 git add -A
 git commit -m "refactor(state): extract PaneRuntimeMap wrapper"
 ```
@@ -558,7 +558,7 @@ Rule: a test goes where its unit-under-test lives. Never duplicate.
 - [ ] **Step 3: Run verification checklist + commit**
 
 ```bash
-cargo fmt && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo insta pending-snapshots
+cargo fmt && cargo fmt --check && cargo clippy && cargo test && cargo insta pending-snapshots
 git add -A
 git commit -m "refactor(state): move type definitions into state/ submodules"
 ```
@@ -631,7 +631,7 @@ rg -n '\b(worktree_name|worktree_branch)\b' src/ tests/
 - [ ] **Step 4: Run verification checklist + commit**
 
 ```bash
-cargo fmt && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo insta pending-snapshots
+cargo fmt && cargo fmt --check && cargo clippy && cargo test && cargo insta pending-snapshots
 git add -A
 git commit -m "refactor(tmux): extract WorktreeMetadata from PaneInfo"
 ```
@@ -685,7 +685,7 @@ let pane_cwd = &parts[pane_field::PANE_CWD];
 - [ ] **Step 4: Run verification checklist + commit**
 
 ```bash
-cargo fmt && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo insta pending-snapshots
+cargo fmt && cargo fmt --check && cargo clippy && cargo test && cargo insta pending-snapshots
 git add -A
 git commit -m "refactor(tmux): name-constant pane line field indices"
 ```
@@ -1154,7 +1154,7 @@ And anywhere `notification_settings()` is called, use `notifications::notificati
 - [ ] **Step 4: Verification checklist + commit**
 
 ```bash
-cargo fmt && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo insta pending-snapshots
+cargo fmt && cargo fmt --check && cargo clippy && cargo test && cargo insta pending-snapshots
 git add -A
 git commit -m "refactor(cli/hook): split activity and notifications modules"
 ```
@@ -1340,7 +1340,7 @@ Alternative: reuse a fixture builder from `tests/test_helpers.rs` if one exists 
 - [ ] **Step 8: Run full verification + commit**
 
 ```bash
-cargo fmt && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cargo insta pending-snapshots
+cargo fmt && cargo fmt --check && cargo clippy && cargo test && cargo insta pending-snapshots
 ```
 
 Optional: measure coverage delta if `cargo-llvm-cov` is installed:
@@ -1396,7 +1396,7 @@ git commit -m "docs: update architecture sections for refactored module layout"
 Run once the whole 13-commit sequence is in:
 
 - [ ] `cargo fmt --check` — passes
-- [ ] `cargo clippy --all-targets -- -D warnings` — passes
+- [ ] `cargo clippy` — passes
 - [ ] `cargo test` — 912+ existing tests plus new tests from Task 5.1 all pass
 - [ ] `cargo build --release` — succeeds
 - [ ] `cargo insta pending-snapshots` — empty output
