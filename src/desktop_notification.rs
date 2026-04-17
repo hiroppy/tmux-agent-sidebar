@@ -88,15 +88,13 @@ impl DesktopNotificationSettings {
         opts: &HashMap<String, String>,
         backend_available: bool,
     ) -> Self {
-        let mut settings = Self::default();
-        settings.enabled = read_bool(opts, "@sidebar_notifications").unwrap_or(true);
-        if settings.enabled && !backend_available {
-            settings.enabled = false;
-        }
-        if let Some(raw) = opts.get("@sidebar_notifications_events") {
-            settings.events = parse_events(raw);
-        }
-        settings
+        let enabled = read_bool(opts, "@sidebar_notifications").unwrap_or(true);
+        let enabled = enabled && backend_available;
+        let events = opts
+            .get("@sidebar_notifications_events")
+            .map_or_else(|| Self::default().events, |raw| parse_events(raw));
+
+        Self { enabled, events }
     }
 
     pub fn from_tmux() -> Self {
@@ -253,7 +251,7 @@ fn send_desktop_notification(title: &str, body: &str) -> Result<(), String> {
             .args(["-e", &script])
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        return run_notification_command(&mut command, "osascript", DESKTOP_NOTIFICATION_TIMEOUT);
+        run_notification_command(&mut command, "osascript", DESKTOP_NOTIFICATION_TIMEOUT)
     }
 
     #[cfg(target_os = "linux")]
@@ -268,13 +266,13 @@ fn send_desktop_notification(title: &str, body: &str) -> Result<(), String> {
             ])
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        return run_notification_command(&mut command, "notify-send", DESKTOP_NOTIFICATION_TIMEOUT);
+        run_notification_command(&mut command, "notify-send", DESKTOP_NOTIFICATION_TIMEOUT)
     }
 
     #[cfg(target_os = "windows")]
     {
         let _ = (title, body);
-        return Err("desktop notifications are not supported on Windows yet".into());
+        Err("desktop notifications are not supported on Windows yet".into())
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
@@ -292,12 +290,12 @@ fn notification_backend_available() -> bool {
             .args(["-e", "return 0"])
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        return run_notification_command(
+        run_notification_command(
             &mut command,
             "osascript",
             DESKTOP_NOTIFICATION_PROBE_TIMEOUT,
         )
-        .is_ok();
+        .is_ok()
     }
 
     #[cfg(target_os = "linux")]
@@ -329,10 +327,9 @@ fn notification_backend_available() -> bool {
 #[cfg(target_os = "macos")]
 fn escape_applescript(value: &str) -> String {
     value
+        .replace(['\n', '\r'], " ")
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
-        .replace('\n', " ")
-        .replace('\r', " ")
 }
 
 fn run_notification_command(

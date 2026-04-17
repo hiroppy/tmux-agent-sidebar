@@ -195,6 +195,24 @@ fn unique_window_paths(output: &str) -> Vec<(String, String)> {
     windows
 }
 
+pub(crate) fn cmd_auto_close(args: &[String]) -> i32 {
+    let window_id = match args.first() {
+        Some(id) => id.as_str(),
+        None => return 0,
+    };
+
+    let output =
+        tmux::run_tmux(&["list-panes", "-t", window_id, "-F", "#{@pane_role}"]).unwrap_or_default();
+
+    let non_sidebar = output.lines().filter(|line| *line != "sidebar").count();
+
+    if non_sidebar == 0 {
+        let _ = tmux::run_tmux(&["kill-window", "-t", window_id]);
+    }
+
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -231,22 +249,4 @@ mod tests {
             vec![("%1".to_string(), "/tmp".to_string())]
         );
     }
-}
-
-pub(crate) fn cmd_auto_close(args: &[String]) -> i32 {
-    let window_id = match args.first() {
-        Some(id) => id.as_str(),
-        None => return 0,
-    };
-
-    let output =
-        tmux::run_tmux(&["list-panes", "-t", window_id, "-F", "#{@pane_role}"]).unwrap_or_default();
-
-    let non_sidebar = output.lines().filter(|line| *line != "sidebar").count();
-
-    if non_sidebar == 0 {
-        let _ = tmux::run_tmux(&["kill-window", "-t", window_id]);
-    }
-
-    0
 }

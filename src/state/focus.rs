@@ -1,14 +1,9 @@
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum Focus {
     Filter,
+    #[default]
     Panes,
     ActivityLog,
-}
-
-impl Default for Focus {
-    fn default() -> Self {
-        Self::Panes
-    }
 }
 
 #[derive(Debug, Clone)]
