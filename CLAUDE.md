@@ -44,13 +44,13 @@ TUI event loop (main.rs) → AppState::sync_global_state() → reads tmux panes 
 
 ### Key Modules
 
-- **`state.rs`** — `AppState` central struct: sessions, repo groups, filters, scroll positions, focus management. All UI is computed from this state.
-- **`tmux.rs`** — Tmux integration: queries all panes via single `list-panes -a` call, defines `PaneInfo`/`PaneStatus`/`AgentType`/`PermissionMode`.
-- **`cli/hook.rs`** — Receives real-time status updates from agent hooks, writes state to `/tmp/` files for the TUI to read.
+- **`state.rs` + `state/`** — `AppState` central struct plus topical submodules (`activity`, `session`, `focus`, `scroll`, `pane_runtime`, `layout`, `popup`, `notices`, `timers`, `filter`, `global`, `refresh`, `tab`). All UI is computed from this state.
+- **`tmux.rs`** — Tmux integration: queries all panes via single `list-panes -a` call, defines `PaneInfo`/`PaneStatus`/`AgentType`/`PermissionMode`/`WorktreeMetadata`.
+- **`cli/hook.rs` + `cli/hook/`** — Receives real-time status updates from agent hooks; dispatch in `hook.rs`, with submodules `context` (shared helpers + `AgentContext`), `handlers` (per-event `on_*` handlers), `activity` (activity log writing), `notifications` (desktop notification helpers).
 - **`git.rs`** — Git operations (branch, ahead/behind, PR numbers via `gh` CLI, diff stats). Runs in a background polling thread.
 - **`activity.rs`** — Parses `/tmp/tmux-agent-activity*.log` files, maps tool types to colors.
 - **`group.rs`** — Groups panes by repository path.
-- **`ui/`** — Rendering layer: `panes.rs` (agent list + repo filter), `bottom.rs` (activity/git tabs), `colors.rs` (256-color theme), `text.rs` (text formatting/truncation).
+- **`ui/`** — Rendering layer: `panes.rs` (agent list + repo filter) with submodules (`filter_bar`, `row`, `row_collector`, `click_targets`, `popups`); `bottom.rs` (activity/git tabs); `colors.rs` (256-color theme); `text.rs` (text formatting/truncation).
 
 ### State Management
 

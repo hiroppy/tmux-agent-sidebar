@@ -71,30 +71,32 @@ Per-pane file-based state:
 | Field | Update Frequency | Description |
 |-------|-----------------|-------------|
 | `repo_groups` | Every 1s | Panes grouped by git repo root (built directly from `tmux::query_sessions()` output, not stored separately as a session list) |
-| `focused_pane_id` | Every 1s, plus immediately on user-initiated pane jumps | Currently focused agent pane |
-| `sidebar_focused` | Every 1s | Whether sidebar pane itself has focus |
+| `focus_state.focused_pane_id` | Every 1s, plus immediately on user-initiated pane jumps | Currently focused agent pane |
+| `focus_state.sidebar_focused` | Every 1s | Whether sidebar pane itself has focus |
+| `focus_state.focus` | On user input | UI focus: `Filter` / `Panes` / `ActivityLog`; input also triggers an immediate redraw so focus changes appear without waiting for the next poll tick |
+| `focus_state.prev_focused_pane_id` | Every 1s | Previous focused pane ID (for detecting focus changes) |
 | `now` | Every 1s | Current Unix epoch |
-| `focus` | On user input | UI focus: `Filter` / `Panes` / `ActivityLog`; input also triggers an immediate redraw so focus changes appear without waiting for the next poll tick |
-| `panes_scroll` | On user input / render | Agent list scroll position |
-| `activity_scroll` | On user input / render | Activity log scroll position |
-| `git_scroll` | On user input / render | Git status scroll position |
-| `activity_entries` | Every 1s | Focused pane's activity entries (max 50) |
+| `scrolls.panes` | On user input / render | Agent list scroll position |
+| `scrolls.git` | On user input / render | Git status scroll position |
+| `activity.scroll` | On user input / render | Activity log scroll position |
+| `activity.entries` | Every 1s | Focused pane's activity entries (max 50) |
+| `activity.max_entries` | Once at startup | Max activity log entries to display |
+| `activity.log_cache` | Every 1s | `(focused_pane_id, mtime)` of the last-rendered activity log; skips re-reads when unchanged |
 | `git` | Every 2s (bg thread) | Branch, diff stats, ahead/behind, PR number |
 | `bottom_tab` | On user input / auto-switch | Current bottom panel tab |
 | `theme` | Once at startup | Color theme from tmux `@sidebar_color_*` variables |
 | `popup` | On user input / render | `PopupState` enum: `None` / `Repo { selected, area }` / `Notices { area }`. Enforces "at most one popup open" via the type system |
-| `layout` | Every frame (render) | `FrameLayout` sub-struct bundling the four ephemeral fields the UI rewrites every frame for click hit-testing: `pane_row_targets`, `line_to_row`, `repo_button_col`, `hyperlink_overlays` |
+| `layout` | Every frame (render) | `FrameLayout` sub-struct bundling the ephemeral fields the UI rewrites every frame for click hit-testing: `pane_row_targets`, `line_to_row`, `repo_button_col`, `repo_spawn_targets`, `spawn_remove_targets`, `hyperlink_overlays` |
 | `notices` | Once at startup / on copy | `NoticesState` sub-struct: `button_col`, `missing_hook_groups`, `claude_plugin_installed_version`, `claude_settings_has_residual_hooks`, `claude_plugin_notice`, `copy_targets`, `copied_at` |
 | `timers` | Refresh cycle / on user input | `RefreshTimers` sub-struct gating periodic work: `last_filter_click` (debounce), `last_port_refresh`, `port_scan_initialized` |
 | `pending_osc52_copy` | On successful copy / frame flush | OSC 52 clipboard payload queued for terminal forwarding |
 | `spinner_frame` | Every 200ms (animation) | Spinner animation frame counter |
 | `icons` | Once at startup | `StatusIcons` theme (overridable via tmux options) |
 | `tmux_pane` | Once at startup | This sidebar's own tmux pane ID |
-| `activity_max_entries` | Once at startup | Max activity log entries to display |
-| `prev_focused_pane_id` | Every 1s | Previous focused pane ID (for detecting focus changes) |
-| `seen_agent_panes` | Every 1s | Set of pane IDs that have been seen as agents |
+| `pane_states.seen` | Every 1s | Set of pane IDs that have been seen as agents (bundled with `pane_states.map` under the `PaneRuntimeMap` wrapper) |
 | `version_notice` | Once at startup (bg fetch) | GitHub release update notice, `None` when up-to-date |
-| `session_names` | Every 10s (background thread) | `session_id → session name` map; scanned by `session_poll_loop` in `main.rs` so the TUI thread never blocks on filesystem I/O |
+| `sessions.names` | Every 10s (background thread) | `session_id → session name` map; scanned by `session_poll_loop` in `main.rs` so the TUI thread never blocks on filesystem I/O |
+| `sessions.dirty` | On session map refresh / application tick | Marks the session map as changed so the per-pane session label walk only runs when needed |
 
 ---
 
@@ -106,14 +108,15 @@ Per-pane file-based state:
 │  layout.* (rebuilt by ui::draw), spinner animation          │
 ├─────────────────────────────────────────────────────────────┤
 │  Every 1s (refresh cycle)                                   │
-│  repo_groups, focused_pane_id, layout.pane_row_targets,     │
-│  activity_entries, pane_states.task_progress                │
+│  repo_groups, focus_state.focused_pane_id,                  │
+│  layout.pane_row_targets, activity.entries,                 │
+│  pane_states.map[..].task_progress                          │
 ├─────────────────────────────────────────────────────────────┤
 │  Every 10s (port scan, background)                          │
-│  pane_states.ports, agent liveness cleanup                  │
+│  pane_states.map[..].ports, agent liveness cleanup          │
 ├─────────────────────────────────────────────────────────────┤
 │  Every 10s (session_names background thread)                │
-│  session_names map populated by session_poll_loop           │
+│  sessions.names map populated by session_poll_loop          │
 ├─────────────────────────────────────────────────────────────┤
 │  Once at startup                                             │
 │  theme, bottom_panel_height, notices.claude_plugin_*,       │
@@ -130,8 +133,9 @@ Per-pane file-based state:
 │  @pane_* tmux options, activity log files                   │
 ├─────────────────────────────────────────────────────────────┤
 │  On user input                                              │
-│  focus, scroll offsets, bottom_tab, GlobalState fields,     │
-│  popup (PopupState enum), timers.last_filter_click,         │
+│  focus_state.focus, scrolls.*, activity.scroll, bottom_tab, │
+│  GlobalState fields, popup (PopupState enum),               │
+│  timers.last_filter_click,                                  │
 │  immediate selection / active-pane redraw                   │
 ├─────────────────────────────────────────────────────────────┤
 │  Every frame (render)                                       │
@@ -212,6 +216,48 @@ struct PaneRuntimeState {
     task_dismissed_total: Option<usize>,
     inactive_since: Option<u64>,
     tab_pref: Option<BottomTab>,
+    task_progress_log_mtime: Option<SystemTime>,
+}
+
+/// Wraps `PaneRuntimeState` per pane plus the set of pane IDs that
+/// have been seen as agents. Methods delegate to the underlying
+/// `HashMap`; `seen` is read/written alongside `map` during refresh.
+struct PaneRuntimeMap {
+    map: HashMap<String, PaneRuntimeState>,
+    seen: HashSet<String>,
+}
+
+/// Focus-related fields grouped so UI code can pass them as a single
+/// sub-struct rather than juggling four flat fields.
+struct FocusState {
+    sidebar_focused: bool,
+    focus: Focus,
+    focused_pane_id: Option<String>,
+    prev_focused_pane_id: Option<String>,
+}
+
+/// Non-activity scrolls (the agent list and the git bottom panel).
+/// Activity's scroll lives inside `ActivityState` because it pairs
+/// with the activity entries buffer.
+struct ScrollStates {
+    panes: ScrollState,
+    git: ScrollState,
+}
+
+/// Activity-log snapshot for the focused pane plus cache metadata so
+/// the polling tick can skip redundant file reads.
+struct ActivityState {
+    entries: Vec<ActivityEntry>,
+    scroll: ScrollState,
+    max_entries: usize,
+    log_cache: Option<(String, SystemTime)>,
+}
+
+/// Session-name map scanned by a background thread so the TUI thread
+/// never blocks on `~/.claude/sessions/*.json` reads.
+struct SessionNamesState {
+    names: HashMap<String, String>,
+    dirty: bool,
 }
 
 /// Frame-scoped render output cached for click hit-testing. Rewritten
@@ -221,6 +267,8 @@ struct FrameLayout {
     pane_row_targets: Vec<RowTarget>,
     line_to_row: Vec<Option<usize>>,
     repo_button_col: Option<u16>,
+    repo_spawn_targets: Vec<RepoSpawnTarget>,
+    spawn_remove_targets: Vec<SpawnRemoveTarget>,
     hyperlink_overlays: Vec<HyperlinkOverlay>,
 }
 
@@ -250,7 +298,7 @@ struct NoticesState {
 ## State Invariants
 
 1. `selected_pane_row` is always < `layout.pane_row_targets.len()` — clamped in `rebuild_row_targets()`
-2. `activity_entries` contains only the focused pane's entries — cleared on focus change
+2. `activity.entries` contains only the focused pane's entries — cleared on focus change
 3. Tab preferences persist per pane in `PaneRuntimeState.tab_pref` and are restored on focus change. They vanish together with the rest of `PaneRuntimeState` when the pane is pruned, so a relaunched agent starts on the default tab
 4. Git fetching respects the `git_tab_active` flag — stops when tab is hidden
 5. Task progress has a 3-second debounce — prevents flicker when agent briefly pauses
