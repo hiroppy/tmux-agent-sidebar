@@ -1,24 +1,23 @@
 use ratatui::layout::Rect;
 
-use super::row_collector::CollectedRows;
 use super::{REMOVE_MARKER_HIT_WIDTH, SPAWN_BUTTON};
 use crate::state::{AppState, RepoSpawnTarget, SpawnRemoveTarget};
 
 pub(super) fn materialize(
     state: &mut AppState,
-    collected: &CollectedRows,
+    pending_spawn: Vec<(usize, String, String)>,
+    pending_remove: Vec<(usize, u16, String)>,
     scroll_offset: usize,
     list_area: Rect,
 ) {
     let btn_width = SPAWN_BUTTON.len() as u16;
-    state.layout.repo_spawn_targets = collected
-        .pending_spawn
-        .iter()
+    state.layout.repo_spawn_targets = pending_spawn
+        .into_iter()
         .filter_map(|(line_idx, repo_name, repo_root)| {
-            if *line_idx < scroll_offset {
+            if line_idx < scroll_offset {
                 return None;
             }
-            let screen_row = (*line_idx - scroll_offset) as u16;
+            let screen_row = (line_idx - scroll_offset) as u16;
             if screen_row >= list_area.height {
                 return None;
             }
@@ -26,20 +25,19 @@ pub(super) fn materialize(
             let btn_y = list_area.y + screen_row;
             Some(RepoSpawnTarget {
                 rect: Rect::new(btn_x, btn_y, btn_width, 1),
-                repo_name: repo_name.clone(),
-                repo_root: repo_root.clone(),
+                repo_name,
+                repo_root,
             })
         })
         .collect();
 
-    state.layout.spawn_remove_targets = collected
-        .pending_remove
-        .iter()
+    state.layout.spawn_remove_targets = pending_remove
+        .into_iter()
         .filter_map(|(line_idx, marker_col, pane_id)| {
-            if *line_idx < scroll_offset {
+            if line_idx < scroll_offset {
                 return None;
             }
-            let screen_row = (*line_idx - scroll_offset) as u16;
+            let screen_row = (line_idx - scroll_offset) as u16;
             if screen_row >= list_area.height {
                 return None;
             }
@@ -55,7 +53,7 @@ pub(super) fn materialize(
             let btn_y = list_area.y + screen_row;
             Some(SpawnRemoveTarget {
                 rect: Rect::new(btn_x, btn_y, REMOVE_MARKER_HIT_WIDTH, 1),
-                pane_id: pane_id.clone(),
+                pane_id,
             })
         })
         .collect();
@@ -75,25 +73,18 @@ mod tests {
         }
     }
 
-    fn collected_with(
-        pending_spawn: Vec<(usize, String, String)>,
-        pending_remove: Vec<(usize, u16, String)>,
-    ) -> CollectedRows {
-        CollectedRows {
-            lines: Vec::new(),
-            line_to_row: Vec::new(),
-            pending_spawn,
-            pending_remove,
-        }
-    }
-
     #[test]
     fn materialize_places_spawn_targets_at_absolute_coords() {
         let mut state = AppState::new("%0".into());
-        let collected = collected_with(vec![(0, "repo".into(), "/tmp/repo".into())], Vec::new());
         let list_area = test_list_area();
 
-        materialize(&mut state, &collected, 0, list_area);
+        materialize(
+            &mut state,
+            vec![(0, "repo".into(), "/tmp/repo".into())],
+            Vec::new(),
+            0,
+            list_area,
+        );
 
         assert_eq!(state.layout.repo_spawn_targets.len(), 1);
         let target = &state.layout.repo_spawn_targets[0];
@@ -112,10 +103,15 @@ mod tests {
     fn materialize_places_remove_targets_with_marker_hit_width() {
         let mut state = AppState::new("%0".into());
         let marker_col: u16 = 30;
-        let collected = collected_with(Vec::new(), vec![(2, marker_col, "%42".into())]);
         let list_area = test_list_area();
 
-        materialize(&mut state, &collected, 0, list_area);
+        materialize(
+            &mut state,
+            Vec::new(),
+            vec![(2, marker_col, "%42".into())],
+            0,
+            list_area,
+        );
 
         assert_eq!(state.layout.spawn_remove_targets.len(), 1);
         let target = &state.layout.spawn_remove_targets[0];
@@ -132,16 +128,18 @@ mod tests {
     #[test]
     fn materialize_filters_out_lines_above_scroll_offset() {
         let mut state = AppState::new("%0".into());
-        let collected = collected_with(
+        let list_area = test_list_area();
+
+        materialize(
+            &mut state,
             vec![
                 (0, "above".into(), "/repo/above".into()),
                 (5, "visible".into(), "/repo/visible".into()),
             ],
             vec![(0, 20, "%above".into()), (5, 20, "%visible".into())],
+            3,
+            list_area,
         );
-        let list_area = test_list_area();
-
-        materialize(&mut state, &collected, 3, list_area);
 
         assert_eq!(state.layout.repo_spawn_targets.len(), 1);
         assert_eq!(state.layout.repo_spawn_targets[0].repo_name, "visible");
@@ -155,15 +153,16 @@ mod tests {
         let list_area = test_list_area();
         // height is 10 → rows [0, 10). line_idx 15 (with scroll_offset=0)
         // maps to screen_row=15 which is >= height=10, so it must drop.
-        let collected = collected_with(
+        materialize(
+            &mut state,
             vec![
                 (0, "inside".into(), "/repo/inside".into()),
                 (15, "outside".into(), "/repo/outside".into()),
             ],
             vec![(0, 20, "%inside".into()), (15, 20, "%outside".into())],
+            0,
+            list_area,
         );
-
-        materialize(&mut state, &collected, 0, list_area);
 
         assert_eq!(state.layout.repo_spawn_targets.len(), 1);
         assert_eq!(state.layout.repo_spawn_targets[0].repo_name, "inside");
@@ -185,12 +184,7 @@ mod tests {
             pane_id: "%stale".into(),
         }];
 
-        materialize(
-            &mut state,
-            &collected_with(Vec::new(), Vec::new()),
-            0,
-            test_list_area(),
-        );
+        materialize(&mut state, Vec::new(), Vec::new(), 0, test_list_area());
 
         assert!(state.layout.repo_spawn_targets.is_empty());
         assert!(state.layout.spawn_remove_targets.is_empty());

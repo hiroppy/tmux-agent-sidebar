@@ -423,13 +423,8 @@ fn render_secondary_header_into(frame: &mut Frame, state: &mut AppState, area: R
     frame.render_widget(Paragraph::new(vec![line]), area);
 }
 
-fn compute_scroll_offset(
-    state: &mut AppState,
-    collected: &row_collector::CollectedRows,
-    list_area: Rect,
-) -> usize {
-    state.layout.line_to_row = collected.line_to_row.clone();
-    state.scrolls.panes.total_lines = collected.lines.len();
+fn compute_scroll_offset(state: &mut AppState, total_lines: usize, list_area: Rect) -> usize {
+    state.scrolls.panes.total_lines = total_lines;
     state.scrolls.panes.visible_height = list_area.height as usize;
 
     // Auto-scroll to keep selected agent visible
@@ -460,11 +455,11 @@ fn compute_scroll_offset(
 
 fn render_pane_rows(
     frame: &mut Frame,
-    collected: &row_collector::CollectedRows,
+    lines: Vec<Line<'static>>,
     scroll_offset: usize,
     list_area: Rect,
 ) {
-    let paragraph = Paragraph::new(collected.lines.clone()).scroll((scroll_offset as u16, 0));
+    let paragraph = Paragraph::new(lines).scroll((scroll_offset as u16, 0));
     frame.render_widget(paragraph, list_area);
 }
 
@@ -493,10 +488,22 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
     render_filter_bar_into(frame, state, layout.filter_area);
     render_secondary_header_into(frame, state, layout.secondary_area);
 
-    let collected = row_collector::collect(state, layout.list_area.width);
-    let scroll_offset = compute_scroll_offset(state, &collected, layout.list_area);
-    click_targets::materialize(state, &collected, scroll_offset, layout.list_area);
-    render_pane_rows(frame, &collected, scroll_offset, layout.list_area);
+    let row_collector::CollectedRows {
+        lines,
+        line_to_row,
+        pending_spawn,
+        pending_remove,
+    } = row_collector::collect(state, layout.list_area.width);
+    state.layout.line_to_row = line_to_row;
+    let scroll_offset = compute_scroll_offset(state, lines.len(), layout.list_area);
+    click_targets::materialize(
+        state,
+        pending_spawn,
+        pending_remove,
+        scroll_offset,
+        layout.list_area,
+    );
+    render_pane_rows(frame, lines, scroll_offset, layout.list_area);
 
     render_flash_banner_into(frame, state, area);
     popups::render_if_open(frame, state, area);
