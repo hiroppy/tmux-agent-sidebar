@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::time::Instant;
 
 use crate::activity::TaskProgress;
@@ -7,119 +6,32 @@ use crate::ui::colors::ColorTheme;
 use crate::ui::icons::StatusIcons;
 
 mod activity;
+mod filter;
 mod focus;
+mod global;
+mod layout;
+mod notices;
 mod pane_runtime;
+mod popup;
 mod refresh;
 mod scroll;
 mod session;
 mod tab;
+mod timers;
 
 pub use activity::ActivityState;
+pub use filter::{RepoFilter, StatusFilter};
 pub use focus::{Focus, FocusState};
+pub use global::GlobalState;
+pub use layout::{FrameLayout, HyperlinkOverlay, RepoSpawnTarget, RowTarget, SpawnRemoveTarget};
+pub use notices::{ClaudePluginNotice, NoticesCopyTarget, NoticesMissingHookGroup, NoticesState};
 pub use pane_runtime::{PaneRuntimeMap, PaneRuntimeState};
+pub use popup::{PopupState, SpawnField};
 #[cfg(test)]
 pub(crate) use refresh::{TaskProgressDecision, classify_task_progress};
 pub use scroll::{ScrollState, ScrollStates};
 pub use session::SessionNamesState;
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum StatusFilter {
-    All,
-    Running,
-    Waiting,
-    Idle,
-    Error,
-}
-
-impl StatusFilter {
-    pub const VARIANTS: [StatusFilter; 5] = [
-        StatusFilter::All,
-        StatusFilter::Running,
-        StatusFilter::Waiting,
-        StatusFilter::Idle,
-        StatusFilter::Error,
-    ];
-
-    pub fn next(self) -> Self {
-        let idx = StatusFilter::VARIANTS
-            .iter()
-            .position(|v| *v == self)
-            .unwrap_or(0);
-        StatusFilter::VARIANTS[(idx + 1) % StatusFilter::VARIANTS.len()]
-    }
-
-    pub fn prev(self) -> Self {
-        let idx = StatusFilter::VARIANTS
-            .iter()
-            .position(|v| *v == self)
-            .unwrap_or(0);
-        StatusFilter::VARIANTS
-            [(idx + StatusFilter::VARIANTS.len() - 1) % StatusFilter::VARIANTS.len()]
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::All => "all",
-            Self::Running => "running",
-            Self::Waiting => "waiting",
-            Self::Idle => "idle",
-            Self::Error => "error",
-        }
-    }
-
-    /// Parse a tmux-option label into a `StatusFilter`. Unknown values
-    /// fall back to `All`.
-    pub fn from_label(s: &str) -> Self {
-        match s {
-            "running" => Self::Running,
-            "waiting" => Self::Waiting,
-            "idle" => Self::Idle,
-            "error" => Self::Error,
-            _ => Self::All,
-        }
-    }
-
-    pub fn matches(self, status: &crate::tmux::PaneStatus) -> bool {
-        match self {
-            StatusFilter::All => true,
-            StatusFilter::Running => *status == crate::tmux::PaneStatus::Running,
-            StatusFilter::Waiting => *status == crate::tmux::PaneStatus::Waiting,
-            StatusFilter::Idle => *status == crate::tmux::PaneStatus::Idle,
-            StatusFilter::Error => *status == crate::tmux::PaneStatus::Error,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum RepoFilter {
-    All,
-    Repo(String),
-}
-
-impl RepoFilter {
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::All => "all",
-            Self::Repo(name) => name.as_str(),
-        }
-    }
-
-    /// Parse a tmux-option label into a `RepoFilter`. `""` and `"all"`
-    /// map to `All`; any other value is stored as `Repo(name)`.
-    pub fn from_label(s: &str) -> Self {
-        match s {
-            "all" | "" => Self::All,
-            name => Self::Repo(name.to_string()),
-        }
-    }
-
-    pub fn matches_group(&self, group_name: &str) -> bool {
-        match self {
-            Self::All => true,
-            Self::Repo(name) => name == group_name,
-        }
-    }
-}
+pub use timers::RefreshTimers;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BottomTab {
@@ -127,357 +39,8 @@ pub enum BottomTab {
     GitStatus,
 }
 
-#[derive(Debug, Clone)]
-pub struct RowTarget {
-    pub pane_id: String,
-}
-
-/// Click target for the `+` button rendered at the right edge of each
-/// repo-group header in the agents panel. Clicking it opens the spawn
-/// modal prefilled for that repo.
-#[derive(Debug, Clone)]
-pub struct RepoSpawnTarget {
-    pub rect: ratatui::layout::Rect,
-    pub repo_name: String,
-    pub repo_root: String,
-}
-
-/// Click target for the red `×` rendered next to the branch of a
-/// sidebar-spawned pane. Clicking it opens the close-pane confirmation
-/// for that specific pane.
-#[derive(Debug, Clone)]
-pub struct SpawnRemoveTarget {
-    pub rect: ratatui::layout::Rect,
-    pub pane_id: String,
-}
-
-/// Focus target inside the spawn input popup. Tab / Shift+Tab / arrow
-/// keys cycle through these in order; only `Task` accepts text input.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SpawnField {
-    #[default]
-    Task,
-    Agent,
-    Mode,
-}
-
-impl SpawnField {
-    pub fn next(self) -> Self {
-        match self {
-            Self::Task => Self::Agent,
-            Self::Agent => Self::Mode,
-            Self::Mode => Self::Task,
-        }
-    }
-
-    pub fn prev(self) -> Self {
-        match self {
-            Self::Task => Self::Mode,
-            Self::Agent => Self::Task,
-            Self::Mode => Self::Agent,
-        }
-    }
-}
-
 fn point_in_rect(row: u16, col: u16, rect: ratatui::layout::Rect) -> bool {
     rect.contains(ratatui::layout::Position { x: col, y: row })
-}
-
-/// At-most-one popup state for the sidebar. The enum variant encodes
-/// both which popup is open and its per-popup data, so the "only one
-/// popup open at a time" invariant is checked by the type system.
-#[derive(Debug, Clone, Default)]
-pub enum PopupState {
-    #[default]
-    None,
-    Repo {
-        selected: usize,
-        area: Option<ratatui::layout::Rect>,
-    },
-    Notices {
-        area: Option<ratatui::layout::Rect>,
-    },
-    /// Modal text input shown when the user presses `n` (or clicks `+`)
-    /// to spawn a new worktree. `target_repo` / `target_repo_root` pin
-    /// the spawn target; `agent_idx` / `mode_idx` index into
-    /// [`crate::worktree::AGENTS`] / [`crate::worktree::modes_for`] so
-    /// arrow keys can cycle the user's agent and permission-mode picks.
-    SpawnInput {
-        input: String,
-        target_repo: String,
-        target_repo_root: String,
-        agent_idx: usize,
-        mode_idx: usize,
-        field: SpawnField,
-        /// Screen Y of the repo header row that owns the `+` button
-        /// this modal was opened from. Renderer anchors the popup just
-        /// below it; `None` falls back to a centered layout.
-        anchor_y: Option<u16>,
-        /// Inline error message rendered at the bottom of the popup
-        /// so spawn failures stay visually attached to the input the
-        /// user was editing. Cleared on the next edit / field change.
-        error: Option<String>,
-        area: Option<ratatui::layout::Rect>,
-    },
-    /// Confirmation prompt shown when the user presses `x` on a
-    /// spawn-created pane. `pane_id` feeds `worktree::remove`; `branch`
-    /// is shown in the modal title.
-    RemoveConfirm {
-        pane_id: String,
-        branch: String,
-        error: Option<String>,
-        area: Option<ratatui::layout::Rect>,
-    },
-}
-
-impl PopupState {
-    pub fn set_repo_area(&mut self, rect: Option<ratatui::layout::Rect>) {
-        if let Self::Repo { area, .. } = self {
-            *area = rect;
-        }
-    }
-
-    pub fn set_notices_area(&mut self, rect: Option<ratatui::layout::Rect>) {
-        if let Self::Notices { area } = self {
-            *area = rect;
-        }
-    }
-
-    pub fn set_spawn_input_area(&mut self, rect: Option<ratatui::layout::Rect>) {
-        if let Self::SpawnInput { area, .. } = self {
-            *area = rect;
-        }
-    }
-
-    pub fn set_remove_confirm_area(&mut self, rect: Option<ratatui::layout::Rect>) {
-        if let Self::RemoveConfirm { area, .. } = self {
-            *area = rect;
-        }
-    }
-}
-
-/// State shared across all sidebar instances via tmux global variables.
-/// Synced from tmux at startup and on pane focus change (SIGUSR1).
-pub struct GlobalState {
-    pub status_filter: StatusFilter,
-    pub selected_pane_row: usize,
-    pub repo_filter: RepoFilter,
-    /// Last filter value successfully written to tmux.
-    last_saved_filter: StatusFilter,
-    /// Last cursor value successfully written to tmux.
-    last_saved_cursor: usize,
-    /// Last repo filter value successfully written to tmux.
-    last_saved_repo_filter: RepoFilter,
-    /// When the selected cursor was last changed and still needs persisting.
-    pending_cursor_save_since: Option<Instant>,
-}
-
-impl Default for GlobalState {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl GlobalState {
-    pub fn new() -> Self {
-        Self {
-            status_filter: StatusFilter::All,
-            selected_pane_row: 0,
-            repo_filter: RepoFilter::All,
-            last_saved_filter: StatusFilter::All,
-            last_saved_cursor: 0,
-            last_saved_repo_filter: RepoFilter::All,
-            pending_cursor_save_since: None,
-        }
-    }
-
-    /// Save filter to tmux global variable.
-    /// Only updates `last_saved_filter` on success so that a failed write
-    /// does not cause sync to overwrite the user's choice.
-    pub fn save_filter(&mut self) {
-        if tmux::run_tmux(&["set", "-g", "@sidebar_filter", self.status_filter.as_str()]).is_some()
-        {
-            self.last_saved_filter = self.status_filter;
-        }
-    }
-
-    /// Save cursor position to tmux global variable.
-    pub fn save_cursor(&mut self) {
-        if tmux::run_tmux(&[
-            "set",
-            "-g",
-            "@sidebar_cursor",
-            &self.selected_pane_row.to_string(),
-        ])
-        .is_some()
-        {
-            self.last_saved_cursor = self.selected_pane_row;
-        }
-    }
-
-    /// Mark the cursor as dirty so the main loop can persist it once the
-    /// user pauses navigation.
-    pub fn queue_cursor_save(&mut self) {
-        self.pending_cursor_save_since = Some(Instant::now());
-    }
-
-    /// Persist a queued cursor update after it has been idle for at least the
-    /// requested debounce duration. Returns true when the queue was consumed.
-    pub fn flush_pending_cursor_save(&mut self, debounce: std::time::Duration) -> bool {
-        let Some(queued_at) = self.pending_cursor_save_since else {
-            return false;
-        };
-        if queued_at.elapsed() < debounce {
-            return false;
-        }
-        self.pending_cursor_save_since = None;
-        self.save_cursor();
-        true
-    }
-
-    /// Save repo filter to tmux global variable.
-    pub fn save_repo_filter(&mut self) {
-        if tmux::run_tmux(&[
-            "set",
-            "-g",
-            "@sidebar_repo_filter",
-            self.repo_filter.as_str(),
-        ])
-        .is_some()
-        {
-            self.last_saved_repo_filter = self.repo_filter.clone();
-        }
-    }
-
-    /// Load all global state from tmux variables.
-    /// Called at startup and on SIGUSR1 (pane focus change).
-    pub fn load_from_tmux(&mut self) {
-        let opts = tmux::get_all_global_options();
-        self.apply_all(&opts);
-    }
-
-    /// Apply all global options from tmux (filter, cursor, repo filter).
-    pub fn apply_all(&mut self, opts: &HashMap<String, String>) {
-        if let Some(filter_str) = opts.get("@sidebar_filter") {
-            let tmux_filter = StatusFilter::from_label(filter_str);
-            if tmux_filter != self.last_saved_filter {
-                self.status_filter = tmux_filter;
-                self.last_saved_filter = tmux_filter;
-            }
-        }
-        if let Some(cursor_str) = opts.get("@sidebar_cursor")
-            && let Ok(n) = cursor_str.parse::<usize>()
-            && n != self.last_saved_cursor
-        {
-            self.selected_pane_row = n;
-            self.last_saved_cursor = n;
-        }
-        if let Some(repo_str) = opts.get("@sidebar_repo_filter") {
-            let tmux_repo = RepoFilter::from_label(repo_str);
-            if tmux_repo != self.last_saved_repo_filter {
-                self.repo_filter = tmux_repo.clone();
-                self.last_saved_repo_filter = tmux_repo;
-            }
-        }
-    }
-}
-
-/// Ephemeral render output cached for click hit-testing.
-///
-/// Every field here is **rewritten on every frame** by the UI layer and
-/// only read by event handlers (mouse/keyboard) before the next render.
-/// Bundling them under `state.layout` makes the "frame-scoped vs
-/// persistent state" boundary visible at a glance, since the rest of
-/// `AppState` only holds data that survives across frames.
-#[derive(Debug, Clone, Default)]
-pub struct FrameLayout {
-    /// Filtered pane list, in the order the UI rendered them. Index
-    /// matches `GlobalState::selected_pane_row`.
-    pub pane_row_targets: Vec<RowTarget>,
-    /// Maps each rendered text line in the agents panel back to a row in
-    /// `pane_row_targets`. `None` for header/blank lines that should not
-    /// route clicks to a pane.
-    pub line_to_row: Vec<Option<usize>>,
-    /// X column of the repo filter button in the secondary header. `None`
-    /// when the button is hidden. Used for click hit-testing.
-    pub repo_button_col: Option<u16>,
-    /// Click regions for the `[+]` spawn button rendered at the right
-    /// edge of each repo-group header. One entry per visible repo group.
-    pub repo_spawn_targets: Vec<RepoSpawnTarget>,
-    /// Click regions for the red `×` remove marker rendered next to the
-    /// branch of each sidebar-spawned pane. One entry per visible row.
-    pub spawn_remove_targets: Vec<SpawnRemoveTarget>,
-    /// OSC 8 hyperlink overlays the main loop writes after each frame so
-    /// terminals can recognise PR numbers as clickable links.
-    pub hyperlink_overlays: Vec<HyperlinkOverlay>,
-}
-
-/// Periodic-refresh bookkeeping. Bundles the wall/monotonic clocks that
-/// gate refresh cadence in `state/refresh.rs` (port scan, filter-bar
-/// debounce, and the "first port scan completed" flag) so they live as
-/// a unit instead of cluttering [`AppState`].
-///
-/// `session_names` is intentionally NOT here: the polling lives in a
-/// dedicated background thread (`session_poll_loop` in `main.rs`) so the
-/// TUI thread never performs blocking filesystem I/O.
-#[derive(Debug, Clone)]
-pub struct RefreshTimers {
-    /// Last time a mouse click was processed on the filter bar (debounce).
-    pub last_filter_click: Instant,
-    /// Timestamp of the last port/command scan.
-    pub last_port_refresh: Instant,
-    /// Whether the first port scan has completed; the first scan must
-    /// always run regardless of the elapsed-time gate.
-    pub port_scan_initialized: bool,
-}
-
-impl Default for RefreshTimers {
-    fn default() -> Self {
-        let now = Instant::now();
-        Self {
-            last_filter_click: now,
-            last_port_refresh: now,
-            port_scan_initialized: false,
-        }
-    }
-}
-
-/// Sub-state for the ⓘ notices popup, lifted out of [`AppState`] so its
-/// seven related fields (button column, missing-hook groups, plugin
-/// version, legacy hook flag, plugin notice, copy targets, copy feedback)
-/// travel as a single unit.
-#[derive(Debug, Clone, Default)]
-pub struct NoticesState {
-    /// Column of the ⓘ button in the secondary header, or `None` when the
-    /// button is hidden. Used for click hit-testing.
-    pub button_col: Option<u16>,
-    /// Missing hooks grouped per agent, shown in the "Missing hooks"
-    /// section of the popup.
-    pub missing_hook_groups: Vec<NoticesMissingHookGroup>,
-    /// Version of the `tmux-agent-sidebar` Claude Code plugin install
-    /// detected at sidebar startup, or `None` when the plugin is not
-    /// installed. Resolved once from
-    /// `~/.claude/plugins/installed_plugins.json` and cached for the
-    /// lifetime of the TUI process — restart the sidebar after a
-    /// `/plugin install` or `/plugin uninstall` to pick up the change.
-    /// `claude_plugin_notice` and the missing-hooks Claude filter are
-    /// derived from this field.
-    pub claude_plugin_installed_version: Option<String>,
-    /// Whether `~/.claude/settings.json` still contains residual
-    /// `tmux-agent-sidebar/hook.sh` entries from the legacy manual
-    /// setup. Resolved once at startup. When this is `true` AND the
-    /// plugin is installed, every hook fires twice and the popup must
-    /// keep nagging the user to clean up.
-    pub claude_settings_has_residual_hooks: bool,
-    /// Drives the `Plugin / claude` section in the notices popup. See
-    /// [`ClaudePluginNotice`] for the two states. Derived from
-    /// `claude_plugin_installed_version` in `refresh_notices`.
-    pub claude_plugin_notice: Option<ClaudePluginNotice>,
-    /// Click regions for the `copy` label on each agent row in the popup.
-    pub copy_targets: Vec<NoticesCopyTarget>,
-    /// Agent name and timestamp of the most recent successful copy, shown
-    /// as a transient `copied` label next to the popup title.
-    pub copied_at: Option<(String, Instant)>,
 }
 
 pub struct AppState {
@@ -536,52 +99,6 @@ pub struct AppState {
     /// pane each tick when the map is unchanged (the polling thread only
     /// updates it every 10s).
     pub sessions: SessionNamesState,
-}
-
-/// Screen-positioned hyperlink overlay for OSC 8 terminal hyperlinks.
-#[derive(Debug, Clone)]
-pub struct HyperlinkOverlay {
-    pub x: u16,
-    pub y: u16,
-    pub text: String,
-    pub url: String,
-}
-
-/// Missing hooks grouped by agent name.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct NoticesMissingHookGroup {
-    pub agent: String,
-    pub hooks: Vec<String>,
-}
-
-/// Notice surfaced in the popup's `Plugin / claude` section. The
-/// variants are mutually exclusive and ordered by urgency:
-/// `DuplicateHooks` > `InstallRecommended` > `Stale`. When the plugin
-/// is installed, current, and the user has no residual manual hook
-/// entries, no notice is set.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ClaudePluginNotice {
-    /// The Claude Code plugin is not installed. The popup offers a
-    /// `[prompt]` copy button that hands an LLM the migration recipe
-    /// (clean up `~/.claude/settings.json` then run `/plugin install`).
-    InstallRecommended,
-    /// The plugin is installed AND the user still has legacy
-    /// `tmux-agent-sidebar/hook.sh` entries in `~/.claude/settings.json`.
-    /// Every hook fires twice in this state — once via the plugin, once
-    /// via the manual setting. Takes precedence over `Stale` because it
-    /// is an actively-broken state, not just a pending update.
-    DuplicateHooks,
-    /// The plugin is installed but its `plugin.json` version is older
-    /// than the running binary, so the user needs to restart Claude
-    /// Code to pick up the new bundled hooks.
-    Stale { installed: String, current: String },
-}
-
-/// Click target for the `copy` label next to an agent in the notices popup.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NoticesCopyTarget {
-    pub area: ratatui::layout::Rect,
-    pub agent: String,
 }
 
 impl AppState {
@@ -2929,47 +2446,7 @@ mod tests {
         assert_eq!(state.global.selected_pane_row, 0); // unchanged
     }
 
-    // ─── StatusFilter tests ───────────────────────────────────────────
-
-    #[test]
-    fn status_filter_next_cycles() {
-        assert_eq!(StatusFilter::All.next(), StatusFilter::Running);
-        assert_eq!(StatusFilter::Running.next(), StatusFilter::Waiting);
-        assert_eq!(StatusFilter::Waiting.next(), StatusFilter::Idle);
-        assert_eq!(StatusFilter::Idle.next(), StatusFilter::Error);
-        assert_eq!(StatusFilter::Error.next(), StatusFilter::All);
-    }
-
-    #[test]
-    fn status_filter_prev_cycles() {
-        assert_eq!(StatusFilter::All.prev(), StatusFilter::Error);
-        assert_eq!(StatusFilter::Error.prev(), StatusFilter::Idle);
-        assert_eq!(StatusFilter::Idle.prev(), StatusFilter::Waiting);
-        assert_eq!(StatusFilter::Waiting.prev(), StatusFilter::Running);
-        assert_eq!(StatusFilter::Running.prev(), StatusFilter::All);
-    }
-
-    #[test]
-    fn status_filter_matches_status() {
-        assert!(StatusFilter::All.matches(&PaneStatus::Running));
-        assert!(StatusFilter::All.matches(&PaneStatus::Idle));
-        assert!(StatusFilter::All.matches(&PaneStatus::Waiting));
-        assert!(StatusFilter::All.matches(&PaneStatus::Error));
-
-        assert!(StatusFilter::Running.matches(&PaneStatus::Running));
-        assert!(!StatusFilter::Running.matches(&PaneStatus::Idle));
-        assert!(!StatusFilter::Running.matches(&PaneStatus::Waiting));
-        assert!(!StatusFilter::Running.matches(&PaneStatus::Error));
-
-        assert!(StatusFilter::Waiting.matches(&PaneStatus::Waiting));
-        assert!(!StatusFilter::Waiting.matches(&PaneStatus::Running));
-
-        assert!(StatusFilter::Idle.matches(&PaneStatus::Idle));
-        assert!(!StatusFilter::Idle.matches(&PaneStatus::Running));
-
-        assert!(StatusFilter::Error.matches(&PaneStatus::Error));
-        assert!(!StatusFilter::Error.matches(&PaneStatus::Idle));
-    }
+    // ─── StatusFilter tests live in state/filter.rs ──────────────────
 
     // ─── status_counts tests ─────────────────────────────────────────
 
@@ -3155,60 +2632,7 @@ mod tests {
         assert_eq!(state.layout.pane_row_targets[0].pane_id, "%2");
     }
 
-    // ─── StatusFilter as_str / from_str tests ─────────────────────────
-
-    #[test]
-    fn status_filter_as_str_all_variants() {
-        assert_eq!(StatusFilter::All.as_str(), "all");
-        assert_eq!(StatusFilter::Running.as_str(), "running");
-        assert_eq!(StatusFilter::Waiting.as_str(), "waiting");
-        assert_eq!(StatusFilter::Idle.as_str(), "idle");
-        assert_eq!(StatusFilter::Error.as_str(), "error");
-    }
-
-    #[test]
-    fn status_filter_from_str_all_variants() {
-        assert_eq!(StatusFilter::from_label("all"), StatusFilter::All);
-        assert_eq!(StatusFilter::from_label("running"), StatusFilter::Running);
-        assert_eq!(StatusFilter::from_label("waiting"), StatusFilter::Waiting);
-        assert_eq!(StatusFilter::from_label("idle"), StatusFilter::Idle);
-        assert_eq!(StatusFilter::from_label("error"), StatusFilter::Error);
-    }
-
-    #[test]
-    fn status_filter_from_str_unknown_defaults_to_all() {
-        assert_eq!(StatusFilter::from_label(""), StatusFilter::All);
-        assert_eq!(StatusFilter::from_label("unknown"), StatusFilter::All);
-        assert_eq!(StatusFilter::from_label("Running"), StatusFilter::All); // case-sensitive
-    }
-
-    #[test]
-    fn status_filter_roundtrip() {
-        for filter in StatusFilter::VARIANTS {
-            assert_eq!(StatusFilter::from_label(filter.as_str()), filter);
-        }
-    }
-
-    // ─── RepoFilter tests ─────────────────────────────────────
-
-    #[test]
-    fn repo_filter_persistence_roundtrip() {
-        assert_eq!(RepoFilter::from_label("all"), RepoFilter::All);
-        assert_eq!(RepoFilter::from_label(""), RepoFilter::All);
-        assert_eq!(
-            RepoFilter::from_label("my-app"),
-            RepoFilter::Repo("my-app".into())
-        );
-        assert_eq!(RepoFilter::All.as_str(), "all");
-        assert_eq!(RepoFilter::Repo("my-app".into()).as_str(), "my-app");
-    }
-
-    #[test]
-    fn repo_filter_matches_group() {
-        assert!(RepoFilter::All.matches_group("anything"));
-        assert!(RepoFilter::Repo("app".into()).matches_group("app"));
-        assert!(!RepoFilter::Repo("app".into()).matches_group("other"));
-    }
+    // ─── StatusFilter / RepoFilter pure tests live in state/filter.rs ─
 
     #[test]
     fn repo_filter_all_shows_all_groups() {
