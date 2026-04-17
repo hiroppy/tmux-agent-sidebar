@@ -274,6 +274,17 @@ pub fn render_if_open(frame: &mut Frame, state: &mut AppState, area: Rect) { ...
 
 Internally preserves the current dispatch structure verbatim — it calls the existing guard helpers (`is_notices_popup_open`, `is_repo_popup_open`, `is_spawn_input_open`, `is_remove_confirm_open`) in the same order as pre-refactor `draw_agents` lines 749–757. Those helpers remain defined on `AppState` / `PopupState` and continue to be used elsewhere (`state.rs`, handlers); they are not inlined or replaced by direct `match &state.popup` dispatch.
 
+### Visibility & Test Co-Location (UI split)
+
+`src/ui/panes.rs` currently has an inline `#[cfg(test)] mod tests` (starting at line 763) that calls `render_filter_bar` (defined at line 53) and `render_secondary_header` (line 118) directly. Eight tests depend on this private access: `render_secondary_header_keeps_repo_position_with_or_without_notices_info`, `render_filter_bar_is_status_only`, `render_filter_bar_uses_selected_and_inactive_icon_colors`, `render_secondary_header_repo_button_col_returned`, `render_secondary_header_shows_repo_name_when_filtered`, `render_secondary_header_truncates_long_repo_name`, `render_secondary_header_popup_open_styling`, and related cases.
+
+**Rules applied during the split** (commits 7–9):
+
+- `render_filter_bar` and `render_secondary_header` move to `src/ui/panes/filter_bar.rs` and become `pub(super)`.
+- `row_collector::collect`, `CollectedRows`, `click_targets::materialize`, `popups::render_if_open`, and `PaneLayout::compute` are all `pub(super)` to allow the `draw_agents` coordinator plus tests to call them.
+- **Tests migrate with the functions**: tests for `render_filter_bar` / `render_secondary_header` move into `src/ui/panes/filter_bar.rs`'s `#[cfg(test)] mod tests`. Tests that exercise the full `draw_agents` pipeline (snapshot tests, mouse-click target verification) stay in `src/ui/panes.rs` or `tests/ui_snapshot.rs` and call through the `pub(super)` surface.
+- `src/ui/panes/row.rs` tests (`src/ui/panes::row::tests`) are unchanged — `row.rs` is not restructured in this PR.
+
 ### Snapshot Guarantees
 
 - Line construction order and blank-line insertion logic are preserved byte-for-byte.
@@ -333,6 +344,20 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
 - `AgentEvent` enum definition in `src/event.rs` stays untouched.
 - `notification_settings()` is not hoisted — remains called lazily within variants that need it, to avoid unnecessary I/O for variants that do not.
 - No `AgentEvent::context()` method added — variant-specific extra fields (`prompt`, `last_message`, `error`, `wait_reason`) make a generic accessor awkward.
+
+### Visibility & Test Co-Location
+
+The current `src/cli/hook.rs` is a single file whose `#[cfg(test)] mod tests` (starts at line 948) calls many private helpers directly: `resolve_cwd`, `notification_run_id`, `on_session_start`, `on_worktree_remove`, `handle_activity_log`, and others. Splitting the file without care would break both the tests (can no longer see helpers moved to sibling submodules) and the dispatch (the child `AgentContext<'a>` type, currently private at `src/cli/hook.rs:76`, is not nameable from `handlers.rs`).
+
+**Rules applied during the split** (commits 10–11):
+
+- `AgentContext<'a>` moves to `src/cli/hook/context.rs` and is declared `pub(super)`.
+- `make_ctx()`, `set_agent_meta`, `pane_writes_allowed`, `clear_all_meta`, `clear_run_state`, `mark_pending`, `drain_pending_teardowns`, `PENDING_*` constants — all `pub(super)`.
+- The `on_*` handler functions in `handlers.rs` are `pub(super)`.
+- `handle_activity_log` in `activity.rs` and the notification helpers in `notifications.rs` are `pub(super)`.
+- **Tests migrate with the code**: each moved helper's tests move into the submodule's own `#[cfg(test)] mod tests`. Tests that span multiple helpers (e.g., end-to-end dispatch tests) stay in `src/cli/hook.rs`'s test module and call through the `pub(super)` surface.
+
+This keeps `cargo test` green at every commit and respects Rust's module boundaries.
 
 ## `tmux.rs` Changes
 
@@ -445,8 +470,10 @@ Each commit leaves `cargo test` passing. Commits are grouped so the PR can, if n
 10. refactor(cli/hook): extract context and handlers modules
 11. refactor(cli/hook): split activity and notifications modules
 12. test: add unit tests for extracted units
-13. docs: update CLAUDE.md architecture section (if needed)
+13. docs: update CLAUDE.md + state-management.md architecture sections
 ```
+
+Commit 13 covers `docs/state-management.md` as well — that document is already stale relative to `FrameLayout` (it lists only `pane_row_targets, line_to_row, repo_button_col, hyperlink_overlays` at lines 85–86, but the actual struct at `src/state.rs:423–443` also includes `repo_spawn_targets` and `spawn_remove_targets`). Updating it in the same PR keeps it from being misdocumented immediately after the new `state/` layout lands.
 
 **Grouping for future-splittability**: commits 1–4 (state) / 5–6 (tmux) / 7–9 (UI) / 10–11 (hook) / 12–13 (tests+docs) each form a self-contained group.
 
