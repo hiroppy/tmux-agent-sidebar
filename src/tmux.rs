@@ -4,6 +4,51 @@ use std::process::Command;
 pub const CLAUDE_AGENT: &str = "claude";
 pub const CODEX_AGENT: &str = "codex";
 
+// Field indices in `tmux list-panes -F` output. Keep in lock-step with
+// the `PANE_FORMAT` format string. When adding a new field, update both
+// this module and the format string together.
+mod session_line_field {
+    pub const SESSION_NAME: usize = 0;
+    pub const WINDOW_ID: usize = 1;
+    pub const WINDOW_NAME: usize = 3;
+    pub const WINDOW_ACTIVE: usize = 4;
+    pub const AUTOMATIC_RENAME: usize = 5;
+    /// Index where the per-pane field suffix consumed by `parse_pane_line` begins.
+    pub const PANE_LINE_OFFSET: usize = 6;
+    /// Minimum number of fields a valid `PANE_FORMAT` line must contain.
+    pub const MIN_FIELDS: usize = 27;
+}
+
+// Indices into the pane-line suffix that `parse_pane_line` operates on.
+// Each value = (absolute index in the full format string) - 6, because
+// `build_session_hierarchy` strips the leading 6 window-level fields
+// before joining the remainder back into `pane_line`.
+mod pane_line_field {
+    pub const PANE_ACTIVE: usize = 0; // absolute 6
+    pub const PANE_STATUS: usize = 1; // absolute 7  (@pane_status)
+    pub const PANE_ATTENTION: usize = 2; // absolute 8  (@pane_attention)
+    pub const AGENT: usize = 3; // absolute 9  (@pane_agent)
+    pub const PANE_CURRENT_PATH: usize = 5; // absolute 11 (pane_current_path)
+    pub const PANE_CURRENT_COMMAND: usize = 6; // absolute 12
+    pub const PANE_ROLE: usize = 7; // absolute 13 (@pane_role)
+    pub const PANE_ID: usize = 8; // absolute 14
+    pub const PROMPT: usize = 9; // absolute 15 (@pane_prompt)
+    pub const PROMPT_SOURCE: usize = 10; // absolute 16 (@pane_prompt_source)
+    pub const STARTED_AT: usize = 11; // absolute 17 (@pane_started_at)
+    pub const WAIT_REASON: usize = 12; // absolute 18 (@pane_wait_reason)
+    pub const PANE_PID: usize = 13; // absolute 19
+    pub const SUBAGENTS: usize = 14; // absolute 20 (@pane_subagents)
+    pub const PANE_CWD: usize = 15; // absolute 21 (@pane_cwd)
+    pub const PERMISSION_MODE: usize = 16; // absolute 22 (@pane_permission_mode)
+    pub const WORKTREE_NAME: usize = 17; // absolute 23 (@pane_worktree_name)
+    pub const WORKTREE_BRANCH: usize = 18; // absolute 24 (@pane_worktree_branch)
+    pub const SESSION_ID: usize = 19; // absolute 25 (@pane_session_id)
+    pub const SIDEBAR_SPAWNED: usize = 20; // absolute 26 (@agent-sidebar-spawned)
+    /// Minimum number of fields the pane-line suffix must contain.
+    /// Equals `session_line_field::MIN_FIELDS - PANE_LINE_OFFSET`.
+    pub const MIN_FIELDS: usize = 21;
+}
+
 #[derive(Debug, Clone)]
 pub struct PaneInfo {
     pub pane_id: String,
@@ -216,13 +261,13 @@ fn build_session_hierarchy(all_panes_output: &str) -> (SessionMap, Vec<CodexPidE
 
     for line in all_panes_output.lines() {
         let parts = split_tmux_fields(line, '|');
-        if parts.len() < 27 {
+        if parts.len() < session_line_field::MIN_FIELDS {
             continue;
         }
 
-        let session_name = parts[0].as_str();
-        let window_id = parts[1].as_str();
-        let pane_line = parts[6..].join("|");
+        let session_name = parts[session_line_field::SESSION_NAME].as_str();
+        let window_id = parts[session_line_field::WINDOW_ID].as_str();
+        let pane_line = parts[session_line_field::PANE_LINE_OFFSET..].join("|");
 
         let sessions_entry = sessions_map.entry(session_name.to_string()).or_default();
 
@@ -230,9 +275,9 @@ fn build_session_hierarchy(all_panes_output: &str) -> (SessionMap, Vec<CodexPidE
             .entry(window_id.to_string())
             .or_insert_with(|| WindowInfo {
                 window_id: window_id.to_string(),
-                window_name: parts[3].to_string(),
-                window_active: parts[4] == "1",
-                auto_rename: parts[5] == "1",
+                window_name: parts[session_line_field::WINDOW_NAME].to_string(),
+                window_active: parts[session_line_field::WINDOW_ACTIVE] == "1",
+                auto_rename: parts[session_line_field::AUTOMATIC_RENAME] == "1",
                 panes: Vec::new(),
             });
 
@@ -307,16 +352,16 @@ fn finalize_sessions(sessions_map: SessionMap) -> Vec<SessionInfo> {
 /// Returns None if the line has fewer than 20 fields, is a sidebar, or has no agent.
 pub(crate) fn parse_pane_line(line: &str) -> Option<PaneInfo> {
     let parts = split_tmux_fields(line, '|');
-    if parts.len() < 21 {
+    if parts.len() < pane_line_field::MIN_FIELDS {
         return None;
     }
 
-    if parts[7] == "sidebar" {
+    if parts[pane_line_field::PANE_ROLE] == "sidebar" {
         return None;
     }
 
-    let agent = AgentType::from_label(&parts[3])?;
-    let current_command = parts[6].as_str();
+    let agent = AgentType::from_label(&parts[pane_line_field::AGENT])?;
+    let current_command = parts[pane_line_field::PANE_CURRENT_COMMAND].as_str();
 
     // Codex panes can leave stale tmux metadata behind after the agent exits
     // and the pane falls back to the user's shell. In that case, ignore the
@@ -325,58 +370,58 @@ pub(crate) fn parse_pane_line(line: &str) -> Option<PaneInfo> {
         return None;
     }
 
-    let pane_pid: Option<u32> = parts[13].parse().ok();
+    let pane_pid: Option<u32> = parts[pane_line_field::PANE_PID].parse().ok();
 
     // Prefer @pane_cwd (set by hook from agent's cwd) over pane_current_path
-    let pane_cwd = &parts[15];
+    let pane_cwd = &parts[pane_line_field::PANE_CWD];
     let path = if !pane_cwd.is_empty() {
         pane_cwd.to_string()
     } else {
-        parts[5].to_string()
+        parts[pane_line_field::PANE_CURRENT_PATH].to_string()
     };
 
     // Claude: read permission_mode from hook-set tmux variable
     // Codex: no permission_mode in hooks, detect from process args later
     let permission_mode = if agent == AgentType::Claude {
-        PermissionMode::from_label(&parts[16])
+        PermissionMode::from_label(&parts[pane_line_field::PERMISSION_MODE])
     } else {
         PermissionMode::Default
     };
 
-    let prompt_source = &parts[10];
+    let prompt_source = &parts[pane_line_field::PROMPT_SOURCE];
     let prompt_is_response = prompt_source == "response";
 
     // Sanitize prompt: replace pipes/newlines, filter system-injected messages, truncate
-    let prompt = sanitize_prompt(&parts[9]);
+    let prompt = sanitize_prompt(&parts[pane_line_field::PROMPT]);
 
-    let session_id = if parts[19].is_empty() {
+    let session_id = if parts[pane_line_field::SESSION_ID].is_empty() {
         None
     } else {
-        Some(parts[19].to_string())
+        Some(parts[pane_line_field::SESSION_ID].to_string())
     };
 
     Some(PaneInfo {
-        pane_active: parts[0] == "1",
-        status: PaneStatus::from_label(&parts[1]),
-        attention: !parts[2].is_empty(),
+        pane_active: parts[pane_line_field::PANE_ACTIVE] == "1",
+        status: PaneStatus::from_label(&parts[pane_line_field::PANE_STATUS]),
+        attention: !parts[pane_line_field::PANE_ATTENTION].is_empty(),
         agent,
         path,
-        current_command: parts[6].to_string(),
-        pane_id: parts[8].to_string(),
+        current_command: parts[pane_line_field::PANE_CURRENT_COMMAND].to_string(),
+        pane_id: parts[pane_line_field::PANE_ID].to_string(),
         prompt,
         prompt_is_response,
-        started_at: parts[11].parse().ok(),
-        wait_reason: parts[12].to_string(),
+        started_at: parts[pane_line_field::STARTED_AT].parse().ok(),
+        wait_reason: parts[pane_line_field::WAIT_REASON].to_string(),
         permission_mode,
-        subagents: parse_subagents(&parts[14]),
+        subagents: parse_subagents(&parts[pane_line_field::SUBAGENTS]),
         pane_pid,
         worktree: WorktreeMetadata {
-            name: parts[17].to_string(),
-            branch: parts[18].to_string(),
+            name: parts[pane_line_field::WORKTREE_NAME].to_string(),
+            branch: parts[pane_line_field::WORKTREE_BRANCH].to_string(),
         },
         session_id,
         session_name: String::new(),
-        sidebar_spawned: parts[20] == "1",
+        sidebar_spawned: parts[pane_line_field::SIDEBAR_SPAWNED] == "1",
     })
 }
 
