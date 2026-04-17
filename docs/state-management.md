@@ -53,12 +53,13 @@ pane disappears (`prune_pane_states_to_current_panes`).
 
 | Field | Update Frequency | Description |
 |-------|-----------------|-------------|
-| `pane_states[...].ports` | Every 10s (port scan) | Listening localhost ports detected from the pane process tree |
-| `pane_states[...].command` | Every 10s (port scan) | Best-effort commandline for the pane process tree, with tmux command fallback in the UI |
-| `pane_states[...].task_progress` | Every 1s (refresh cycle) | Parsed from activity log — task list per pane |
-| `pane_states[...].task_dismissed_total` | On task completion | Tracks dismissed completed-task counts |
-| `pane_states[...].inactive_since` | On status change | Debounce timestamp (3s grace before hiding tasks) |
-| `pane_states[...].tab_pref` | On user tab switch | Remembered bottom tab choice per pane (cleared on relaunch) |
+| `pane_states.map[...].ports` | Every 10s (port scan) | Listening localhost ports detected from the pane process tree |
+| `pane_states.map[...].command` | Every 10s (port scan) | Best-effort commandline for the pane process tree, with tmux command fallback in the UI |
+| `pane_states.map[...].task_progress` | Every 1s (refresh cycle) | Parsed from activity log — task list per pane |
+| `pane_states.map[...].task_dismissed_total` | On task completion | Tracks dismissed completed-task counts |
+| `pane_states.map[...].inactive_since` | On status change | Debounce timestamp (3s grace before hiding tasks) |
+| `pane_states.map[...].tab_pref` | On user tab switch | Remembered bottom tab choice per pane (cleared on relaunch) |
+| `pane_states.map[...].task_progress_log_mtime` | Every 1s (refresh cycle) | mtime of the task-progress log last parsed; skips re-parsing when unchanged |
 
 Per-pane file-based state:
 
