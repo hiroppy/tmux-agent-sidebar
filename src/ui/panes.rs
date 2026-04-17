@@ -1,4 +1,6 @@
+mod click_targets;
 mod filter_bar;
+mod popups;
 mod row;
 mod row_collector;
 
@@ -10,16 +12,14 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, Paragraph},
 };
 
-use crate::state::{
-    AppState, Focus, PopupState, RepoFilter, RepoSpawnTarget, SpawnField, SpawnRemoveTarget,
-};
+use crate::state::{AppState, Focus, PopupState, RepoFilter, SpawnField};
 
 pub(super) const SPAWN_BUTTON: &str = "+";
 
 /// Width of the clickable region around the `×` marker. One column of
 /// slack on either side makes it comfortable to hit without stealing
 /// clicks from adjacent branch text.
-const REMOVE_MARKER_HIT_WIDTH: u16 = 3;
+pub(super) const REMOVE_MARKER_HIT_WIDTH: u16 = 3;
 
 use super::text::{display_width, truncate_to_width};
 
@@ -108,7 +108,7 @@ const EXP_MODE_LABEL_Y: u16 = 7;
 const EXP_MODE_VALUE_Y: u16 = 8;
 const EXP_ERROR_Y: u16 = 10;
 
-fn render_spawn_input_popup(frame: &mut Frame, state: &mut AppState, area: Rect) {
+pub(super) fn render_spawn_input_popup(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let PopupState::SpawnInput {
         input,
         agent_idx,
@@ -286,7 +286,7 @@ fn tail_fit(text: &str, max_width: usize) -> String {
     out
 }
 
-fn render_remove_confirm_popup(frame: &mut Frame, state: &mut AppState, area: Rect) {
+pub(super) fn render_remove_confirm_popup(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let (branch, error) = match &state.popup {
         PopupState::RemoveConfirm { branch, error, .. } => (branch.clone(), error.clone()),
         _ => return,
@@ -345,7 +345,7 @@ fn render_remove_confirm_popup(frame: &mut Frame, state: &mut AppState, area: Re
     }
 }
 
-fn render_repo_popup(frame: &mut Frame, state: &mut AppState, area: Rect) {
+pub(super) fn render_repo_popup(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let theme = &state.theme;
     let repos = state.repo_names();
     if repos.is_empty() {
@@ -423,16 +423,12 @@ fn render_secondary_header_into(frame: &mut Frame, state: &mut AppState, area: R
     frame.render_widget(Paragraph::new(vec![line]), area);
 }
 
-pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
-    let layout = PaneLayout::compute(area);
-    render_filter_bar_into(frame, state, layout.filter_area);
-    render_secondary_header_into(frame, state, layout.secondary_area);
-
-    let list_area = layout.list_area;
-
-    let collected = row_collector::collect(state, list_area.width);
-
-    state.layout.line_to_row = collected.line_to_row;
+fn compute_scroll_offset(
+    state: &mut AppState,
+    collected: &row_collector::CollectedRows,
+    list_area: Rect,
+) -> usize {
+    state.layout.line_to_row = collected.line_to_row.clone();
     state.scrolls.panes.total_lines = collected.lines.len();
     state.scrolls.panes.visible_height = list_area.height as usize;
 
@@ -459,60 +455,20 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
         }
     }
 
-    let scroll_offset = state.scrolls.panes.offset;
-    let btn_width = SPAWN_BUTTON.len() as u16;
-    state.layout.repo_spawn_targets = collected
-        .pending_spawn
-        .into_iter()
-        .filter_map(|(line_idx, repo_name, repo_root)| {
-            if line_idx < scroll_offset {
-                return None;
-            }
-            let screen_row = (line_idx - scroll_offset) as u16;
-            if screen_row >= list_area.height {
-                return None;
-            }
-            let btn_x = list_area.x + list_area.width.saturating_sub(btn_width);
-            let btn_y = list_area.y + screen_row;
-            Some(RepoSpawnTarget {
-                rect: Rect::new(btn_x, btn_y, btn_width, 1),
-                repo_name,
-                repo_root,
-            })
-        })
-        .collect();
+    state.scrolls.panes.offset
+}
 
-    state.layout.spawn_remove_targets = collected
-        .pending_remove
-        .into_iter()
-        .filter_map(|(line_idx, marker_col, pane_id)| {
-            if line_idx < scroll_offset {
-                return None;
-            }
-            let screen_row = (line_idx - scroll_offset) as u16;
-            if screen_row >= list_area.height {
-                return None;
-            }
-            // The `×` sits at the rightmost row column, so the hit
-            // region can only extend leftward. Extending by
-            // `REMOVE_MARKER_HIT_WIDTH - 1` keeps the glyph at the
-            // right edge of the click rect with two columns of slack
-            // to its left (which normally covers the space or port
-            // digits just left of the marker).
-            let btn_x = list_area
-                .x
-                .saturating_add(marker_col.saturating_sub(REMOVE_MARKER_HIT_WIDTH - 1));
-            let btn_y = list_area.y + screen_row;
-            Some(SpawnRemoveTarget {
-                rect: Rect::new(btn_x, btn_y, REMOVE_MARKER_HIT_WIDTH, 1),
-                pane_id,
-            })
-        })
-        .collect();
-
-    let paragraph = Paragraph::new(collected.lines).scroll((state.scrolls.panes.offset as u16, 0));
+fn render_pane_rows(
+    frame: &mut Frame,
+    collected: &row_collector::CollectedRows,
+    scroll_offset: usize,
+    list_area: Rect,
+) {
+    let paragraph = Paragraph::new(collected.lines.clone()).scroll((scroll_offset as u16, 0));
     frame.render_widget(paragraph, list_area);
+}
 
+fn render_flash_banner_into(frame: &mut Frame, state: &mut AppState, area: Rect) {
     // Render flash banner (spawn / remove feedback) before popups so
     // popups stay on top.
     if let Some(text) = state.take_flash() {
@@ -530,15 +486,18 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
             flash_rect,
         );
     }
+}
 
-    // Render popup overlay on top if open
-    if state.is_notices_popup_open() {
-        super::notices::render_notices_popup(frame, state, area);
-    } else if state.is_repo_popup_open() {
-        render_repo_popup(frame, state, area);
-    } else if state.is_spawn_input_open() {
-        render_spawn_input_popup(frame, state, area);
-    } else if state.is_remove_confirm_open() {
-        render_remove_confirm_popup(frame, state, area);
-    }
+pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
+    let layout = PaneLayout::compute(area);
+    render_filter_bar_into(frame, state, layout.filter_area);
+    render_secondary_header_into(frame, state, layout.secondary_area);
+
+    let collected = row_collector::collect(state, layout.list_area.width);
+    let scroll_offset = compute_scroll_offset(state, &collected, layout.list_area);
+    click_targets::materialize(state, &collected, scroll_offset, layout.list_area);
+    render_pane_rows(frame, &collected, scroll_offset, layout.list_area);
+
+    render_flash_banner_into(frame, state, area);
+    popups::render_if_open(frame, state, area);
 }
