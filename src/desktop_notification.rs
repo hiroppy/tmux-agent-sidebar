@@ -35,6 +35,13 @@ impl DesktopNotificationEvent {
         Self::PermissionDenied,
     ];
 
+    pub const DEFAULT: [Self; 4] = [
+        Self::Stop,
+        Self::Notification,
+        Self::StopFailure,
+        Self::PermissionDenied,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Stop => "stop",
@@ -67,7 +74,7 @@ impl Default for DesktopNotificationSettings {
     fn default() -> Self {
         Self {
             enabled: true,
-            events: DesktopNotificationEvent::ALL.iter().copied().collect(),
+            events: DesktopNotificationEvent::DEFAULT.iter().copied().collect(),
         }
     }
 }
@@ -430,12 +437,16 @@ mod tests {
     }
 
     #[test]
-    fn events_default_to_all_when_unset() {
+    fn events_default_to_default_set_when_unset() {
         let opts = HashMap::new();
         let settings = DesktopNotificationSettings::from_tmux_options_with_backend(&opts, true);
-        for event in DesktopNotificationEvent::ALL {
+        for event in DesktopNotificationEvent::DEFAULT {
             assert!(settings.event_enabled(event), "expected {event:?} enabled");
         }
+        assert!(
+            !settings.event_enabled(DesktopNotificationEvent::TaskCompleted),
+            "task_completed should be opt-in"
+        );
     }
 
     #[test]

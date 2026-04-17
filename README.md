@@ -305,15 +305,16 @@ Supported events:
 
 - `stop` — assistant finished responding (`Stop` hook; Claude Code and Codex)
 - `notification` — permission prompt or other attention request (`Notification` hook; Claude only)
-- `task_completed` — subagent / Task tool completion (`TaskCompleted` hook; Claude only)
+- `task_completed` — subagent / Task tool completion (`TaskCompleted` hook; Claude only). Off by default — opt in via `@sidebar_notifications_events`.
 - `stop_failure` — assistant ended with an error (`StopFailure` hook; Claude only)
 - `permission_denied` — permission explicitly denied (`PermissionDenied` hook; Claude only)
 
-Restrict which events fire notifications with `@sidebar_notifications_events` (comma-separated event names; `all` or unset = every event):
+Restrict which events fire notifications with `@sidebar_notifications_events` (comma-separated event names; `all` fires every event, unset = every event except `task_completed`):
 
 ```tmux
-set -g @sidebar_notifications_events "stop,notification"  # drop subagent + error notifications
-set -g @sidebar_notifications_events all                  # explicit "fire everything" (default)
+set -g @sidebar_notifications_events "stop,notification"                  # drop error notifications
+set -g @sidebar_notifications_events "stop,notification,task_completed"   # enable subagent notifications
+set -g @sidebar_notifications_events all                                  # explicit "fire everything"
 ```
 
 Setting an empty value disables every event without touching the master `@sidebar_notifications` switch.
