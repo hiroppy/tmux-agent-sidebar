@@ -136,7 +136,7 @@ enum TabDecision {
 mod tests {
     use super::*;
     use crate::group::{PaneGitInfo, RepoGroup};
-    use crate::tmux::{AgentType, PaneInfo, PaneStatus, PermissionMode};
+    use crate::tmux::{AgentType, PaneInfo, PaneStatus, PermissionMode, WorktreeMetadata};
 
     fn test_pane(id: &str) -> PaneInfo {
         PaneInfo {
@@ -154,8 +154,7 @@ mod tests {
             permission_mode: PermissionMode::Default,
             subagents: vec![],
             pane_pid: None,
-            worktree_name: String::new(),
-            worktree_branch: String::new(),
+            worktree: WorktreeMetadata::default(),
             session_id: None,
             session_name: String::new(),
             sidebar_spawned: false,

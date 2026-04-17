@@ -20,8 +20,7 @@ pub struct PaneInfo {
     pub permission_mode: PermissionMode,
     pub subagents: Vec<String>,
     pub pane_pid: Option<u32>,
-    pub worktree_name: String,
-    pub worktree_branch: String,
+    pub worktree: WorktreeMetadata,
     pub session_id: Option<String>,
     pub session_name: String,
     /// `true` when the window this pane lives in was created by the
@@ -29,6 +28,12 @@ pub struct PaneInfo {
     /// option). Used by the row renderer to show a clickable red `×`
     /// in place of the usual `+` worktree marker.
     pub sidebar_spawned: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct WorktreeMetadata {
+    pub name: String,
+    pub branch: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -365,8 +370,10 @@ pub(crate) fn parse_pane_line(line: &str) -> Option<PaneInfo> {
         permission_mode,
         subagents: parse_subagents(&parts[14]),
         pane_pid,
-        worktree_name: parts[17].to_string(),
-        worktree_branch: parts[18].to_string(),
+        worktree: WorktreeMetadata {
+            name: parts[17].to_string(),
+            branch: parts[18].to_string(),
+        },
         session_id,
         session_name: String::new(),
         sidebar_spawned: parts[20] == "1",
@@ -1048,8 +1055,7 @@ mod tests {
             permission_mode: PermissionMode::Default,
             subagents: vec![],
             pane_pid: None,
-            worktree_name: String::new(),
-            worktree_branch: String::new(),
+            worktree: WorktreeMetadata::default(),
             session_id: None,
             session_name: String::new(),
             sidebar_spawned: false,
@@ -1079,8 +1085,7 @@ mod tests {
             permission_mode: PermissionMode::Default,
             subagents: vec![],
             pane_pid: None,
-            worktree_name: String::new(),
-            worktree_branch: String::new(),
+            worktree: WorktreeMetadata::default(),
             session_id: None,
             session_name: String::new(),
             sidebar_spawned: false,
@@ -1531,8 +1536,7 @@ mod tests {
                     permission_mode: PermissionMode::Default,
                     subagents: vec![],
                     pane_pid: None,
-                    worktree_name: String::new(),
-                    worktree_branch: String::new(),
+                    worktree: WorktreeMetadata::default(),
                     session_id: None,
                     session_name: String::new(),
                     sidebar_spawned: false,

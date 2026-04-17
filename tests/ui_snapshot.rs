@@ -6,7 +6,7 @@ use tmux_agent_sidebar::activity::{ActivityEntry, TaskProgress, TaskStatus};
 use tmux_agent_sidebar::group::{PaneGitInfo, RepoGroup};
 use tmux_agent_sidebar::state::{Focus, PopupState, StatusFilter};
 use tmux_agent_sidebar::tmux::{
-    AgentType, PaneInfo, PaneStatus, PermissionMode, SessionInfo, WindowInfo,
+    AgentType, PaneInfo, PaneStatus, PermissionMode, SessionInfo, WindowInfo, WorktreeMetadata,
 };
 
 // ─── UI Snapshot Tests ─────────────────────────────────────────────
@@ -242,8 +242,7 @@ fn snapshot_two_agents_same_window_ui() {
         permission_mode: tmux_agent_sidebar::tmux::PermissionMode::Default,
         subagents: vec![],
         pane_pid: None,
-        worktree_name: String::new(),
-        worktree_branch: String::new(),
+        worktree: WorktreeMetadata::default(),
         session_id: None,
         session_name: String::new(),
         sidebar_spawned: false,
@@ -263,8 +262,7 @@ fn snapshot_two_agents_same_window_ui() {
         permission_mode: tmux_agent_sidebar::tmux::PermissionMode::Default,
         subagents: vec![],
         pane_pid: None,
-        worktree_name: String::new(),
-        worktree_branch: String::new(),
+        worktree: WorktreeMetadata::default(),
         session_id: None,
         session_name: String::new(),
         sidebar_spawned: false,

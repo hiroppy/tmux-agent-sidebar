@@ -104,12 +104,12 @@ pub fn group_panes_by_repo(sessions: &[crate::tmux::SessionInfo]) -> Vec<RepoGro
                 // Override with hook-provided worktree info (Claude Code
                 // provides this; Codex does not, so the git-command base
                 // remains as fallback).
-                if !pane.worktree_name.is_empty() {
-                    git_info.worktree_name = Some(pane.worktree_name.clone());
+                if !pane.worktree.name.is_empty() {
+                    git_info.worktree_name = Some(pane.worktree.name.clone());
                     git_info.is_worktree = true;
                 }
-                if !pane.worktree_branch.is_empty() {
-                    git_info.branch = Some(pane.worktree_branch.clone());
+                if !pane.worktree.branch.is_empty() {
+                    git_info.branch = Some(pane.worktree.branch.clone());
                     git_info.is_worktree = true;
                 }
 
@@ -227,8 +227,7 @@ mod tests {
             permission_mode: crate::tmux::PermissionMode::Default,
             subagents: vec![],
             pane_pid: None,
-            worktree_name: String::new(),
-            worktree_branch: String::new(),
+            worktree: crate::tmux::WorktreeMetadata::default(),
             session_id: None,
             session_name: String::new(),
             sidebar_spawned: false,

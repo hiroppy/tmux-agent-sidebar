@@ -1081,7 +1081,7 @@ mod tests {
     use super::*;
     use crate::activity::{TaskProgress, TaskStatus};
     use crate::group::{PaneGitInfo, RepoGroup};
-    use crate::tmux::{AgentType, PaneInfo, PaneStatus, PermissionMode};
+    use crate::tmux::{AgentType, PaneInfo, PaneStatus, PermissionMode, WorktreeMetadata};
     use std::fs;
 
     /// Reset filter click debounce so the next `handle_filter_click` is not ignored.
@@ -1344,8 +1344,7 @@ mod tests {
             permission_mode: PermissionMode::Default,
             subagents: vec![],
             pane_pid: None,
-            worktree_name: String::new(),
-            worktree_branch: String::new(),
+            worktree: WorktreeMetadata::default(),
             session_id: None,
             session_name: String::new(),
             sidebar_spawned: false,

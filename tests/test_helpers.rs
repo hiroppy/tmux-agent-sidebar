@@ -2,7 +2,7 @@
 use ratatui::style::{Color, Modifier};
 use ratatui::{Terminal, backend::TestBackend, buffer::Buffer};
 use tmux_agent_sidebar::state::AppState;
-use tmux_agent_sidebar::tmux::{AgentType, PaneInfo, PaneStatus, SessionInfo};
+use tmux_agent_sidebar::tmux::{AgentType, PaneInfo, PaneStatus, SessionInfo, WorktreeMetadata};
 use tmux_agent_sidebar::ui;
 
 pub const FIXED_NOW: u64 = 1_700_000_000;
@@ -117,8 +117,7 @@ pub fn make_pane(agent: AgentType, status: PaneStatus) -> PaneInfo {
         permission_mode: tmux_agent_sidebar::tmux::PermissionMode::Default,
         subagents: vec![],
         pane_pid: None,
-        worktree_name: String::new(),
-        worktree_branch: String::new(),
+        worktree: WorktreeMetadata::default(),
         session_id: None,
         session_name: String::new(),
         sidebar_spawned: false,

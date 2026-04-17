@@ -7,7 +7,9 @@ use tmux_agent_sidebar::group::{PaneGitInfo, RepoGroup};
 use tmux_agent_sidebar::state::{
     AppState, BottomTab, Focus, GlobalState, PopupState, RepoFilter, RowTarget, StatusFilter,
 };
-use tmux_agent_sidebar::tmux::{AgentType, PaneInfo, PaneStatus, SessionInfo, WindowInfo};
+use tmux_agent_sidebar::tmux::{
+    AgentType, PaneInfo, PaneStatus, SessionInfo, WindowInfo, WorktreeMetadata,
+};
 use tmux_agent_sidebar::worktree;
 
 // ─── State Transition Tests ────────────────────────────────────────
@@ -113,8 +115,7 @@ fn test_line_to_row_two_agents() {
         permission_mode: tmux_agent_sidebar::tmux::PermissionMode::Default,
         subagents: vec![],
         pane_pid: None,
-        worktree_name: String::new(),
-        worktree_branch: String::new(),
+        worktree: WorktreeMetadata::default(),
         session_id: None,
         session_name: String::new(),
         sidebar_spawned: false,
@@ -134,8 +135,7 @@ fn test_line_to_row_two_agents() {
         permission_mode: tmux_agent_sidebar::tmux::PermissionMode::Default,
         subagents: vec![],
         pane_pid: None,
-        worktree_name: String::new(),
-        worktree_branch: String::new(),
+        worktree: WorktreeMetadata::default(),
         session_id: None,
         session_name: String::new(),
         sidebar_spawned: false,

@@ -510,7 +510,7 @@ fn running_icon_for<'a>(
 mod tests {
     use super::*;
     use crate::group::PaneGitInfo;
-    use crate::tmux::{AgentType, PaneInfo, PermissionMode};
+    use crate::tmux::{AgentType, PaneInfo, PermissionMode, WorktreeMetadata};
     use crate::ui::icons::StatusIcons;
 
     fn pane(permission_mode: PermissionMode, status: PaneStatus, prompt: &str) -> PaneInfo {
@@ -538,8 +538,7 @@ mod tests {
             permission_mode,
             subagents: vec![],
             pane_pid: None,
-            worktree_name: String::new(),
-            worktree_branch: String::new(),
+            worktree: WorktreeMetadata::default(),
             session_id: None,
             session_name: String::new(),
             sidebar_spawned: false,
