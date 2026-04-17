@@ -23,7 +23,7 @@ fn test_scroll_bottom_dispatches() {
     let mut state = make_state(vec![]);
 
     // Set up activity scroll state
-    state.activity_entries = vec![
+    state.activity.entries = vec![
         ActivityEntry {
             timestamp: "10:00".into(),
             tool: "Read".into(),
@@ -35,8 +35,8 @@ fn test_scroll_bottom_dispatches() {
             label: "b".into(),
         },
     ];
-    state.activity_scroll.total_lines = 6;
-    state.activity_scroll.visible_height = 4;
+    state.activity.scroll.total_lines = 6;
+    state.activity.scroll.visible_height = 4;
 
     // Set up git scroll state
     state.git.unstaged_files = vec![
@@ -62,14 +62,14 @@ fn test_scroll_bottom_dispatches() {
     // Activity tab: scroll should affect activity
     state.bottom_tab = BottomTab::Activity;
     state.scroll_bottom(1);
-    assert_eq!(state.activity_scroll.offset, 1);
+    assert_eq!(state.activity.scroll.offset, 1);
     assert_eq!(state.git_scroll.offset, 0);
 
     // Git tab: scroll should affect git
     state.bottom_tab = BottomTab::GitStatus;
     state.scroll_bottom(1);
     assert_eq!(state.git_scroll.offset, 1);
-    assert_eq!(state.activity_scroll.offset, 1); // unchanged
+    assert_eq!(state.activity.scroll.offset, 1); // unchanged
 }
 
 #[test]
@@ -181,7 +181,7 @@ fn snapshot_activity_tab_active_ui() {
     state.bottom_tab = BottomTab::Activity;
     state.focus = Focus::ActivityLog;
     state.sidebar_focused = true;
-    state.activity_entries = vec![ActivityEntry {
+    state.activity.entries = vec![ActivityEntry {
         timestamp: "10:32".into(),
         tool: "Edit".into(),
         label: "src/main.rs".into(),
@@ -218,7 +218,7 @@ fn activity_tab_leaves_one_blank_row_above_entries() {
     state.bottom_tab = BottomTab::Activity;
     state.focus = Focus::ActivityLog;
     state.sidebar_focused = true;
-    state.activity_entries = vec![ActivityEntry {
+    state.activity.entries = vec![ActivityEntry {
         timestamp: "10:32".into(),
         tool: "Edit".into(),
         label: "src/main.rs".into(),
@@ -254,7 +254,7 @@ fn snapshot_tab_bar_renders_both_labels() {
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
 
-    state.activity_entries = vec![ActivityEntry {
+    state.activity.entries = vec![ActivityEntry {
         timestamp: "10:32".into(),
         tool: "Edit".into(),
         label: "test".into(),

@@ -121,8 +121,8 @@ fn run_app(
     // Populate session names synchronously before the first draw so
     // `/rename`-assigned labels show up without waiting for the first
     // background scan tick.
-    state.session_names = session::scan_session_names();
-    state.session_names_dirty = true;
+    state.sessions.names = session::scan_session_names();
+    state.sessions.dirty = true;
     state.refresh();
 
     let (git_tx, git_rx) = mpsc::channel::<GitData>();
@@ -257,7 +257,7 @@ fn run_app(
                                 Focus::ActivityLog => {
                                     let at_top = match state.bottom_tab {
                                         tmux_agent_sidebar::state::BottomTab::Activity => {
-                                            state.activity_scroll.offset == 0
+                                            state.activity.scroll.offset == 0
                                         }
                                         tmux_agent_sidebar::state::BottomTab::GitStatus => {
                                             state.git_scroll.offset == 0
@@ -382,8 +382,8 @@ fn run_app(
         }
 
         if let Ok(names) = session_rx.try_recv() {
-            state.session_names = names;
-            state.session_names_dirty = true;
+            state.sessions.names = names;
+            state.sessions.dirty = true;
             needs_redraw = true;
         }
 

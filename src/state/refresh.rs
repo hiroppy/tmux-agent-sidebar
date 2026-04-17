@@ -74,7 +74,7 @@ impl AppState {
             })
             .collect();
         self.repo_groups = crate::group::group_panes_by_repo(&sessions);
-        if !self.session_names_dirty
+        if !self.sessions.dirty
             && self
                 .repo_groups
                 .iter()
@@ -84,7 +84,7 @@ impl AppState {
                     Some(prev_sid) => *prev_sid != p.session_id,
                 })
         {
-            self.session_names_dirty = true;
+            self.sessions.dirty = true;
         }
         self.prune_pane_states_to_current_panes();
         self.rebuild_row_targets();
@@ -157,9 +157,9 @@ impl AppState {
         } else {
             self.apply_session_snapshot(focused, sessions);
         }
-        if self.session_names_dirty {
+        if self.sessions.dirty {
             self.refresh_session_names();
-            self.session_names_dirty = false;
+            self.sessions.dirty = false;
         }
         self.refresh_activity_data();
         window_active
@@ -173,7 +173,7 @@ impl AppState {
         for group in &mut self.repo_groups {
             for (pane, _) in &mut group.panes {
                 if let Some(sid) = &pane.session_id
-                    && let Some(name) = self.session_names.get(sid)
+                    && let Some(name) = self.sessions.names.get(sid)
                 {
                     pane.session_name.clone_from(name);
                 } else {
@@ -329,13 +329,13 @@ impl AppState {
 
     pub(crate) fn refresh_activity_log(&mut self) {
         let Some(ref pane_id) = self.focused_pane_id else {
-            self.activity_entries.clear();
-            self.activity_log_cache = None;
+            self.activity.entries.clear();
+            self.activity.log_cache = None;
             return;
         };
         let current_mtime = activity::log_mtime(pane_id);
         if let (Some(mtime), Some((cached_id, cached_mtime))) =
-            (current_mtime, self.activity_log_cache.as_ref())
+            (current_mtime, self.activity.log_cache.as_ref())
             && cached_id == pane_id
             && *cached_mtime == mtime
         {
@@ -343,10 +343,10 @@ impl AppState {
         }
         // Task-reset markers are internal bookkeeping for parse_task_progress;
         // they should never appear in the user-facing Activity tab.
-        let mut entries = activity::read_activity_log(pane_id, self.activity_max_entries);
+        let mut entries = activity::read_activity_log(pane_id, self.activity.max_entries);
         entries.retain(|e| e.tool != activity::TASK_RESET_MARKER);
-        self.activity_entries = entries;
-        self.activity_log_cache = current_mtime.map(|m| (pane_id.clone(), m));
+        self.activity.entries = entries;
+        self.activity.log_cache = current_mtime.map(|m| (pane_id.clone(), m));
     }
 }
 
@@ -449,8 +449,8 @@ mod tests {
             pane_with_session("%1", "sess-a"),
             pane_with_session("%2", "sess-b"),
         ]);
-        state.session_names.insert("sess-a".into(), "alpha".into());
-        state.session_names.insert("sess-b".into(), "beta".into());
+        state.sessions.names.insert("sess-a".into(), "alpha".into());
+        state.sessions.names.insert("sess-b".into(), "beta".into());
 
         state.refresh_session_names();
 
@@ -488,13 +488,13 @@ mod tests {
         // refresh_session_names would be skipped and the UI would
         // keep showing the old session label forever.
         let mut state = state_with_panes(vec![pane_with_session("%1", "sess-old")]);
-        state.session_names_dirty = false;
+        state.sessions.dirty = false;
 
         let next_sessions = test_session(vec![pane_with_session("%1", "sess-new")]);
         state.apply_session_snapshot(false, next_sessions);
 
         assert!(
-            state.session_names_dirty,
+            state.sessions.dirty,
             "session_names_dirty must be set when an existing pane's session_id changes"
         );
     }
@@ -504,13 +504,13 @@ mod tests {
         // Same pane, same session_id across snapshots — no need to
         // re-walk every pane, dirty flag should stay clear.
         let mut state = state_with_panes(vec![pane_with_session("%1", "sess-a")]);
-        state.session_names_dirty = false;
+        state.sessions.dirty = false;
 
         let next_sessions = test_session(vec![pane_with_session("%1", "sess-a")]);
         state.apply_session_snapshot(false, next_sessions);
 
         assert!(
-            !state.session_names_dirty,
+            !state.sessions.dirty,
             "session_names_dirty must remain clear when nothing changed"
         );
     }
@@ -523,7 +523,7 @@ mod tests {
         // to a known session.
         let mut state = state_with_panes(vec![test_pane("%1")]);
         state.repo_groups[0].panes[0].0.session_name = "stray".into();
-        state.session_names.insert("sess-a".into(), "alpha".into());
+        state.sessions.names.insert("sess-a".into(), "alpha".into());
 
         state.refresh_session_names();
 

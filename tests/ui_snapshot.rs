@@ -466,7 +466,7 @@ fn snapshot_activity_log_ui() {
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
 
-    state.activity_entries = vec![
+    state.activity.entries = vec![
         ActivityEntry {
             timestamp: "10:32".into(),
             tool: "Edit".into(),
@@ -517,7 +517,7 @@ fn snapshot_activity_log_long_label_ui() {
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
 
-    state.activity_entries = vec![ActivityEntry {
+    state.activity.entries = vec![ActivityEntry {
         timestamp: "10:32".into(),
         tool: "Read".into(),
         label: "config/tmux-agent-sidebar-rs/src/very-long-filename.rs".into(),
@@ -1195,7 +1195,7 @@ fn snapshot_activity_all_tool_types_ui() {
     let pane = make_pane(AgentType::Claude, PaneStatus::Running);
     let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
 
-    state.activity_entries = vec![
+    state.activity.entries = vec![
         ActivityEntry {
             timestamp: "10:07".into(),
             tool: "Agent".into(),
@@ -1266,7 +1266,7 @@ fn snapshot_focus_activity_log_ui() {
     let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
     state.focus = Focus::ActivityLog;
     state.sidebar_focused = true;
-    state.activity_entries = vec![ActivityEntry {
+    state.activity.entries = vec![ActivityEntry {
         timestamp: "10:00".into(),
         tool: "Read".into(),
         label: "file.rs".into(),

@@ -1,15 +1,20 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use crate::activity::{ActivityEntry, TaskProgress};
+use crate::activity::TaskProgress;
 use crate::tmux;
 use crate::ui::colors::ColorTheme;
 use crate::ui::icons::StatusIcons;
 
+mod activity;
 mod refresh;
+mod session;
 mod tab;
+
+pub use activity::ActivityState;
 #[cfg(test)]
 pub(crate) use refresh::{TaskProgressDecision, classify_task_progress};
+pub use session::SessionNamesState;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Focus {
@@ -524,11 +529,9 @@ pub struct AppState {
     /// the UI layer; consumed by mouse/keyboard handlers before the
     /// next render.
     pub layout: FrameLayout,
-    pub activity_entries: Vec<ActivityEntry>,
-    pub activity_scroll: ScrollState,
+    pub activity: ActivityState,
     pub focused_pane_id: Option<String>,
     pub tmux_pane: String,
-    pub activity_max_entries: usize,
     pub panes_scroll: ScrollState,
     pub theme: ColorTheme,
     pub icons: StatusIcons,
@@ -563,19 +566,14 @@ pub struct AppState {
     /// the `@sidebar_bottom_height` tmux option. A value of 0 hides the panel.
     pub bottom_panel_height: u16,
     /// Maps session_id → session name, refreshed periodically from
-    /// `~/.claude/sessions/*.json` files.
-    pub session_names: HashMap<String, String>,
-    /// `true` when `session_names` has changed since the last
-    /// `refresh_session_names` application. Set by the main loop after
-    /// receiving a fresh map from `session_poll_loop`, cleared by
-    /// `refresh_session_names` once the map has been propagated to every
-    /// pane. Avoids re-walking every pane each tick when the map is
-    /// unchanged (the polling thread only updates it every 10s).
-    pub session_names_dirty: bool,
-    /// `(focused_pane_id, mtime)` of the activity log most recently
-    /// rendered into `activity_entries`. `refresh_activity_log` skips
-    /// re-reading the log when neither field has changed.
-    pub activity_log_cache: Option<(String, std::time::SystemTime)>,
+    /// `~/.claude/sessions/*.json` files. The `dirty` flag is `true` when
+    /// the map has changed since the last `refresh_session_names`
+    /// application. Set by the main loop after receiving a fresh map from
+    /// `session_poll_loop`, cleared by `refresh_session_names` once the
+    /// map has been propagated to every pane. Avoids re-walking every
+    /// pane each tick when the map is unchanged (the polling thread only
+    /// updates it every 10s).
+    pub sessions: SessionNamesState,
 }
 
 /// Screen-positioned hyperlink overlay for OSC 8 terminal hyperlinks.
@@ -634,11 +632,9 @@ impl AppState {
             flash: None,
             spinner_frame: 0,
             layout: FrameLayout::default(),
-            activity_entries: vec![],
-            activity_scroll: ScrollState::default(),
+            activity: ActivityState::new(),
             focused_pane_id: None,
             tmux_pane,
-            activity_max_entries: 50,
             panes_scroll: ScrollState::default(),
             theme: ColorTheme::default(),
             icons: StatusIcons::default(),
@@ -655,9 +651,7 @@ impl AppState {
             version_notice: None,
             global: GlobalState::new(),
             bottom_panel_height: crate::ui::BOTTOM_PANEL_HEIGHT,
-            session_names: HashMap::new(),
-            session_names_dirty: true,
-            activity_log_cache: None,
+            sessions: SessionNamesState::new(),
         }
     }
 
@@ -1296,7 +1290,7 @@ impl AppState {
 
     pub fn scroll_bottom(&mut self, delta: isize) {
         match self.bottom_tab {
-            BottomTab::Activity => self.activity_scroll.scroll(delta),
+            BottomTab::Activity => self.activity.scroll.scroll(delta),
             BottomTab::GitStatus => self.git_scroll.scroll(delta),
         }
     }
@@ -2074,14 +2068,14 @@ mod tests {
         let log_path = crate::activity::log_file_path(pane_id);
         fs::write(&log_path, "10:00|Read|old\n10:01|Edit|new\n").unwrap();
         state.focused_pane_id = Some(pane_id.into());
-        state.activity_max_entries = 50;
+        state.activity.max_entries = 50;
 
         state.refresh_activity_log();
 
-        assert_eq!(state.activity_entries.len(), 2);
-        assert_eq!(state.activity_entries[0].tool, "Edit");
-        assert_eq!(state.activity_entries[0].label, "new");
-        assert_eq!(state.activity_entries[1].tool, "Read");
+        assert_eq!(state.activity.entries.len(), 2);
+        assert_eq!(state.activity.entries[0].tool, "Edit");
+        assert_eq!(state.activity.entries[0].label, "new");
+        assert_eq!(state.activity.entries[1].tool, "Read");
 
         fs::remove_file(&log_path).ok();
     }
@@ -2089,7 +2083,7 @@ mod tests {
     #[test]
     fn refresh_activity_log_clears_without_focus() {
         let mut state = AppState::new("%99".into());
-        state.activity_entries = vec![crate::activity::ActivityEntry {
+        state.activity.entries = vec![crate::activity::ActivityEntry {
             timestamp: "10:00".into(),
             tool: "Read".into(),
             label: "keep?".into(),
@@ -2098,7 +2092,7 @@ mod tests {
         state.focused_pane_id = None;
         state.refresh_activity_log();
 
-        assert!(state.activity_entries.is_empty());
+        assert!(state.activity.entries.is_empty());
     }
 
     #[test]
@@ -2624,14 +2618,14 @@ mod tests {
     fn scroll_bottom_dispatches_to_activity() {
         let mut state = AppState::new("%99".into());
         state.bottom_tab = BottomTab::Activity;
-        state.activity_scroll = ScrollState {
+        state.activity.scroll = ScrollState {
             offset: 0,
             total_lines: 10,
             visible_height: 3,
         };
 
         state.scroll_bottom(2);
-        assert_eq!(state.activity_scroll.offset, 2);
+        assert_eq!(state.activity.scroll.offset, 2);
         assert_eq!(state.git_scroll.offset, 0);
     }
 
@@ -2647,7 +2641,7 @@ mod tests {
 
         state.scroll_bottom(2);
         assert_eq!(state.git_scroll.offset, 2);
-        assert_eq!(state.activity_scroll.offset, 0);
+        assert_eq!(state.activity.scroll.offset, 0);
     }
 
     // ─── handle_mouse_scroll tests ────────────────────────────────────
@@ -2656,7 +2650,7 @@ mod tests {
     fn mouse_scroll_in_bottom_panel_scrolls_activity() {
         let mut state = AppState::new("%99".into());
         state.bottom_tab = BottomTab::Activity;
-        state.activity_scroll = ScrollState {
+        state.activity.scroll = ScrollState {
             offset: 0,
             total_lines: 30,
             visible_height: 10,
@@ -2664,7 +2658,7 @@ mod tests {
         // term_height=50, bottom_panel=20 → bottom starts at row 30
         // mouse at row 35 → in bottom panel
         state.handle_mouse_scroll(35, 50, 20, 3);
-        assert_eq!(state.activity_scroll.offset, 3);
+        assert_eq!(state.activity.scroll.offset, 3);
         assert_eq!(state.panes_scroll.offset, 0);
     }
 
@@ -2680,7 +2674,7 @@ mod tests {
         // mouse at row 10 → in agents panel
         state.handle_mouse_scroll(10, 50, 20, 3);
         assert_eq!(state.panes_scroll.offset, 3);
-        assert_eq!(state.activity_scroll.offset, 0);
+        assert_eq!(state.activity.scroll.offset, 0);
     }
 
     #[test]
@@ -2722,7 +2716,7 @@ mod tests {
         // row 29, just above bottom_start=30
         state.handle_mouse_scroll(29, 50, 20, 3);
         assert_eq!(state.panes_scroll.offset, 3);
-        assert_eq!(state.activity_scroll.offset, 0);
+        assert_eq!(state.activity.scroll.offset, 0);
     }
 
     // ─── move_pane_selection edge cases ─────────────────────────────

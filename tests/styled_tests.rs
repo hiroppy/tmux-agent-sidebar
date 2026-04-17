@@ -55,7 +55,7 @@ fn snapshot_activity_focused_styled() {
     state.rebuild_row_targets();
     state.focus = Focus::ActivityLog;
     state.sidebar_focused = true;
-    state.activity_entries = vec![ActivityEntry {
+    state.activity.entries = vec![ActivityEntry {
         timestamp: "10:32".into(),
         tool: "Edit".into(),
         label: "src/main.rs".into(),
@@ -98,7 +98,7 @@ fn snapshot_activity_unfocused_styled() {
     state.rebuild_row_targets();
     state.focus = Focus::Panes; // not activity
     state.sidebar_focused = true;
-    state.activity_entries = vec![ActivityEntry {
+    state.activity.entries = vec![ActivityEntry {
         timestamp: "10:32".into(),
         tool: "Edit".into(),
         label: "src/main.rs".into(),

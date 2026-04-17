@@ -12,7 +12,7 @@ use crate::ui::text::{display_width, pad_to, wrap_text_char};
 pub(super) fn draw_activity_content(frame: &mut Frame, state: &mut AppState, inner: Rect) {
     let theme = &state.theme;
 
-    if state.activity_entries.is_empty() {
+    if state.activity.entries.is_empty() {
         super::render_centered(frame, inner, "No activity yet", theme.text_muted);
         return;
     }
@@ -23,7 +23,7 @@ pub(super) fn draw_activity_content(frame: &mut Frame, state: &mut AppState, inn
     // Leave one blank row above the first activity entry for breathing room.
     lines.push(Line::from(""));
 
-    for entry in &state.activity_entries {
+    for entry in &state.activity.entries {
         let tool_color = Color::Indexed(entry.tool_color_index());
 
         let ts_dw = display_width(&entry.timestamp);
@@ -51,10 +51,10 @@ pub(super) fn draw_activity_content(frame: &mut Frame, state: &mut AppState, inn
         }
     }
 
-    state.activity_scroll.total_lines = lines.len();
-    state.activity_scroll.visible_height = inner.height as usize;
+    state.activity.scroll.total_lines = lines.len();
+    state.activity.scroll.visible_height = inner.height as usize;
 
-    let scroll_offset = state.activity_scroll.offset as u16;
+    let scroll_offset = state.activity.scroll.offset as u16;
     let paragraph = Paragraph::new(lines).scroll((scroll_offset, 0));
     frame.render_widget(paragraph, inner);
 }
