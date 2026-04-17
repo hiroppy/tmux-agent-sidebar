@@ -1,9 +1,5 @@
 use crate::event::WorktreeInfo;
 use crate::tmux;
-use crate::ui::text::wait_reason_label;
-use crate::{desktop_notification, desktop_notification::DesktopNotificationKind};
-
-use super::super::{local_time_hhmm, sanitize_tmux_value};
 
 /// Returns whether the pane's cwd should be updated.
 /// When subagents are active, events may come from a subagent running in a
@@ -228,36 +224,6 @@ pub(super) fn remove_subagent(current: &str, agent_id: &str) -> Option<String> {
     Some(filtered.join(","))
 }
 
-/// Write a single activity entry to the log file and trim if needed.
-pub(super) fn write_activity_entry(pane: &str, tool_name: &str, label: &str) {
-    let log_path = crate::activity::log_file_path(pane);
-    let label = sanitize_tmux_value(label);
-    let timestamp = local_time_hhmm();
-    let line = format!("{}|{}|{}\n", timestamp, tool_name, label);
-
-    use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)
-    {
-        let _ = f.write_all(line.as_bytes());
-    }
-
-    trim_log_file(&log_path, 200, 210);
-}
-
-/// Trim a log file to `keep` lines when it exceeds `threshold` lines.
-pub(super) fn trim_log_file(path: &std::path::Path, keep: usize, threshold: usize) {
-    if let Ok(content) = std::fs::read_to_string(path) {
-        let lines: Vec<&str> = content.lines().collect();
-        if lines.len() > threshold {
-            let start = lines.len() - keep;
-            let _ = std::fs::write(path, lines[start..].join("\n") + "\n");
-        }
-    }
-}
-
 pub(super) fn now_epoch_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -272,20 +238,6 @@ pub(super) fn now_epoch_millis() -> u64 {
         .unwrap_or(0)
 }
 
-pub(super) fn set_notification_run_id(pane: &str) {
-    tmux::set_pane_option(
-        pane,
-        "@pane_notification_run_id",
-        &now_epoch_millis().to_string(),
-    );
-}
-
-pub(super) fn notification_run_id(pane: &str) -> Option<u64> {
-    tmux::get_pane_option_value(pane, "@pane_notification_run_id")
-        .parse::<u64>()
-        .ok()
-}
-
 /// Write a task-reset marker to the activity log so `parse_task_progress`
 /// treats the upcoming run as a fresh batch — otherwise in-progress or
 /// abandoned tasks from a previous run would accumulate into the next one.
@@ -297,89 +249,7 @@ pub(super) fn mark_task_reset(pane: &str) {
     if !current_subagents.is_empty() {
         return;
     }
-    write_activity_entry(pane, crate::activity::TASK_RESET_MARKER, "");
-}
-
-pub(super) fn notify_desktop(
-    pane: &str,
-    kind: DesktopNotificationKind,
-    event: desktop_notification::DesktopNotificationEvent,
-    settings: &desktop_notification::DesktopNotificationSettings,
-    fingerprint: &str,
-    title: &str,
-    body: &str,
-) -> bool {
-    desktop_notification::notify_if_allowed(settings, pane, kind, event, fingerprint, title, body)
-}
-
-pub(super) fn task_completed_fingerprint<'a>(task_id: &'a str, task_subject: &'a str) -> &'a str {
-    if !task_id.is_empty() {
-        task_id
-    } else if !task_subject.is_empty() {
-        task_subject
-    } else {
-        "task-completed"
-    }
-}
-
-pub(super) fn task_completed_body(task_subject: &str) -> String {
-    if task_subject.is_empty() {
-        "Task completed".to_string()
-    } else {
-        format!("Task completed: {task_subject}")
-    }
-}
-
-pub(super) const NOTIFICATION_BODY_MAX_CHARS: usize = 240;
-
-pub(super) fn stop_body(last_message: &str) -> String {
-    let trimmed = last_message.trim();
-    if trimmed.is_empty() {
-        "Task completed".to_string()
-    } else {
-        truncate_body(trimmed)
-    }
-}
-
-pub(super) fn truncate_body(text: &str) -> String {
-    if text.chars().count() <= NOTIFICATION_BODY_MAX_CHARS {
-        text.to_string()
-    } else {
-        let truncated: String = text.chars().take(NOTIFICATION_BODY_MAX_CHARS).collect();
-        format!("{truncated}…")
-    }
-}
-
-pub(super) fn notification_fingerprint(wait_reason: &str) -> &str {
-    if wait_reason.is_empty() {
-        "notification"
-    } else {
-        wait_reason
-    }
-}
-
-pub(super) fn notification_body(wait_reason: &str) -> String {
-    if wait_reason.is_empty() {
-        "Permission required".to_string()
-    } else {
-        wait_reason_label(wait_reason)
-    }
-}
-
-pub(super) fn stop_failure_fingerprint(error: &str) -> &str {
-    if error.is_empty() {
-        "task-failed"
-    } else {
-        error
-    }
-}
-
-pub(super) fn stop_failure_body(error: &str) -> String {
-    if error.is_empty() {
-        "Task failed".to_string()
-    } else {
-        format!("Task failed: {error}")
-    }
+    super::activity::write_activity_entry(pane, crate::activity::TASK_RESET_MARKER, "");
 }
 
 pub(super) fn repo_label_from_ctx(ctx: &AgentContext<'_>) -> Option<String> {
@@ -508,53 +378,6 @@ mod tests {
     }
 
     #[test]
-    fn notification_run_id_reads_tmux_option() {
-        let _guard = tmux::test_mock::install();
-        let pane = "%PANE_STARTED";
-        tmux::test_mock::set(pane, "@pane_notification_run_id", "1700000123456");
-        assert_eq!(notification_run_id(pane), Some(1_700_000_123_456));
-    }
-
-    #[test]
-    fn notification_task_completed_helpers_choose_expected_values() {
-        assert_eq!(task_completed_fingerprint("id-1", "subject"), "id-1");
-        assert_eq!(task_completed_fingerprint("", "subject"), "subject");
-        assert_eq!(task_completed_fingerprint("", ""), "task-completed");
-        assert_eq!(task_completed_body("subject"), "Task completed: subject");
-        assert_eq!(task_completed_body(""), "Task completed");
-    }
-
-    #[test]
-    fn notification_stop_failure_helpers_choose_expected_values() {
-        assert_eq!(stop_failure_fingerprint("boom"), "boom");
-        assert_eq!(stop_failure_fingerprint(""), "task-failed");
-        assert_eq!(stop_failure_body("boom"), "Task failed: boom");
-        assert_eq!(stop_failure_body(""), "Task failed");
-    }
-
-    #[test]
-    fn stop_body_falls_back_to_placeholder_when_empty() {
-        assert_eq!(stop_body(""), "Task completed");
-        assert_eq!(stop_body("   \n"), "Task completed");
-    }
-
-    #[test]
-    fn stop_body_uses_last_message_when_present() {
-        assert_eq!(
-            stop_body("Fixed the bug in main.rs"),
-            "Fixed the bug in main.rs"
-        );
-    }
-
-    #[test]
-    fn stop_body_truncates_long_message() {
-        let long = "a".repeat(NOTIFICATION_BODY_MAX_CHARS + 50);
-        let body = stop_body(&long);
-        assert_eq!(body.chars().count(), NOTIFICATION_BODY_MAX_CHARS + 1);
-        assert!(body.ends_with('…'));
-    }
-
-    #[test]
     fn branch_label_from_ctx_prefers_worktree_branch() {
         let wt = Some(WorktreeInfo {
             name: "feat".into(),
@@ -580,21 +403,6 @@ mod tests {
         tmux::test_mock::set(pane, "@pane_worktree_branch", "feat/abc");
         tmux::test_mock::set(pane, "@pane_cwd", "/tmp/somewhere");
         assert_eq!(branch_label_from_pane(pane), Some("feat/abc".into()));
-    }
-
-    #[test]
-    fn set_notification_run_id_writes_millis_value() {
-        let _guard = tmux::test_mock::install();
-        let pane = "%PANE_SET_RUN_ID";
-        set_notification_run_id(pane);
-        let written = tmux::test_mock::get(pane, "@pane_notification_run_id");
-        assert!(
-            written
-                .as_deref()
-                .and_then(|s| s.parse::<u64>().ok())
-                .is_some(),
-            "expected a millisecond timestamp to be written"
-        );
     }
 
     // ─── append_subagent tests ──────────────────────────────────────
@@ -694,118 +502,6 @@ mod tests {
             remove_subagent("TrailingX:y,Explore:x", "x"),
             Some("TrailingX:y".into())
         );
-    }
-
-    // ─── trim_log_file tests ────────────────────────────────────────
-
-    #[test]
-    fn trim_log_file_under_threshold_no_change() {
-        let dir = std::env::temp_dir();
-        let path = dir.join("trim_test_under.log");
-        fs::write(&path, "line1\nline2\nline3\n").unwrap();
-
-        trim_log_file(&path, 2, 5);
-
-        let content = fs::read_to_string(&path).unwrap();
-        assert_eq!(content.lines().count(), 3);
-        fs::remove_file(&path).ok();
-    }
-
-    #[test]
-    fn trim_log_file_over_threshold_trims() {
-        let dir = std::env::temp_dir();
-        let path = dir.join("trim_test_over.log");
-        let lines: Vec<String> = (1..=15).map(|i| format!("line{}", i)).collect();
-        fs::write(&path, lines.join("\n") + "\n").unwrap();
-
-        trim_log_file(&path, 5, 10);
-
-        let content = fs::read_to_string(&path).unwrap();
-        let remaining: Vec<&str> = content.lines().collect();
-        assert_eq!(remaining.len(), 5);
-        assert_eq!(remaining[0], "line11");
-        assert_eq!(remaining[4], "line15");
-        fs::remove_file(&path).ok();
-    }
-
-    #[test]
-    fn trim_log_file_exactly_at_threshold_no_change() {
-        let dir = std::env::temp_dir();
-        let path = dir.join("trim_test_exact.log");
-        let lines: Vec<String> = (1..=10).map(|i| format!("line{}", i)).collect();
-        fs::write(&path, lines.join("\n") + "\n").unwrap();
-
-        trim_log_file(&path, 5, 10);
-
-        let content = fs::read_to_string(&path).unwrap();
-        assert_eq!(content.lines().count(), 10);
-        fs::remove_file(&path).ok();
-    }
-
-    #[test]
-    fn trim_log_file_nonexistent_file_no_panic() {
-        let dir = std::env::temp_dir();
-        let path = dir.join("trim_test_nonexistent.log");
-        let _ = fs::remove_file(&path);
-        trim_log_file(&path, 5, 10);
-    }
-
-    // ─── write_activity_entry tests ─────────────────────────────────
-
-    #[test]
-    fn write_activity_entry_creates_and_appends() {
-        let pane_id = "%CLI_WRITE_TEST";
-        let path = crate::activity::log_file_path(pane_id);
-        let _ = fs::remove_file(&path);
-
-        write_activity_entry(pane_id, "Read", "main.rs");
-        write_activity_entry(pane_id, "Edit", "lib.rs");
-
-        let content = fs::read_to_string(&path).unwrap();
-        let lines: Vec<&str> = content.lines().collect();
-        assert_eq!(lines.len(), 2);
-        assert!(lines[0].ends_with("|Read|main.rs"));
-        assert!(lines[1].ends_with("|Edit|lib.rs"));
-        assert_eq!(lines[0].as_bytes()[2], b':');
-        fs::remove_file(&path).ok();
-    }
-
-    #[test]
-    fn write_activity_entry_sanitizes_label() {
-        let pane_id = "%CLI_SANITIZE_TEST";
-        let path = crate::activity::log_file_path(pane_id);
-        let _ = fs::remove_file(&path);
-
-        write_activity_entry(pane_id, "Bash", "cat file | grep foo\nbar");
-
-        let content = fs::read_to_string(&path).unwrap();
-        let lines: Vec<&str> = content.lines().collect();
-        assert_eq!(
-            lines.len(),
-            1,
-            "newlines in label should not create extra lines"
-        );
-        let label = lines[0].splitn(3, '|').nth(2).unwrap();
-        assert!(!label.contains('|'));
-        assert!(!label.contains('\n'));
-        fs::remove_file(&path).ok();
-    }
-
-    #[test]
-    fn write_activity_entry_trims_at_threshold() {
-        let pane_id = "%CLI_TRIM_TEST";
-        let path = crate::activity::log_file_path(pane_id);
-        let _ = fs::remove_file(&path);
-
-        for i in 1..=215 {
-            write_activity_entry(pane_id, "Read", &format!("file{}.rs", i));
-        }
-
-        let content = fs::read_to_string(&path).unwrap();
-        let lines: Vec<&str> = content.lines().collect();
-        assert!(lines.len() <= 210, "should be trimmed, got {}", lines.len());
-        assert!(lines.last().unwrap().ends_with("|Read|file215.rs"));
-        fs::remove_file(&path).ok();
     }
 
     // ─── mark_task_reset tests ──────────────────────────────────────

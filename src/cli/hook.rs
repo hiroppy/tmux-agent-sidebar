@@ -2,11 +2,13 @@ use crate::event::{AgentEvent, resolve_adapter};
 
 use super::{read_stdin_json, tmux_pane};
 
+mod activity;
 mod context;
 mod handlers;
+mod notifications;
 
 use context::sync_pane_location;
-use handlers::notification_settings;
+use notifications::notification_settings;
 
 // ─── hook subcommand ────────────────────────────────────────────────────────
 
@@ -130,7 +132,7 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
             tool_name,
             tool_input,
             tool_response,
-        } => handlers::handle_activity_log(pane, &tool_name, &tool_input, &tool_response),
+        } => activity::handle_activity_log(pane, &tool_name, &tool_input, &tool_response),
         AgentEvent::PermissionDenied {
             agent,
             cwd,

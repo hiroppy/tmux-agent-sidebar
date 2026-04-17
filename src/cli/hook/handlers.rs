@@ -2,18 +2,19 @@ use crate::desktop_notification;
 use crate::desktop_notification::DesktopNotificationKind;
 use crate::tmux;
 
-use super::super::label::extract_tool_label;
 use super::super::{sanitize_tmux_value, set_attention, set_status};
 
 use super::context::{
     AgentContext, PENDING_SESSION_END, PENDING_WORKTREE_REMOVE, append_subagent,
     branch_label_from_ctx, branch_label_from_pane, clear_run_state, drain_pending_teardowns,
-    is_system_message, mark_pending, mark_task_reset, notification_body, notification_fingerprint,
-    notification_run_id, notify_desktop, now_epoch_secs, pane_writes_allowed, remove_subagent,
+    is_system_message, mark_pending, mark_task_reset, now_epoch_secs, remove_subagent,
     repo_label_from_ctx, repo_label_from_pane, run_session_end_teardown,
-    run_worktree_remove_teardown, set_agent_meta, set_notification_run_id, should_update_cwd,
-    stop_body, stop_failure_body, stop_failure_fingerprint, task_completed_body,
-    task_completed_fingerprint, write_activity_entry,
+    run_worktree_remove_teardown, set_agent_meta, should_update_cwd,
+};
+use super::notifications::{
+    notification_body, notification_fingerprint, notification_run_id, notify_desktop,
+    set_notification_run_id, stop_body, stop_failure_body, stop_failure_fingerprint,
+    task_completed_body, task_completed_fingerprint,
 };
 
 pub(super) fn on_session_start(pane: &str, ctx: &AgentContext<'_>) -> i32 {
@@ -289,161 +290,10 @@ pub(super) fn on_task_completed(
     0
 }
 
-pub(super) fn notification_settings() -> desktop_notification::DesktopNotificationSettings {
-    desktop_notification::DesktopNotificationSettings::from_tmux()
-}
-
-// ─── activity-log logic ─────────────────────────────────────────────────────
-
-/// Activity-log handler, called from `hook <agent> activity-log` event.
-pub(super) fn handle_activity_log(
-    pane: &str,
-    tool_name: &str,
-    tool_input: &serde_json::Value,
-    tool_response: &serde_json::Value,
-) -> i32 {
-    let label = extract_tool_label(tool_name, tool_input, tool_response);
-
-    // If status is not running, tool use means agent is active again
-    let current_status = tmux::get_pane_option_value(pane, "@pane_status");
-    if current_status != "running" && !current_status.is_empty() {
-        set_status(pane, "running");
-        if current_status == "waiting" {
-            tmux::unset_pane_option(pane, "@pane_attention");
-            tmux::unset_pane_option(pane, "@pane_wait_reason");
-        }
-        let existing_started = tmux::get_pane_option_value(pane, "@pane_started_at");
-        if existing_started.is_empty() {
-            tmux::set_pane_option(pane, "@pane_started_at", &now_epoch_secs().to_string());
-        }
-    }
-
-    // Update permission mode when plan mode tools are used.
-    // Same parent-protection rule as `set_agent_meta`: a subagent that
-    // enters/exits plan mode must not flip the parent pane's badge.
-    if pane_writes_allowed(pane) {
-        match tool_name {
-            "EnterPlanMode" => {
-                tmux::set_pane_option(pane, "@pane_permission_mode", "plan");
-            }
-            "ExitPlanMode" => {
-                tmux::set_pane_option(pane, "@pane_permission_mode", "default");
-            }
-            _ => {}
-        }
-    }
-
-    write_activity_entry(pane, tool_name, &label);
-    0
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::Value;
-    use serde_json::json;
     use std::fs;
-
-    // ─── handle_activity_log tests ──────────────────────────────────
-
-    #[test]
-    fn handle_activity_log_writes_entry() {
-        let pane_id = "%CLI_HANDLE_TEST";
-        let path = crate::activity::log_file_path(pane_id);
-        let _ = fs::remove_file(&path);
-
-        handle_activity_log(
-            pane_id,
-            "Read",
-            &json!({"file_path": "/home/user/src/main.rs"}),
-            &Value::Null,
-        );
-
-        let content = fs::read_to_string(&path).unwrap();
-        assert!(content.contains("|Read|main.rs"));
-        fs::remove_file(&path).ok();
-    }
-
-    #[test]
-    fn handle_activity_log_empty_tool_name_does_nothing() {
-        let pane_id = "%CLI_EMPTY_TOOL";
-        let path = crate::activity::log_file_path(pane_id);
-        let _ = fs::remove_file(&path);
-
-        // With the adapter pattern, empty tool_name is filtered by the adapter
-        // before reaching handle_activity_log. We still test that handle_activity_log
-        // writes an entry even with empty tool_name (label extraction handles it).
-        let result = handle_activity_log(pane_id, "", &Value::Null, &Value::Null);
-        assert_eq!(result, 0);
-        // Empty tool_name still writes an entry now (adapter filters upstream)
-    }
-
-    #[test]
-    fn handle_activity_log_tool_input_as_json_object() {
-        let pane_id = "%CLI_JSON_STR";
-        let path = crate::activity::log_file_path(pane_id);
-        let _ = fs::remove_file(&path);
-
-        handle_activity_log(
-            pane_id,
-            "Edit",
-            &json!({"file_path": "/a/b/test.rs"}),
-            &Value::Null,
-        );
-
-        let content = fs::read_to_string(&path).unwrap();
-        assert!(content.contains("|Edit|test.rs"));
-        fs::remove_file(&path).ok();
-    }
-
-    #[test]
-    fn handle_activity_log_null_tool_input_uses_empty_label() {
-        let pane_id = "%CLI_NULL_INPUT";
-        let path = crate::activity::log_file_path(pane_id);
-        let _ = fs::remove_file(&path);
-
-        handle_activity_log(pane_id, "UnknownTool", &Value::Null, &Value::Null);
-
-        let content = fs::read_to_string(&path).unwrap();
-        assert!(content.contains("|UnknownTool|"));
-        fs::remove_file(&path).ok();
-    }
-
-    #[test]
-    fn handle_activity_log_task_create_with_response() {
-        let pane_id = "%CLI_TASK_CREATE";
-        let path = crate::activity::log_file_path(pane_id);
-        let _ = fs::remove_file(&path);
-
-        handle_activity_log(
-            pane_id,
-            "TaskCreate",
-            &json!({"subject": "Fix bug"}),
-            &json!({"task": {"id": "42"}}),
-        );
-
-        let content = fs::read_to_string(&path).unwrap();
-        assert!(content.contains("|TaskCreate|#42 Fix bug"));
-        fs::remove_file(&path).ok();
-    }
-
-    #[test]
-    fn handle_activity_log_enter_plan_mode_blocked_by_subagents() {
-        let _guard = tmux::test_mock::install();
-        let pane = "%PARENT_PLAN";
-        tmux::test_mock::set(pane, "@pane_subagents", "Explore:sub-1");
-        tmux::test_mock::set(pane, "@pane_permission_mode", "default");
-
-        // A subagent's EnterPlanMode tool use must not flip the parent
-        // badge to "plan".
-        handle_activity_log(pane, "EnterPlanMode", &Value::Null, &Value::Null);
-
-        assert_eq!(
-            tmux::test_mock::get(pane, "@pane_permission_mode").as_deref(),
-            Some("default"),
-            "child EnterPlanMode must not overwrite parent's permission_mode"
-        );
-    }
 
     // ─── SessionEnd / WorktreeRemove regression tests ───────────────
 
