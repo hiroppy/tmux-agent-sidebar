@@ -8,6 +8,7 @@ use crate::ui::icons::StatusIcons;
 
 mod activity;
 mod focus;
+mod pane_runtime;
 mod refresh;
 mod scroll;
 mod session;
@@ -15,6 +16,7 @@ mod tab;
 
 pub use activity::ActivityState;
 pub use focus::{Focus, FocusState};
+pub use pane_runtime::{PaneRuntimeMap, PaneRuntimeState};
 #[cfg(test)]
 pub(crate) use refresh::{TaskProgressDecision, classify_task_progress};
 pub use scroll::{ScrollState, ScrollStates};
@@ -123,25 +125,6 @@ impl RepoFilter {
 pub enum BottomTab {
     Activity,
     GitStatus,
-}
-
-/// Per-pane runtime state that should vanish together with the pane.
-#[derive(Debug, Clone, Default)]
-pub struct PaneRuntimeState {
-    pub ports: Vec<u16>,
-    pub command: Option<String>,
-    pub task_progress: Option<TaskProgress>,
-    pub task_dismissed_total: Option<usize>,
-    pub inactive_since: Option<u64>,
-    /// Last bottom tab the user selected while this pane was focused.
-    /// `None` until the user changes tabs at least once. Cleaned up
-    /// automatically by `prune_pane_states_to_current_panes` when the
-    /// pane disappears, so a relaunched pane starts fresh.
-    pub tab_pref: Option<BottomTab>,
-    /// Last observed mtime of this pane's `/tmp/tmux-agent-activity*.log`.
-    /// Used by `refresh_task_progress` to skip the (potentially expensive)
-    /// re-parse when the log has not been touched since the previous tick.
-    pub task_progress_log_mtime: Option<std::time::SystemTime>,
 }
 
 #[derive(Debug, Clone)]
@@ -521,9 +504,7 @@ pub struct AppState {
     pub icons: StatusIcons,
     pub bottom_tab: BottomTab,
     pub git: crate::git::GitData,
-    pub pane_states: HashMap<String, PaneRuntimeState>,
-    /// Agent pane IDs that have already been seen.
-    pub seen_agent_panes: std::collections::HashSet<String>,
+    pub pane_states: PaneRuntimeMap,
     /// Periodic-refresh clocks (port scan, session-name scan, filter
     /// debounce, port-scan first-run flag).
     pub timers: RefreshTimers,
@@ -619,8 +600,7 @@ impl AppState {
             icons: StatusIcons::default(),
             bottom_tab: BottomTab::Activity,
             git: crate::git::GitData::default(),
-            pane_states: HashMap::new(),
-            seen_agent_panes: std::collections::HashSet::new(),
+            pane_states: PaneRuntimeMap::new(),
             timers: RefreshTimers::default(),
             popup: PopupState::None,
             notices: NoticesState::default(),
@@ -633,7 +613,7 @@ impl AppState {
     }
 
     pub fn pane_state_mut(&mut self, pane_id: &str) -> &mut PaneRuntimeState {
-        self.pane_states.entry(pane_id.to_string()).or_default()
+        self.pane_states.entry_mut(pane_id)
     }
 
     pub fn pane_state(&self, pane_id: &str) -> Option<&PaneRuntimeState> {
@@ -1168,6 +1148,7 @@ impl AppState {
             }
         }
         self.pane_states
+            .map
             .retain(|pane_id, _| active_ids.contains(pane_id));
     }
 

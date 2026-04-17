@@ -61,7 +61,7 @@ impl AppState {
         for group in &self.repo_groups {
             for (pane, _) in &group.panes {
                 current.insert(pane.pane_id.clone());
-                if self.seen_agent_panes.insert(pane.pane_id.clone()) {
+                if self.pane_states.seen.insert(pane.pane_id.clone()) {
                     new_ids.insert(pane.pane_id.clone());
                 }
             }
@@ -73,13 +73,14 @@ impl AppState {
         // (e.g. when tests mutate `repo_groups` directly without going
         // through `apply_session_snapshot`).
         let removed: Vec<String> = self
-            .seen_agent_panes
+            .pane_states
+            .seen
             .iter()
             .filter(|id| !current.contains(id.as_str()))
             .cloned()
             .collect();
         for id in &removed {
-            self.seen_agent_panes.remove(id);
+            self.pane_states.seen.remove(id);
             if let Some(state) = self.pane_states.get_mut(id) {
                 state.tab_pref = None;
             }
@@ -225,13 +226,13 @@ mod tests {
         state.repo_groups = vec![agent_group("%1")];
         let new_ids = state.detect_new_agents();
         assert!(new_ids.contains("%1"));
-        assert!(state.seen_agent_panes.contains("%1"));
+        assert!(state.pane_states.seen.contains("%1"));
     }
 
     #[test]
     fn detect_new_agents_already_seen() {
         let mut state = AppState::new("%99".into());
-        state.seen_agent_panes.insert("%1".into());
+        state.pane_states.seen.insert("%1".into());
         state.repo_groups = vec![agent_group("%1")];
         assert!(state.detect_new_agents().is_empty());
     }
@@ -407,7 +408,7 @@ mod tests {
         let mut state = state_with_groups(vec![agent_group("%1")], Some("%5"));
 
         // %1 agent already seen, currently on non-agent %5
-        state.seen_agent_panes.insert("%1".into());
+        state.pane_states.seen.insert("%1".into());
         state.focus_state.prev_focused_pane_id = Some("%5".into());
         state.bottom_tab = BottomTab::GitStatus;
 
@@ -543,7 +544,7 @@ mod tests {
         state.auto_switch_tab();
         // %1 should be removed from seen_agent_panes
         assert!(
-            !state.seen_agent_panes.contains("%1"),
+            !state.pane_states.seen.contains("%1"),
             "closed agent should be removed from seen set"
         );
 
