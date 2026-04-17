@@ -489,6 +489,139 @@ mod tests {
         assert!(!tmux::test_mock::contains(pane, PENDING_SESSION_END));
     }
 
+    // ─── on_session_start happy-path coverage ───────────────────────
+
+    #[test]
+    fn on_session_start_sets_agent_and_idle_status() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%NEW_SESSION";
+        let ctx = AgentContext {
+            agent: "claude",
+            cwd: "/repo",
+            permission_mode: "default",
+            worktree: &None,
+            session_id: &Some("sess-123".into()),
+        };
+
+        let exit = on_session_start(pane, &ctx);
+        assert_eq!(exit, 0);
+        assert_eq!(
+            tmux::test_mock::get(pane, "@pane_agent").as_deref(),
+            Some("claude")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, "@pane_status").as_deref(),
+            Some("idle")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, "@pane_session_id").as_deref(),
+            Some("sess-123")
+        );
+        assert!(
+            !tmux::test_mock::contains(pane, "@pane_prompt"),
+            "SessionStart should clear any stale prompt"
+        );
+    }
+
+    // ─── on_user_prompt_submit coverage ─────────────────────────────
+
+    #[test]
+    fn on_user_prompt_submit_sets_running_and_stores_prompt() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%PROMPT";
+        let ctx = AgentContext {
+            agent: "claude",
+            cwd: "/repo",
+            permission_mode: "default",
+            worktree: &None,
+            session_id: &None,
+        };
+        let exit = on_user_prompt_submit(pane, &ctx, "fix the bug");
+        assert_eq!(exit, 0);
+        assert_eq!(
+            tmux::test_mock::get(pane, "@pane_status").as_deref(),
+            Some("running")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, "@pane_prompt").as_deref(),
+            Some("fix the bug")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, "@pane_prompt_source").as_deref(),
+            Some("user")
+        );
+        assert!(tmux::test_mock::contains(pane, "@pane_started_at"));
+    }
+
+    #[test]
+    fn on_user_prompt_submit_ignores_system_messages() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%SYS_PROMPT";
+        let ctx = AgentContext {
+            agent: "claude",
+            cwd: "/repo",
+            permission_mode: "default",
+            worktree: &None,
+            session_id: &None,
+        };
+        on_user_prompt_submit(pane, &ctx, "<system-reminder>ignore me</system-reminder>");
+        assert!(
+            !tmux::test_mock::contains(pane, "@pane_prompt"),
+            "system messages should not be stored as user prompt"
+        );
+        // But status should still advance to running.
+        assert_eq!(
+            tmux::test_mock::get(pane, "@pane_status").as_deref(),
+            Some("running")
+        );
+    }
+
+    // ─── on_subagent_start / on_subagent_stop coverage ──────────────
+
+    #[test]
+    fn on_subagent_start_appends_to_list() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%SUB_START";
+        on_subagent_start(pane, "Explore", Some("sub-1"));
+        assert_eq!(
+            tmux::test_mock::get(pane, "@pane_subagents").as_deref(),
+            Some("Explore:sub-1")
+        );
+        on_subagent_start(pane, "Plan", Some("sub-2"));
+        assert_eq!(
+            tmux::test_mock::get(pane, "@pane_subagents").as_deref(),
+            Some("Explore:sub-1,Plan:sub-2")
+        );
+    }
+
+    #[test]
+    fn on_subagent_start_drops_event_without_id() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%SUB_NO_ID";
+        on_subagent_start(pane, "Explore", None);
+        assert!(!tmux::test_mock::contains(pane, "@pane_subagents"));
+        on_subagent_start(pane, "Explore", Some(""));
+        assert!(!tmux::test_mock::contains(pane, "@pane_subagents"));
+    }
+
+    // ─── on_teammate_idle coverage ──────────────────────────────────
+
+    #[test]
+    fn on_teammate_idle_sets_attention_and_reason() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%TEAM";
+        let exit = on_teammate_idle(pane, "alice");
+        assert_eq!(exit, 0);
+        assert_eq!(
+            tmux::test_mock::get(pane, "@pane_attention").as_deref(),
+            Some("notification")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, "@pane_wait_reason").as_deref(),
+            Some("teammate_idle:alice")
+        );
+    }
+
     #[test]
     fn fresh_session_start_clears_pending_markers() {
         let _guard = tmux::test_mock::install();

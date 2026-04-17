@@ -30,3 +30,29 @@ impl Default for ActivityState {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_initializes_expected_defaults() {
+        let state = ActivityState::new();
+        assert!(state.entries.is_empty());
+        assert_eq!(state.max_entries, 50);
+        assert_eq!(state.scroll.offset, 0);
+        assert_eq!(state.scroll.total_lines, 0);
+        assert_eq!(state.scroll.visible_height, 0);
+        assert!(state.log_cache.is_none());
+    }
+
+    #[test]
+    fn default_delegates_to_new() {
+        let default_state = ActivityState::default();
+        let new_state = ActivityState::new();
+        assert_eq!(default_state.entries.len(), new_state.entries.len());
+        assert_eq!(default_state.max_entries, new_state.max_entries);
+        assert_eq!(default_state.scroll.offset, new_state.scroll.offset);
+        assert!(default_state.log_cache.is_none());
+    }
+}

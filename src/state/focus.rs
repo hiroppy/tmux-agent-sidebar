@@ -35,3 +35,31 @@ impl Default for FocusState {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn focus_default_is_panes() {
+        assert_eq!(Focus::default(), Focus::Panes);
+    }
+
+    #[test]
+    fn focus_state_new_has_expected_initial_values() {
+        let state = FocusState::new();
+        assert!(!state.sidebar_focused);
+        assert_eq!(state.focus, Focus::Panes);
+        assert!(state.focused_pane_id.is_none());
+        assert!(state.prev_focused_pane_id.is_none());
+    }
+
+    #[test]
+    fn focus_state_default_delegates_to_new() {
+        let state = FocusState::default();
+        assert!(!state.sidebar_focused);
+        assert_eq!(state.focus, Focus::Panes);
+        assert!(state.focused_pane_id.is_none());
+        assert!(state.prev_focused_pane_id.is_none());
+    }
+}

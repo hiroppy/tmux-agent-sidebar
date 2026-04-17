@@ -318,6 +318,43 @@ mod tests {
 
     // ─── resolve_cwd tests ─────────────────────────────────────────
 
+    // ─── make_ctx tests ────────────────────────────────────────────
+
+    #[test]
+    fn make_ctx_wires_all_fields() {
+        let agent = "claude".to_string();
+        let cwd = "/tmp".to_string();
+        let pm = "auto".to_string();
+        let worktree: Option<WorktreeInfo> = None;
+        let sid: Option<String> = None;
+        let ctx = make_ctx(&agent, &cwd, &pm, &worktree, &sid);
+        assert_eq!(ctx.agent, "claude");
+        assert_eq!(ctx.cwd, "/tmp");
+        assert_eq!(ctx.permission_mode, "auto");
+        assert!(ctx.worktree.is_none());
+        assert!(ctx.session_id.is_none());
+    }
+
+    #[test]
+    fn make_ctx_preserves_worktree_and_session_id() {
+        let agent = "codex".to_string();
+        let cwd = "/src".to_string();
+        let pm = "plan".to_string();
+        let worktree = Some(WorktreeInfo {
+            name: "feat".into(),
+            path: "/tmp/wt".into(),
+            branch: "feature/x".into(),
+            original_repo_dir: "/home/user/repo".into(),
+        });
+        let sid = Some("sess-abc".to_string());
+        let ctx = make_ctx(&agent, &cwd, &pm, &worktree, &sid);
+        assert_eq!(ctx.agent, "codex");
+        assert_eq!(ctx.cwd, "/src");
+        assert_eq!(ctx.permission_mode, "plan");
+        assert_eq!(ctx.worktree.as_ref().map(|w| w.name.as_str()), Some("feat"));
+        assert_eq!(ctx.session_id.as_deref(), Some("sess-abc"));
+    }
+
     #[test]
     fn resolve_cwd_prefers_worktree_original_repo_dir() {
         let wt = crate::event::WorktreeInfo {

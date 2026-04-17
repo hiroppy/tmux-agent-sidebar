@@ -501,3 +501,75 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
     render_flash_banner_into(frame, state, area);
     popups::render_if_open(frame, state, area);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pane_layout_splits_area_into_filter_secondary_list() {
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 40,
+            height: 20,
+        };
+        let layout = PaneLayout::compute(area);
+        assert_eq!(layout.filter_area.x, 0);
+        assert_eq!(layout.filter_area.y, 0);
+        assert_eq!(layout.filter_area.width, 40);
+        assert_eq!(layout.filter_area.height, 1);
+        assert_eq!(layout.secondary_area.y, 1);
+        assert_eq!(layout.secondary_area.height, 1);
+        assert_eq!(layout.list_area.y, 2);
+        assert_eq!(layout.list_area.height, 18);
+        assert_eq!(layout.list_area.width, 40);
+    }
+
+    #[test]
+    fn pane_layout_handles_tiny_area() {
+        // Only 1 row available — filter gets it, secondary and list collapse to 0.
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 40,
+            height: 1,
+        };
+        let layout = PaneLayout::compute(area);
+        assert_eq!(layout.filter_area.height, 1);
+        assert_eq!(layout.secondary_area.height, 0);
+        assert_eq!(layout.list_area.height, 0);
+    }
+
+    #[test]
+    fn pane_layout_handles_zero_height() {
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 40,
+            height: 0,
+        };
+        let layout = PaneLayout::compute(area);
+        assert_eq!(layout.filter_area.height, 0);
+        assert_eq!(layout.secondary_area.height, 0);
+        assert_eq!(layout.list_area.height, 0);
+    }
+
+    #[test]
+    fn pane_layout_respects_non_zero_origin() {
+        let area = Rect {
+            x: 5,
+            y: 10,
+            width: 30,
+            height: 15,
+        };
+        let layout = PaneLayout::compute(area);
+        assert_eq!(layout.filter_area.x, 5);
+        assert_eq!(layout.filter_area.y, 10);
+        assert_eq!(layout.secondary_area.x, 5);
+        assert_eq!(layout.secondary_area.y, 11);
+        assert_eq!(layout.list_area.x, 5);
+        assert_eq!(layout.list_area.y, 12);
+        assert_eq!(layout.list_area.height, 13);
+    }
+}
