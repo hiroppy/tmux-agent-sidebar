@@ -174,6 +174,12 @@ pub(super) fn handle_event(
                         state.handle_mouse_click(mouse.row, mouse.column);
                     } else if mouse.row == bottom_start {
                         state.handle_bottom_tab_click(mouse.column);
+                        // Keep the background git poller in sync immediately — the
+                        // keyboard `BackTab` path does the same update. Without this,
+                        // clicking into Git Status leaves polling disabled until the
+                        // next refresh tick and the tab renders stale data.
+                        git_tab_active
+                            .store(state.bottom_tab == BottomTab::GitStatus, Ordering::Relaxed);
                     }
                 }
                 MouseEventKind::ScrollDown => {
