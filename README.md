@@ -244,7 +244,7 @@ set -g @sidebar_width 32                 # width in columns or % (default: 15%)
 set -g @sidebar_bottom_height 20         # bottom panel height in lines (default: 20, 0 to hide)
 set -g @sidebar_auto_create off          # disable auto-create on new windows (default: on)
 set -g @sidebar_notifications off        # desktop notifications for task completion/failure and permission prompts (default: on)
-set -g @sidebar_notifications_events "stop,notification" # limit desktop notifications to selected hook events (default: all)
+set -g @sidebar_notifications_events "stop,notification" # limit desktop notifications to selected hook events (default: all except task_completed)
 
 # Spawn worktree modal defaults (optional)
 set -g @agent-sidebar-default-agent codex  # agent launched by `n` (default: claude)

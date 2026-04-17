@@ -28,7 +28,7 @@ pub struct NoticesState {
     /// keep nagging the user to clean up.
     pub claude_settings_has_residual_hooks: bool,
     /// Drives the `Plugin / claude` section in the notices popup. See
-    /// [`ClaudePluginNotice`] for the two states. Derived from
+    /// [`ClaudePluginNotice`] for the full set of variants. Derived from
     /// `claude_plugin_installed_version` in `refresh_notices`.
     pub claude_plugin_notice: Option<ClaudePluginNotice>,
     /// Click regions for the `copy` label on each agent row in the popup.
