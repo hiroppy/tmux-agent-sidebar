@@ -12,7 +12,7 @@ Decompose four high-complexity modules in tmux-agent-sidebar while preserving ev
 
 ### In Scope
 
-1. **`src/state.rs`** (3471 lines) — Decompose `AppState` (32 fields) into domain-focused sub-structs and split the file into a `src/state/` module tree.
+1. **`src/state.rs`** (3471 lines) — Decompose `AppState` (31 fields) into domain-focused sub-structs and split the file into a `src/state/` module tree.
 2. **`src/ui/panes.rs:487` `draw_agents()`** (~270 lines) — Split into 4–5 responsibility-focused functions and a `src/ui/panes/` submodule tree.
 3. **`src/cli/hook.rs:277` `handle_event()`** (~165 lines) — Reduce destructuring duplication, split the file into a `src/cli/hook/` submodule tree.
 4. **`src/tmux.rs`** — Extract `WorktreeMetadata` from `PaneInfo`; replace magic field indices in `parse_pane_line` with named constants. No file split.
@@ -97,7 +97,7 @@ src/cli/hook/notifications.rs    — desktop notification glue
 
 ## `AppState` Field Mapping
 
-Current 32 flat fields redistributed as follows:
+Current 31 flat fields redistributed as follows:
 
 ```rust
 pub struct AppState {
@@ -209,19 +209,46 @@ struct PaneLayout {
 }
 ```
 
+### Coordinator helper signatures (all live in `src/ui/panes.rs` alongside `draw_agents`)
+
+```rust
+fn render_filter_bar_into(frame: &mut Frame, state: &AppState, area: Rect);
+
+/// Renders the secondary header (notices button + repo filter button).
+/// Writes `state.notices.button_col` and `state.layout.repo_button_col`
+/// as side effects — these writes must happen at the same point in the
+/// call sequence as the current `render_secondary_header` call site
+/// (lines 507–510 pre-refactor) to preserve click-target registration
+/// order. The internal `render_secondary_header` helper returns
+/// `(Line, Option<u16>, Option<u16>)` as today; the `_into` wrapper
+/// is the one that performs the `state.*` writes.
+fn render_secondary_header_into(frame: &mut Frame, state: &mut AppState, area: Rect);
+
+fn render_pane_rows(frame: &mut Frame, collected: &CollectedRows, scroll_offset: usize, area: Rect);
+
+/// Mutates `state.scrolls.panes.{total_lines, visible_height, offset}`
+/// — preserves the current clamping logic verbatim (pre-refactor lines
+/// 651–678 in `panes.rs`).
+fn compute_scroll_offset(state: &mut AppState, collected: &CollectedRows, area: Rect) -> usize;
+```
+
 ### Submodule responsibilities
 
 **`src/ui/panes/row_collector.rs`**
 
 ```rust
-pub struct CollectedRows<'a> {
-    pub lines: Vec<Line<'a>>,
+// All Line content is fully owned (`render_pane_lines_with_ports` returns
+// `Vec<Line<'static>>`; group headers are built from `title.clone()`).
+// Therefore `CollectedRows` holds no borrow from `state`, and materialize()
+// may freely take `&mut AppState` while a `&CollectedRows` is live.
+pub struct CollectedRows {
+    pub lines: Vec<Line<'static>>,
     pub line_to_row: Vec<Option<usize>>,
     pub pending_spawn: Vec<(usize, String, String)>,
     pub pending_remove: Vec<(usize, u16, String)>,
 }
 
-pub fn collect(state: &AppState, width: u16) -> CollectedRows<'_> { ... }
+pub fn collect(state: &AppState, width: u16) -> CollectedRows { ... }
 ```
 
 Iterates `repo_groups`, applies `StatusFilter`/`RepoFilter`, inserts group separators, builds `header_row`/`branch_ports_row`/`diff_row` lines, and collects pending click targets.
@@ -242,16 +269,10 @@ Converts `line_to_row` / `pending_spawn` / `pending_remove` into absolute-screen
 **`src/ui/panes/popups.rs`**
 
 ```rust
-pub fn render_if_open(frame: &mut Frame, state: &mut AppState, area: Rect) {
-    match &state.popup {
-        PopupState::None => {}
-        PopupState::Spawn(..) => render_spawn_popup(frame, state, area),
-        PopupState::Remove(..) => render_remove_popup(frame, state, area),
-        PopupState::Notices(..) => render_notices_popup(frame, state, area),
-        // ...
-    }
-}
+pub fn render_if_open(frame: &mut Frame, state: &mut AppState, area: Rect) { ... }
 ```
+
+Internally preserves the current dispatch structure verbatim — it calls the existing guard helpers (`is_notices_popup_open`, `is_repo_popup_open`, `is_spawn_input_open`, `is_remove_confirm_open`) in the same order as pre-refactor `draw_agents` lines 749–757. Those helpers remain defined on `AppState` / `PopupState` and continue to be used elsewhere (`state.rs`, handlers); they are not inlined or replaced by direct `match &state.popup` dispatch.
 
 ### Snapshot Guarantees
 
