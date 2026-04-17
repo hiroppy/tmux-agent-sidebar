@@ -227,31 +227,32 @@ fn run_app(
                         needs_redraw = true;
                         match key.code {
                             KeyCode::Esc => {
-                                if state.focus == Focus::ActivityLog || state.focus == Focus::Filter
+                                if state.focus_state.focus == Focus::ActivityLog
+                                    || state.focus_state.focus == Focus::Filter
                                 {
-                                    state.focus = Focus::Panes;
+                                    state.focus_state.focus = Focus::Panes;
                                 }
                             }
-                            KeyCode::Char('j') | KeyCode::Down => match state.focus {
+                            KeyCode::Char('j') | KeyCode::Down => match state.focus_state.focus {
                                 Focus::Filter => {
-                                    state.focus = Focus::Panes;
+                                    state.focus_state.focus = Focus::Panes;
                                 }
                                 Focus::Panes => {
                                     if state.move_pane_selection(1) {
                                         state.global.queue_cursor_save();
                                     } else {
-                                        state.focus = Focus::ActivityLog;
+                                        state.focus_state.focus = Focus::ActivityLog;
                                     }
                                 }
                                 Focus::ActivityLog => state.scroll_bottom(1),
                             },
-                            KeyCode::Char('k') | KeyCode::Up => match state.focus {
+                            KeyCode::Char('k') | KeyCode::Up => match state.focus_state.focus {
                                 Focus::Filter => {}
                                 Focus::Panes => {
                                     if state.move_pane_selection(-1) {
                                         state.global.queue_cursor_save();
                                     } else {
-                                        state.focus = Focus::Filter;
+                                        state.focus_state.focus = Focus::Filter;
                                     }
                                 }
                                 Focus::ActivityLog => {
@@ -260,47 +261,47 @@ fn run_app(
                                             state.activity.scroll.offset == 0
                                         }
                                         tmux_agent_sidebar::state::BottomTab::GitStatus => {
-                                            state.git_scroll.offset == 0
+                                            state.scrolls.git.offset == 0
                                         }
                                     };
                                     if at_top {
-                                        state.focus = Focus::Panes;
+                                        state.focus_state.focus = Focus::Panes;
                                     } else {
                                         state.scroll_bottom(-1);
                                     }
                                 }
                             },
                             KeyCode::Char('h') | KeyCode::Left => {
-                                if state.focus == Focus::Filter {
+                                if state.focus_state.focus == Focus::Filter {
                                     state.global.status_filter = state.global.status_filter.prev();
                                     state.global.save_filter();
                                     state.rebuild_row_targets();
                                 }
                             }
                             KeyCode::Char('l') | KeyCode::Right => {
-                                if state.focus == Focus::Filter {
+                                if state.focus_state.focus == Focus::Filter {
                                     state.global.status_filter = state.global.status_filter.next();
                                     state.global.save_filter();
                                     state.rebuild_row_targets();
                                 }
                             }
                             KeyCode::Char('r') => {
-                                if state.focus == Focus::Filter {
+                                if state.focus_state.focus == Focus::Filter {
                                     state.toggle_repo_popup();
                                 }
                             }
                             KeyCode::Char('n') => {
-                                if state.focus == Focus::Panes {
+                                if state.focus_state.focus == Focus::Panes {
                                     state.open_spawn_input_from_selection();
                                 }
                             }
                             KeyCode::Char('x') => {
-                                if state.focus == Focus::Panes {
+                                if state.focus_state.focus == Focus::Panes {
                                     state.open_remove_confirm();
                                 }
                             }
                             KeyCode::Enter => {
-                                if state.focus == Focus::Panes {
+                                if state.focus_state.focus == Focus::Panes {
                                     state.activate_selected_pane();
                                 }
                             }
@@ -357,9 +358,9 @@ fn run_app(
 
         let sigusr1 = NEEDS_REFRESH.swap(false, Ordering::Relaxed);
         if sigusr1 || last_refresh.elapsed() >= refresh_interval {
-            let previous_focused_pane_id = state.focused_pane_id.clone();
+            let previous_focused_pane_id = state.focus_state.focused_pane_id.clone();
             let is_window_active = state.refresh();
-            if state.focused_pane_id != previous_focused_pane_id {
+            if state.focus_state.focused_pane_id != previous_focused_pane_id {
                 refresh_git_for_focused_pane(&mut state);
             }
             needs_redraw = true;
@@ -421,7 +422,7 @@ fn render_frame(
 
 fn refresh_git_for_focused_pane(state: &mut AppState) {
     refresh_git_for_focused_pane_with(
-        state.focused_pane_id.clone(),
+        state.focus_state.focused_pane_id.clone(),
         tmux::get_pane_path,
         git::fetch_git_data,
         |data| state.apply_git_data(data),

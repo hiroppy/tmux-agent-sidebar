@@ -7,21 +7,18 @@ use crate::ui::colors::ColorTheme;
 use crate::ui::icons::StatusIcons;
 
 mod activity;
+mod focus;
 mod refresh;
+mod scroll;
 mod session;
 mod tab;
 
 pub use activity::ActivityState;
+pub use focus::{Focus, FocusState};
 #[cfg(test)]
 pub(crate) use refresh::{TaskProgressDecision, classify_task_progress};
+pub use scroll::{ScrollState, ScrollStates};
 pub use session::SessionNamesState;
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Focus {
-    Filter,
-    Panes,
-    ActivityLog,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StatusFilter {
@@ -276,21 +273,6 @@ impl PopupState {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct ScrollState {
-    pub offset: usize,
-    pub total_lines: usize,
-    pub visible_height: usize,
-}
-
-impl ScrollState {
-    pub fn scroll(&mut self, delta: isize) {
-        let max = self.total_lines.saturating_sub(self.visible_height);
-        let next = self.offset as isize + delta;
-        self.offset = next.max(0).min(max as isize) as usize;
-    }
-}
-
 /// State shared across all sidebar instances via tmux global variables.
 /// Synced from tmux at startup and on pane focus change (SIGUSR1).
 pub struct GlobalState {
@@ -518,8 +500,9 @@ pub struct NoticesState {
 pub struct AppState {
     pub now: u64,
     pub repo_groups: Vec<crate::group::RepoGroup>,
-    pub sidebar_focused: bool,
-    pub focus: Focus,
+    /// Sidebar focus + pane focus tracking (sidebar_focused, focus,
+    /// focused_pane_id, prev_focused_pane_id).
+    pub focus_state: FocusState,
     /// Transient one-line status banner (message + expiry) for spawn /
     /// remove feedback. Cleared by `take_flash` once the deadline passes.
     pub flash: Option<(String, Instant)>,
@@ -530,19 +513,17 @@ pub struct AppState {
     /// next render.
     pub layout: FrameLayout,
     pub activity: ActivityState,
-    pub focused_pane_id: Option<String>,
     pub tmux_pane: String,
-    pub panes_scroll: ScrollState,
+    /// Scroll offsets for the agents list and git tab. Activity tab
+    /// scroll lives in [`ActivityState::scroll`].
+    pub scrolls: ScrollStates,
     pub theme: ColorTheme,
     pub icons: StatusIcons,
     pub bottom_tab: BottomTab,
     pub git: crate::git::GitData,
-    pub git_scroll: ScrollState,
     pub pane_states: HashMap<String, PaneRuntimeState>,
     /// Agent pane IDs that have already been seen.
     pub seen_agent_panes: std::collections::HashSet<String>,
-    /// Previous focused pane ID, used to detect focus changes.
-    pub prev_focused_pane_id: Option<String>,
     /// Periodic-refresh clocks (port scan, session-name scan, filter
     /// debounce, port-scan first-run flag).
     pub timers: RefreshTimers,
@@ -627,23 +608,19 @@ impl AppState {
         Self {
             now: 0,
             repo_groups: vec![],
-            sidebar_focused: false,
-            focus: Focus::Panes,
+            focus_state: FocusState::new(),
             flash: None,
             spinner_frame: 0,
             layout: FrameLayout::default(),
             activity: ActivityState::new(),
-            focused_pane_id: None,
             tmux_pane,
-            panes_scroll: ScrollState::default(),
+            scrolls: ScrollStates::default(),
             theme: ColorTheme::default(),
             icons: StatusIcons::default(),
             bottom_tab: BottomTab::Activity,
             git: crate::git::GitData::default(),
-            git_scroll: ScrollState::default(),
             pane_states: HashMap::new(),
             seen_agent_panes: std::collections::HashSet::new(),
-            prev_focused_pane_id: None,
             timers: RefreshTimers::default(),
             popup: PopupState::None,
             notices: NoticesState::default(),
@@ -1232,7 +1209,7 @@ impl AppState {
         // When the sidebar has focus, find_active_pane returns None — preserve
         // the previously focused pane so bottom panel data stays stable.
         if let Some((id, _)) = tmux::find_active_pane(&self.tmux_pane) {
-            self.focused_pane_id = Some(id);
+            self.focus_state.focused_pane_id = Some(id);
         }
     }
 
@@ -1261,7 +1238,7 @@ impl AppState {
             // Update the sidebar immediately so the active marker and
             // repo header highlight move without waiting for the next
             // periodic tmux refresh.
-            self.focused_pane_id = Some(target_pane_id.clone());
+            self.focus_state.focused_pane_id = Some(target_pane_id.clone());
             tmux::select_pane(&target_pane_id);
         }
     }
@@ -1291,7 +1268,7 @@ impl AppState {
     pub fn scroll_bottom(&mut self, delta: isize) {
         match self.bottom_tab {
             BottomTab::Activity => self.activity.scroll.scroll(delta),
-            BottomTab::GitStatus => self.git_scroll.scroll(delta),
+            BottomTab::GitStatus => self.scrolls.git.scroll(delta),
         }
     }
 
@@ -1307,7 +1284,7 @@ impl AppState {
         if row >= bottom_start {
             self.scroll_bottom(delta);
         } else {
-            self.panes_scroll.scroll(delta);
+            self.scrolls.panes.scroll(delta);
         }
     }
 
@@ -1457,7 +1434,7 @@ impl AppState {
             return;
         }
 
-        let line_index = (row as usize - 2) + self.panes_scroll.offset;
+        let line_index = (row as usize - 2) + self.scrolls.panes.offset;
         if let Some(Some(agent_row)) = self.layout.line_to_row.get(line_index) {
             self.global.selected_pane_row = *agent_row;
             self.global.queue_cursor_save();
@@ -2067,7 +2044,7 @@ mod tests {
         let pane_id = "%201";
         let log_path = crate::activity::log_file_path(pane_id);
         fs::write(&log_path, "10:00|Read|old\n10:01|Edit|new\n").unwrap();
-        state.focused_pane_id = Some(pane_id.into());
+        state.focus_state.focused_pane_id = Some(pane_id.into());
         state.activity.max_entries = 50;
 
         state.refresh_activity_log();
@@ -2089,7 +2066,7 @@ mod tests {
             label: "keep?".into(),
         }];
 
-        state.focused_pane_id = None;
+        state.focus_state.focused_pane_id = None;
         state.refresh_activity_log();
 
         assert!(state.activity.entries.is_empty());
@@ -2592,7 +2569,7 @@ mod tests {
 
         state.apply_session_snapshot(true, sessions);
 
-        assert!(state.sidebar_focused);
+        assert!(state.focus_state.sidebar_focused);
         assert_eq!(state.repo_groups.len(), 1);
         assert_eq!(state.layout.pane_row_targets.len(), 1);
         assert_eq!(state.global.selected_pane_row, 0);
@@ -2626,21 +2603,21 @@ mod tests {
 
         state.scroll_bottom(2);
         assert_eq!(state.activity.scroll.offset, 2);
-        assert_eq!(state.git_scroll.offset, 0);
+        assert_eq!(state.scrolls.git.offset, 0);
     }
 
     #[test]
     fn scroll_bottom_dispatches_to_git() {
         let mut state = AppState::new("%99".into());
         state.bottom_tab = BottomTab::GitStatus;
-        state.git_scroll = ScrollState {
+        state.scrolls.git = ScrollState {
             offset: 0,
             total_lines: 10,
             visible_height: 3,
         };
 
         state.scroll_bottom(2);
-        assert_eq!(state.git_scroll.offset, 2);
+        assert_eq!(state.scrolls.git.offset, 2);
         assert_eq!(state.activity.scroll.offset, 0);
     }
 
@@ -2659,13 +2636,13 @@ mod tests {
         // mouse at row 35 → in bottom panel
         state.handle_mouse_scroll(35, 50, 20, 3);
         assert_eq!(state.activity.scroll.offset, 3);
-        assert_eq!(state.panes_scroll.offset, 0);
+        assert_eq!(state.scrolls.panes.offset, 0);
     }
 
     #[test]
     fn mouse_scroll_in_agents_panel_scrolls_agents() {
         let mut state = AppState::new("%99".into());
-        state.panes_scroll = ScrollState {
+        state.scrolls.panes = ScrollState {
             offset: 0,
             total_lines: 40,
             visible_height: 20,
@@ -2673,27 +2650,27 @@ mod tests {
         // term_height=50, bottom_panel=20 → bottom starts at row 30
         // mouse at row 10 → in agents panel
         state.handle_mouse_scroll(10, 50, 20, 3);
-        assert_eq!(state.panes_scroll.offset, 3);
+        assert_eq!(state.scrolls.panes.offset, 3);
         assert_eq!(state.activity.scroll.offset, 0);
     }
 
     #[test]
     fn mouse_scroll_up_in_agents_panel() {
         let mut state = AppState::new("%99".into());
-        state.panes_scroll = ScrollState {
+        state.scrolls.panes = ScrollState {
             offset: 5,
             total_lines: 40,
             visible_height: 20,
         };
         state.handle_mouse_scroll(10, 50, 20, -3);
-        assert_eq!(state.panes_scroll.offset, 2);
+        assert_eq!(state.scrolls.panes.offset, 2);
     }
 
     #[test]
     fn mouse_scroll_at_boundary_row_goes_to_bottom() {
         let mut state = AppState::new("%99".into());
         state.bottom_tab = BottomTab::GitStatus;
-        state.git_scroll = ScrollState {
+        state.scrolls.git = ScrollState {
             offset: 0,
             total_lines: 20,
             visible_height: 10,
@@ -2701,21 +2678,21 @@ mod tests {
         // term_height=50, bottom_panel=20 → bottom starts at row 30
         // mouse at exactly row 30 → in bottom panel
         state.handle_mouse_scroll(30, 50, 20, 3);
-        assert_eq!(state.git_scroll.offset, 3);
-        assert_eq!(state.panes_scroll.offset, 0);
+        assert_eq!(state.scrolls.git.offset, 3);
+        assert_eq!(state.scrolls.panes.offset, 0);
     }
 
     #[test]
     fn mouse_scroll_just_above_boundary_goes_to_agents() {
         let mut state = AppState::new("%99".into());
-        state.panes_scroll = ScrollState {
+        state.scrolls.panes = ScrollState {
             offset: 0,
             total_lines: 40,
             visible_height: 20,
         };
         // row 29, just above bottom_start=30
         state.handle_mouse_scroll(29, 50, 20, 3);
-        assert_eq!(state.panes_scroll.offset, 3);
+        assert_eq!(state.scrolls.panes.offset, 3);
         assert_eq!(state.activity.scroll.offset, 0);
     }
 
@@ -2880,7 +2857,7 @@ mod tests {
         ];
         // line_to_row: line 0 = group header (None), line 1 = agent 0, line 2 = agent 1
         state.layout.line_to_row = vec![None, Some(0), Some(1)];
-        state.panes_scroll.offset = 0;
+        state.scrolls.panes.offset = 0;
 
         // row 0 = filter bar, row 1 = secondary header, row 2+ = agent list rows
         state.handle_mouse_click(3, 5); // row 3 → line_index = (3-2) = 1 → agent row 0
@@ -2951,7 +2928,7 @@ mod tests {
         ];
         // 5 lines total, scrolled down by 2
         state.layout.line_to_row = vec![None, Some(0), Some(0), None, Some(1)];
-        state.panes_scroll.offset = 2;
+        state.scrolls.panes.offset = 2;
 
         // row 4 → line_index = (4-2) + 2 = 4 → agent row 1
         state.handle_mouse_click(4, 5);

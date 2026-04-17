@@ -133,7 +133,7 @@ fn test_permission_mode_bypass_all_renders_danger_color() {
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
-    state.sidebar_focused = false;
+    state.focus_state.sidebar_focused = false;
 
     // Styled snapshot locks in the BypassAll `!` badge rendered with
     // badge_danger (fg:167).
@@ -184,7 +184,7 @@ fn test_permission_mode_full_auto_renders_auto_color() {
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
-    state.sidebar_focused = false;
+    state.focus_state.sidebar_focused = false;
 
     // Styled snapshot locks in the Auto `auto` badge rendered with
     // badge_auto (fg:221).
@@ -235,7 +235,7 @@ fn test_permission_mode_normal_no_badge() {
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
-    state.sidebar_focused = false;
+    state.focus_state.sidebar_focused = false;
 
     // Snapshot locks in that the agent row shows no badge in Normal mode.
     insta::assert_snapshot!(render_to_string(&mut state, 28, 25), @"
@@ -298,8 +298,8 @@ fn test_git_summary_modified_uses_badge_auto_color() {
     state.rebuild_row_targets();
 
     state.bottom_tab = BottomTab::GitStatus;
-    state.focus = Focus::ActivityLog;
-    state.sidebar_focused = true;
+    state.focus_state.focus = Focus::ActivityLog;
+    state.focus_state.sidebar_focused = true;
     state.git.branch = "main".into();
     state.git.unstaged_files = vec![tmux_agent_sidebar::git::GitFileEntry {
         status: 'M',
@@ -359,7 +359,7 @@ fn test_task_progress_line_uses_task_progress_color() {
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
-    state.sidebar_focused = false;
+    state.focus_state.sidebar_focused = false;
 
     // Set task progress for pane %1
     let progress = TaskProgress {
@@ -434,7 +434,7 @@ fn test_subagent_line_uses_subagent_color() {
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
-    state.sidebar_focused = false;
+    state.focus_state.sidebar_focused = false;
 
     // Styled snapshot locks in the subagent line color (fg:73) plus the
     // rendered "Explore #1" label.
@@ -488,7 +488,7 @@ fn test_response_arrow_uses_response_arrow_color() {
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
-    state.sidebar_focused = false;
+    state.focus_state.sidebar_focused = false;
 
     // Styled snapshot locks in:
     //   • response_arrow color (fg:81) + bold on the ▷ glyph
@@ -544,8 +544,8 @@ fn test_pr_link_uses_pr_link_color() {
     state.rebuild_row_targets();
 
     state.bottom_tab = BottomTab::GitStatus;
-    state.focus = Focus::ActivityLog;
-    state.sidebar_focused = true;
+    state.focus_state.focus = Focus::ActivityLog;
+    state.focus_state.sidebar_focused = true;
     state.git.branch = "feature/test".into();
     state.git.pr_number = Some("99".into());
     state.git.remote_url = "https://github.com/user/repo".into();
@@ -613,8 +613,8 @@ fn test_diff_stat_added_uses_diff_added_color() {
     state.rebuild_row_targets();
 
     state.bottom_tab = BottomTab::GitStatus;
-    state.focus = Focus::ActivityLog;
-    state.sidebar_focused = true;
+    state.focus_state.focus = Focus::ActivityLog;
+    state.focus_state.sidebar_focused = true;
     state.git.branch = "main".into();
     state.git.diff_stat = Some((42, 10));
 
@@ -681,8 +681,8 @@ fn test_diff_stat_deleted_uses_diff_deleted_color() {
     state.rebuild_row_targets();
 
     state.bottom_tab = BottomTab::GitStatus;
-    state.focus = Focus::ActivityLog;
-    state.sidebar_focused = true;
+    state.focus_state.focus = Focus::ActivityLog;
+    state.focus_state.sidebar_focused = true;
     state.git.branch = "main".into();
     state.git.diff_stat = Some((0, 25));
 
@@ -734,8 +734,8 @@ fn test_file_change_stat_uses_file_change_color() {
     state.rebuild_row_targets();
 
     state.bottom_tab = BottomTab::GitStatus;
-    state.focus = Focus::ActivityLog;
-    state.sidebar_focused = true;
+    state.focus_state.focus = Focus::ActivityLog;
+    state.focus_state.sidebar_focused = true;
     state.git.branch = "main".into();
     state.git.unstaged_files = vec![tmux_agent_sidebar::git::GitFileEntry {
         status: 'M',
@@ -840,7 +840,7 @@ fn test_branch_color_in_agent_panel() {
         )],
     }];
     state.rebuild_row_targets();
-    state.sidebar_focused = false;
+    state.focus_state.sidebar_focused = false;
     state.bottom_panel_height = 0;
 
     // Styled snapshot locks in the branch name rendered with branch color
@@ -871,7 +871,7 @@ fn test_selection_bg_color_applied() {
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
-    state.sidebar_focused = true;
+    state.focus_state.sidebar_focused = true;
     state.global.selected_pane_row = 0;
 
     // Styled snapshot locks in the selected agent row's selection
@@ -936,7 +936,7 @@ fn test_accent_vs_border_inactive_colors() {
             panes: vec![(pane2, tmux_agent_sidebar::group::PaneGitInfo::default())],
         },
     ];
-    state.focused_pane_id = Some("%1".into());
+    state.focus_state.focused_pane_id = Some("%1".into());
     state.rebuild_row_targets();
 
     // Styled snapshot locks in:
@@ -993,7 +993,7 @@ fn test_running_status_color_in_output() {
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
-    state.sidebar_focused = false;
+    state.focus_state.sidebar_focused = false;
     state.bottom_panel_height = 0;
 
     // Styled snapshot locks in the running spinner using SPINNER_PULSE[0]
@@ -1021,7 +1021,7 @@ fn test_waiting_status_color_in_output() {
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
-    state.sidebar_focused = false;
+    state.focus_state.sidebar_focused = false;
     state.bottom_panel_height = 0;
 
     // Styled snapshot locks in the waiting status using status_waiting
@@ -1049,7 +1049,7 @@ fn test_error_status_color_in_output() {
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
-    state.sidebar_focused = false;
+    state.focus_state.sidebar_focused = false;
     state.bottom_panel_height = 0;
 
     // Styled snapshot locks in the error status using status_error
@@ -1077,7 +1077,7 @@ fn test_idle_status_color_in_output() {
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
-    state.sidebar_focused = false;
+    state.focus_state.sidebar_focused = false;
 
     // Styled snapshot locks in the idle status using status_idle
     // color (fg:110).

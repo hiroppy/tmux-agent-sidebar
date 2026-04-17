@@ -587,7 +587,7 @@ fn snapshot_selected_unfocused_ui() {
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
-    state.sidebar_focused = false;
+    state.focus_state.sidebar_focused = false;
 
     let output = render_to_string(&mut state, 28, 26);
     insta::assert_snapshot!(output, @"
@@ -942,7 +942,7 @@ fn snapshot_three_groups_middle_focused_ui() {
     let mut group3 = make_repo_group("repo-c", vec![pane3]);
     group3.has_focus = false;
     let mut state = make_state_with_groups(vec![group1, group2, group3]);
-    state.focused_pane_id = Some("%2".into());
+    state.focus_state.focused_pane_id = Some("%2".into());
 
     let output = render_to_string(&mut state, 28, 33);
     insta::assert_snapshot!(output, @"
@@ -1264,8 +1264,8 @@ fn snapshot_activity_all_tool_types_ui() {
 fn snapshot_focus_activity_log_ui() {
     let pane = make_pane(AgentType::Claude, PaneStatus::Running);
     let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
-    state.focus = Focus::ActivityLog;
-    state.sidebar_focused = true;
+    state.focus_state.focus = Focus::ActivityLog;
+    state.focus_state.sidebar_focused = true;
     state.activity.entries = vec![ActivityEntry {
         timestamp: "10:00".into(),
         tool: "Read".into(),
@@ -1618,7 +1618,7 @@ fn snapshot_filter_bar_stays_fixed_on_scroll() {
         })
         .collect();
     let mut state = make_state_with_groups(vec![make_repo_group("project", panes)]);
-    state.panes_scroll.offset = 3; // scroll down
+    state.scrolls.panes.offset = 3; // scroll down
 
     let output = render_to_string(&mut state, 30, 15);
     insta::assert_snapshot!(output, @"

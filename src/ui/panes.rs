@@ -556,6 +556,7 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
         first_group = false;
 
         let group_has_focused_pane = state
+            .focus_state
             .focused_pane_id
             .as_ref()
             .is_some_and(|fid| group.panes.iter().any(|(p, _)| p.pane_id == *fid));
@@ -600,11 +601,11 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
         line_to_row.push(None);
 
         for (pane, git_info) in filtered_panes.iter() {
-            let is_selected = state.sidebar_focused
-                && state.focus == Focus::Panes
+            let is_selected = state.focus_state.sidebar_focused
+                && state.focus_state.focus == Focus::Panes
                 && row_index == state.global.selected_pane_row;
 
-            let is_active = state.focused_pane_id.as_ref() == Some(&pane.pane_id);
+            let is_active = state.focus_state.focused_pane_id.as_ref() == Some(&pane.pane_id);
 
             let pane_state = state.pane_state(&pane.pane_id);
             let ports = pane_state.map(|s| s.ports.as_slice());
@@ -649,11 +650,11 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
     }
 
     state.layout.line_to_row = line_to_row;
-    state.panes_scroll.total_lines = lines.len();
-    state.panes_scroll.visible_height = list_area.height as usize;
+    state.scrolls.panes.total_lines = lines.len();
+    state.scrolls.panes.visible_height = list_area.height as usize;
 
     // Auto-scroll to keep selected agent visible
-    if state.sidebar_focused && state.focus == Focus::Panes {
+    if state.focus_state.sidebar_focused && state.focus_state.focus == Focus::Panes {
         let mut first_line: Option<usize> = None;
         let mut last_line: Option<usize> = None;
         for (i, mapping) in state.layout.line_to_row.iter().enumerate() {
@@ -666,16 +667,16 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
         }
         if let (Some(first), Some(last)) = (first_line, last_line) {
             let visible_h = list_area.height as usize;
-            let offset = state.panes_scroll.offset;
+            let offset = state.scrolls.panes.offset;
             if first < offset {
-                state.panes_scroll.offset = first.saturating_sub(1);
+                state.scrolls.panes.offset = first.saturating_sub(1);
             } else if last >= offset + visible_h {
-                state.panes_scroll.offset = (last + 1).saturating_sub(visible_h);
+                state.scrolls.panes.offset = (last + 1).saturating_sub(visible_h);
             }
         }
     }
 
-    let scroll_offset = state.panes_scroll.offset;
+    let scroll_offset = state.scrolls.panes.offset;
     let btn_width = SPAWN_BUTTON.len() as u16;
     state.layout.repo_spawn_targets = pending_spawn_targets
         .into_iter()
@@ -724,7 +725,7 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
         })
         .collect();
 
-    let paragraph = Paragraph::new(lines).scroll((state.panes_scroll.offset as u16, 0));
+    let paragraph = Paragraph::new(lines).scroll((state.scrolls.panes.offset as u16, 0));
     frame.render_widget(paragraph, list_area);
 
     // Render flash banner (spawn / remove feedback) before popups so

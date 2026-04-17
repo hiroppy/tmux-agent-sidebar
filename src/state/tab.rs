@@ -7,7 +7,8 @@ impl AppState {
     /// - New agent pane (first seen) → Activity tab (once only)
     /// - Non-agent pane with no saved pref → Git tab
     pub(crate) fn auto_switch_tab(&mut self) {
-        let focus_changed = self.focused_pane_id != self.prev_focused_pane_id;
+        let focus_changed =
+            self.focus_state.focused_pane_id != self.focus_state.prev_focused_pane_id;
         if focus_changed {
             self.save_current_tab();
         }
@@ -24,7 +25,7 @@ impl AppState {
         }
 
         if focus_changed {
-            self.prev_focused_pane_id = self.focused_pane_id.clone();
+            self.focus_state.prev_focused_pane_id = self.focus_state.focused_pane_id.clone();
         }
     }
 
@@ -41,7 +42,7 @@ impl AppState {
             return self.resolve_tab_for_focused_pane(new_agent_pane_ids);
         }
 
-        if let Some(ref fid) = self.focused_pane_id
+        if let Some(ref fid) = self.focus_state.focused_pane_id
             && new_agent_pane_ids.contains(fid)
         {
             // Agent started in the currently focused pane.
@@ -88,7 +89,7 @@ impl AppState {
 
     /// Save the current tab preference for the pane we're leaving.
     fn save_current_tab(&mut self) {
-        if let Some(prev_id) = self.prev_focused_pane_id.clone() {
+        if let Some(prev_id) = self.focus_state.prev_focused_pane_id.clone() {
             let tab = self.bottom_tab.clone();
             self.pane_state_mut(&prev_id).tab_pref = Some(tab);
         }
@@ -100,7 +101,7 @@ impl AppState {
         &self,
         new_agent_pane_ids: &std::collections::HashSet<String>,
     ) -> TabDecision {
-        let Some(ref cur_id) = self.focused_pane_id else {
+        let Some(ref cur_id) = self.focus_state.focused_pane_id else {
             return TabDecision::Keep;
         };
         if let Some(saved) = self.pane_state(cur_id).and_then(|s| s.tab_pref.as_ref()) {
@@ -115,7 +116,7 @@ impl AppState {
 
     /// Check if the focused pane is an agent pane (present in repo_groups).
     pub(crate) fn focused_pane_is_agent(&self) -> bool {
-        let Some(ref fid) = self.focused_pane_id else {
+        let Some(ref fid) = self.focus_state.focused_pane_id else {
             return false;
         };
         self.repo_groups
@@ -171,7 +172,7 @@ mod tests {
     fn state_with_groups(repo_groups: Vec<RepoGroup>, focused_pane_id: Option<&str>) -> AppState {
         let mut state = AppState::new("%99".into());
         state.repo_groups = repo_groups;
-        state.focused_pane_id = focused_pane_id.map(str::to_string);
+        state.focus_state.focused_pane_id = focused_pane_id.map(str::to_string);
         state
     }
 
@@ -180,7 +181,7 @@ mod tests {
     #[test]
     fn focused_pane_is_agent_true() {
         let mut state = AppState::new("%99".into());
-        state.focused_pane_id = Some("%1".into());
+        state.focus_state.focused_pane_id = Some("%1".into());
         state.repo_groups = vec![agent_group("%1")];
         assert!(state.focused_pane_is_agent());
     }
@@ -188,7 +189,7 @@ mod tests {
     #[test]
     fn focused_pane_is_agent_false_non_agent() {
         let mut state = AppState::new("%99".into());
-        state.focused_pane_id = Some("%5".into());
+        state.focus_state.focused_pane_id = Some("%5".into());
         state.repo_groups = vec![agent_group("%1")];
         assert!(!state.focused_pane_is_agent());
     }
@@ -196,7 +197,7 @@ mod tests {
     #[test]
     fn focused_pane_is_agent_false_no_focus() {
         let mut state = AppState::new("%99".into());
-        state.focused_pane_id = None;
+        state.focus_state.focused_pane_id = None;
         state.repo_groups = vec![agent_group("%1")];
         assert!(!state.focused_pane_is_agent());
     }
@@ -204,7 +205,7 @@ mod tests {
     #[test]
     fn focused_pane_is_agent_false_empty_groups() {
         let mut state = AppState::new("%99".into());
-        state.focused_pane_id = Some("%1".into());
+        state.focus_state.focused_pane_id = Some("%1".into());
         state.repo_groups = vec![];
         assert!(!state.focused_pane_is_agent());
     }
@@ -251,7 +252,7 @@ mod tests {
 
         // Step 2: Agent %1 starts, focus moves to it
         state.repo_groups = vec![agent_group("%1")];
-        state.focused_pane_id = Some("%1".into());
+        state.focus_state.focused_pane_id = Some("%1".into());
         state.auto_switch_tab();
         assert_eq!(
             state.bottom_tab,
@@ -277,7 +278,7 @@ mod tests {
         );
 
         // Step 5: Focus to non-agent %5
-        state.focused_pane_id = Some("%5".into());
+        state.focus_state.focused_pane_id = Some("%5".into());
         state.auto_switch_tab();
         assert_eq!(
             state.bottom_tab,
@@ -286,7 +287,7 @@ mod tests {
         );
 
         // Step 6: Focus back to %1 → restores saved Git pref
-        state.focused_pane_id = Some("%1".into());
+        state.focus_state.focused_pane_id = Some("%1".into());
         state.auto_switch_tab();
         assert_eq!(
             state.bottom_tab,
@@ -312,7 +313,7 @@ mod tests {
         let mut group = agent_group("%1");
         group.panes.push((test_pane("%2"), PaneGitInfo::default()));
         state.repo_groups = vec![group];
-        state.focused_pane_id = Some("%2".into());
+        state.focus_state.focused_pane_id = Some("%2".into());
         state.auto_switch_tab();
         assert_eq!(
             state.bottom_tab,
@@ -321,12 +322,12 @@ mod tests {
         );
 
         // Focus back to %1 → Git (saved)
-        state.focused_pane_id = Some("%1".into());
+        state.focus_state.focused_pane_id = Some("%1".into());
         state.auto_switch_tab();
         assert_eq!(state.bottom_tab, BottomTab::GitStatus, "%1: restored Git");
 
         // Focus back to %2 → Activity (saved)
-        state.focused_pane_id = Some("%2".into());
+        state.focus_state.focused_pane_id = Some("%2".into());
         state.auto_switch_tab();
         assert_eq!(
             state.bottom_tab,
@@ -407,11 +408,11 @@ mod tests {
 
         // %1 agent already seen, currently on non-agent %5
         state.seen_agent_panes.insert("%1".into());
-        state.prev_focused_pane_id = Some("%5".into());
+        state.focus_state.prev_focused_pane_id = Some("%5".into());
         state.bottom_tab = BottomTab::GitStatus;
 
         // Focus to %1 (no saved pref for %1)
-        state.focused_pane_id = Some("%1".into());
+        state.focus_state.focused_pane_id = Some("%1".into());
         state.auto_switch_tab();
         assert_eq!(
             state.bottom_tab,
@@ -430,7 +431,7 @@ mod tests {
         assert_eq!(state.bottom_tab, BottomTab::Activity);
 
         // Focus becomes None (all panes closed?)
-        state.focused_pane_id = None;
+        state.focus_state.focused_pane_id = None;
         state.auto_switch_tab();
         // restore_or_default_tab returns early for None, so tab stays
         assert_eq!(
@@ -450,11 +451,11 @@ mod tests {
         state.next_bottom_tab();
         assert_eq!(state.bottom_tab, BottomTab::GitStatus);
 
-        state.focused_pane_id = None;
+        state.focus_state.focused_pane_id = None;
         state.auto_switch_tab();
         assert_eq!(state.bottom_tab, BottomTab::GitStatus);
 
-        state.focused_pane_id = Some("%1".into());
+        state.focus_state.focused_pane_id = Some("%1".into());
         state.auto_switch_tab();
         assert_eq!(
             state.bottom_tab,
@@ -473,12 +474,12 @@ mod tests {
         state.next_bottom_tab();
         assert_eq!(state.bottom_tab, BottomTab::GitStatus);
 
-        state.focused_pane_id = Some("%5".into());
+        state.focus_state.focused_pane_id = Some("%5".into());
         state.repo_groups = vec![agent_group("%1")];
         state.auto_switch_tab();
         assert_eq!(state.bottom_tab, BottomTab::GitStatus);
 
-        state.focused_pane_id = Some("%1".into());
+        state.focus_state.focused_pane_id = Some("%1".into());
         state.repo_groups = vec![agent_group("%1")];
         state.auto_switch_tab();
         assert_eq!(
@@ -538,7 +539,7 @@ mod tests {
 
         // Agent %1 closes (disappears from repo_groups)
         state.repo_groups = vec![];
-        state.focused_pane_id = Some("%5".into());
+        state.focus_state.focused_pane_id = Some("%5".into());
         state.auto_switch_tab();
         // %1 should be removed from seen_agent_panes
         assert!(
@@ -548,7 +549,7 @@ mod tests {
 
         // Agent relaunches in same pane %1
         state.repo_groups = vec![agent_group("%1")];
-        state.focused_pane_id = Some("%1".into());
+        state.focus_state.focused_pane_id = Some("%1".into());
         state.auto_switch_tab();
         assert_eq!(
             state.bottom_tab,

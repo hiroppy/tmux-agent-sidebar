@@ -27,7 +27,7 @@ fn render_centered(frame: &mut Frame, area: Rect, text: &str, color: Color) {
 
 pub fn draw_bottom(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let theme = &state.theme;
-    let border_color = if state.focus == Focus::ActivityLog {
+    let border_color = if state.focus_state.focus == Focus::ActivityLog {
         theme.accent
     } else {
         theme.border_inactive

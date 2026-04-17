@@ -284,11 +284,11 @@ fn test_rebuild_row_targets_clamps_selection() {
 #[test]
 fn test_scroll_git_empty_is_noop() {
     let mut state = make_state(vec![]);
-    state.git_scroll.offset = 0;
+    state.scrolls.git.offset = 0;
     state.bottom_tab = BottomTab::GitStatus;
     state.scroll_bottom(5);
     assert_eq!(
-        state.git_scroll.offset, 0,
+        state.scrolls.git.offset, 0,
         "scrolling empty git should be no-op"
     );
 }
@@ -305,20 +305,20 @@ fn test_scroll_git_bounds() {
         deletions: 0,
         path: String::new(),
     }];
-    state.git_scroll.total_lines = 8;
-    state.git_scroll.visible_height = 3;
-    state.git_scroll.offset = 0;
+    state.scrolls.git.total_lines = 8;
+    state.scrolls.git.visible_height = 3;
+    state.scrolls.git.offset = 0;
 
-    state.git_scroll.scroll(2);
-    assert_eq!(state.git_scroll.offset, 2);
+    state.scrolls.git.scroll(2);
+    assert_eq!(state.scrolls.git.offset, 2);
 
     // Clamp to max (8 - 3 = 5)
-    state.git_scroll.scroll(10);
-    assert_eq!(state.git_scroll.offset, 5);
+    state.scrolls.git.scroll(10);
+    assert_eq!(state.scrolls.git.offset, 5);
 
     // Clamp to 0
-    state.git_scroll.scroll(-100);
-    assert_eq!(state.git_scroll.offset, 0);
+    state.scrolls.git.scroll(-100);
+    assert_eq!(state.scrolls.git.offset, 0);
 }
 
 // ─── State: apply_git_data Tests ────────────────────────────────────
@@ -368,20 +368,20 @@ fn test_state_new_defaults() {
     assert_eq!(state.now, 0);
     assert_eq!(state.tmux_pane, "%99");
     assert!(state.repo_groups.is_empty());
-    assert!(!state.sidebar_focused);
-    assert_eq!(state.focus, Focus::Panes);
+    assert!(!state.focus_state.sidebar_focused);
+    assert_eq!(state.focus_state.focus, Focus::Panes);
     assert_eq!(state.spinner_frame, 0);
     assert_eq!(state.global.selected_pane_row, 0);
     assert!(state.layout.pane_row_targets.is_empty());
     assert!(state.activity.entries.is_empty());
     assert_eq!(state.activity.scroll.offset, 0);
     assert_eq!(state.activity.max_entries, 50);
-    assert_eq!(state.panes_scroll.offset, 0);
-    assert_eq!(state.panes_scroll.total_lines, 0);
-    assert_eq!(state.panes_scroll.visible_height, 0);
+    assert_eq!(state.scrolls.panes.offset, 0);
+    assert_eq!(state.scrolls.panes.total_lines, 0);
+    assert_eq!(state.scrolls.panes.visible_height, 0);
     assert_eq!(state.bottom_tab, BottomTab::Activity);
     assert!(state.git.branch.is_empty());
-    assert_eq!(state.git_scroll.offset, 0);
+    assert_eq!(state.scrolls.git.offset, 0);
     assert!(state.git.pr_number.is_none());
 }
 
@@ -434,12 +434,12 @@ fn test_scroll_bottom_dispatches_to_git() {
         deletions: 0,
         path: String::new(),
     }];
-    state.git_scroll.total_lines = 10;
-    state.git_scroll.visible_height = 3;
-    state.git_scroll.offset = 0;
+    state.scrolls.git.total_lines = 10;
+    state.scrolls.git.visible_height = 3;
+    state.scrolls.git.offset = 0;
 
     state.scroll_bottom(2);
-    assert_eq!(state.git_scroll.offset, 2);
+    assert_eq!(state.scrolls.git.offset, 2);
 }
 
 #[test]

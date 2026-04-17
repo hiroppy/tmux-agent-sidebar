@@ -384,10 +384,10 @@ pub(super) fn draw_git_content(frame: &mut Frame, state: &mut AppState, inner: R
         return;
     }
 
-    state.git_scroll.total_lines = lines.len();
-    state.git_scroll.visible_height = content_height as usize;
+    state.scrolls.git.total_lines = lines.len();
+    state.scrolls.git.visible_height = content_height as usize;
 
-    let scroll_offset = state.git_scroll.offset as u16;
+    let scroll_offset = state.scrolls.git.offset as u16;
     let paragraph = Paragraph::new(lines).scroll((scroll_offset, 0));
     frame.render_widget(paragraph, content_area);
 }

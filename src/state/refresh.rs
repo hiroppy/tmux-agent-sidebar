@@ -57,7 +57,7 @@ impl AppState {
         sidebar_focused: bool,
         sessions: Vec<SessionInfo>,
     ) {
-        self.sidebar_focused = sidebar_focused;
+        self.focus_state.sidebar_focused = sidebar_focused;
         // Capture the prior `pane_id → session_id` map so we can detect
         // anything that should re-trigger `refresh_session_names`:
         //   - a brand-new pane_id (first appearance)
@@ -328,7 +328,7 @@ impl AppState {
     }
 
     pub(crate) fn refresh_activity_log(&mut self) {
-        let Some(ref pane_id) = self.focused_pane_id else {
+        let Some(ref pane_id) = self.focus_state.focused_pane_id else {
             self.activity.entries.clear();
             self.activity.log_cache = None;
             return;

@@ -23,7 +23,7 @@ fn snapshot_selected_focused_styled() {
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
-    state.sidebar_focused = true;
+    state.focus_state.sidebar_focused = true;
     state.global.selected_pane_row = 0;
     state.bottom_panel_height = 0;
 
@@ -53,8 +53,8 @@ fn snapshot_activity_focused_styled() {
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
-    state.focus = Focus::ActivityLog;
-    state.sidebar_focused = true;
+    state.focus_state.focus = Focus::ActivityLog;
+    state.focus_state.sidebar_focused = true;
     state.activity.entries = vec![ActivityEntry {
         timestamp: "10:32".into(),
         tool: "Edit".into(),
@@ -96,8 +96,8 @@ fn snapshot_activity_unfocused_styled() {
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
-    state.focus = Focus::Panes; // not activity
-    state.sidebar_focused = true;
+    state.focus_state.focus = Focus::Panes; // not activity
+    state.focus_state.sidebar_focused = true;
     state.activity.entries = vec![ActivityEntry {
         timestamp: "10:32".into(),
         tool: "Edit".into(),
@@ -139,8 +139,8 @@ fn bottom_tab_activity_uses_accent_when_selected() {
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
-    state.focus = Focus::ActivityLog;
-    state.sidebar_focused = true;
+    state.focus_state.focus = Focus::ActivityLog;
+    state.focus_state.sidebar_focused = true;
     state.bottom_tab = BottomTab::Activity;
 
     // Styled snapshot locks in `A` using accent (fg:153) and `G` remaining
@@ -178,8 +178,8 @@ fn bottom_tab_git_uses_accent_when_selected() {
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
-    state.focus = Focus::ActivityLog;
-    state.sidebar_focused = true;
+    state.focus_state.focus = Focus::ActivityLog;
+    state.focus_state.sidebar_focused = true;
     state.bottom_tab = BottomTab::GitStatus;
 
     // Styled snapshot locks in `G` using accent (fg:153) and `A` remaining
@@ -219,8 +219,8 @@ fn selection_marker_uses_accent_color_with_selection_bg() {
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
-    state.sidebar_focused = true;
-    state.focus = Focus::Panes;
+    state.focus_state.sidebar_focused = true;
+    state.focus_state.focus = Focus::Panes;
     state.global.selected_pane_row = 0;
 
     // Styled snapshot locks in:
@@ -269,8 +269,8 @@ fn selection_bg_covers_inner_padding() {
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
-    state.sidebar_focused = true;
-    state.focus = Focus::Panes;
+    state.focus_state.sidebar_focused = true;
+    state.focus_state.focus = Focus::Panes;
     state.global.selected_pane_row = 0;
 
     // Styled snapshot locks in the selection background extending across the
@@ -318,7 +318,7 @@ fn no_selection_bg_when_not_selected() {
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
-    state.sidebar_focused = false; // not focused → no selection
+    state.focus_state.sidebar_focused = false; // not focused → no selection
 
     // Styled snapshot locks in the absence of any selection background
     // (bg:239) while the sidebar is not focused.
@@ -380,7 +380,7 @@ fn snapshot_custom_theme_colors() {
         ..ColorTheme::default()
     };
     // Unfocus sidebar so selected row doesn't use REVERSED (which hides colors)
-    state.sidebar_focused = false;
+    state.focus_state.sidebar_focused = false;
     state.bottom_panel_height = 0;
 
     // Styled snapshot locks in the custom theme colors (accent fg:196,

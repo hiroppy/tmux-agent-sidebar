@@ -145,8 +145,8 @@ pub fn make_repo_group(name: &str, panes: Vec<PaneInfo>) -> tmux_agent_sidebar::
 pub fn make_state(_sessions: Vec<SessionInfo>) -> AppState {
     let mut state = AppState::new("%99".into());
     state.now = FIXED_NOW;
-    state.sidebar_focused = true;
-    state.focused_pane_id = Some("%1".into());
+    state.focus_state.sidebar_focused = true;
+    state.focus_state.focused_pane_id = Some("%1".into());
     state.notices.missing_hook_groups = vec![tmux_agent_sidebar::state::NoticesMissingHookGroup {
         agent: "claude".into(),
         hooks: vec!["Stop".into()],

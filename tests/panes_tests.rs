@@ -30,20 +30,20 @@ fn test_agents_auto_scroll_keeps_selected_visible() {
         }],
     }]);
     state.repo_groups = vec![make_repo_group("project", panes)];
-    state.sidebar_focused = true;
-    state.focus = Focus::Panes;
+    state.focus_state.sidebar_focused = true;
+    state.focus_state.focus = Focus::Panes;
     state.rebuild_row_targets();
 
     // Render with a small height. With the 2-row header, the first pane
     // still stays visible without needing to scroll.
     let _ = render_to_string(&mut state, 28, 26);
-    assert_eq!(state.panes_scroll.offset, 0, "initially at top");
+    assert_eq!(state.scrolls.panes.offset, 0, "initially at top");
 
     // Select last agent and re-render
     state.global.selected_pane_row = 9;
     let _ = render_to_string(&mut state, 28, 26);
     assert!(
-        state.panes_scroll.offset > 0,
+        state.scrolls.panes.offset > 0,
         "should scroll down to show selected agent"
     );
 }
@@ -67,11 +67,11 @@ fn test_panes_scroll_offset_tracks_total_and_visible() {
     let _ = render_to_string(&mut state, 28, 26);
     // After rendering, panes_scroll.total_lines and panes_scroll.visible_height should be set
     assert!(
-        state.panes_scroll.total_lines > 0,
+        state.scrolls.panes.total_lines > 0,
         "total lines should be populated"
     );
     assert!(
-        state.panes_scroll.visible_height > 0,
+        state.scrolls.panes.visible_height > 0,
         "visible height should be populated"
     );
 }
@@ -115,7 +115,7 @@ fn test_running_icon_blink_off() {
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
-    state.sidebar_focused = false;
+    state.focus_state.sidebar_focused = false;
     state.spinner_frame = 0;
 
     insta::assert_snapshot!(render_to_string(&mut state, 28, 25), @"
@@ -144,7 +144,7 @@ fn test_running_spinner_frame_advances() {
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
-    state.sidebar_focused = false;
+    state.focus_state.sidebar_focused = false;
     state.spinner_frame = 3;
 
     insta::assert_snapshot!(render_to_string(&mut state, 28, 25), @"
@@ -173,7 +173,7 @@ fn test_waiting_icon() {
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
-    state.sidebar_focused = false;
+    state.focus_state.sidebar_focused = false;
 
     insta::assert_snapshot!(render_to_string(&mut state, 28, 25), @"
      ≡1  ●0  ◐1  ○0  ✕0
@@ -201,7 +201,7 @@ fn test_error_icon() {
     }]);
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
-    state.sidebar_focused = false;
+    state.focus_state.sidebar_focused = false;
 
     insta::assert_snapshot!(render_to_string(&mut state, 28, 25), @"
      ≡1  ●0  ◐0  ○0  ✕1
@@ -244,8 +244,8 @@ fn test_agents_auto_scroll_shows_last_selected_pane() {
         }],
     }]);
     state.repo_groups = vec![make_repo_group("project", panes)];
-    state.sidebar_focused = true;
-    state.focus = Focus::Panes;
+    state.focus_state.sidebar_focused = true;
+    state.focus_state.focus = Focus::Panes;
     state.rebuild_row_targets();
 
     // Select the last agent
@@ -255,7 +255,7 @@ fn test_agents_auto_scroll_shows_last_selected_pane() {
 
     // Auto-scroll should have moved forward to keep the last-selected pane visible.
     assert!(
-        state.panes_scroll.offset > 0,
+        state.scrolls.panes.offset > 0,
         "selecting the last agent should scroll the list"
     );
 }
@@ -282,14 +282,14 @@ fn test_agents_auto_scroll_up_shows_group_header() {
         }],
     }]);
     state.repo_groups = vec![make_repo_group("project", panes)];
-    state.sidebar_focused = true;
-    state.focus = Focus::Panes;
+    state.focus_state.sidebar_focused = true;
+    state.focus_state.focus = Focus::Panes;
     state.rebuild_row_targets();
 
     // Scroll to bottom
     state.global.selected_pane_row = 7;
     let _ = render_to_string(&mut state, 28, 26);
-    assert!(state.panes_scroll.offset > 0, "should have scrolled down");
+    assert!(state.scrolls.panes.offset > 0, "should have scrolled down");
 
     // Now select first agent and re-render
     state.global.selected_pane_row = 0;
@@ -374,7 +374,7 @@ fn repo_popup_highlights_selected_entry_with_background() {
         make_repo_group("backend", vec![pane.clone()]),
     ];
     state.rebuild_row_targets();
-    state.sidebar_focused = false; // surface raw colors instead of REVERSED
+    state.focus_state.sidebar_focused = false; // surface raw colors instead of REVERSED
     state.popup = tmux_agent_sidebar::state::PopupState::Repo {
         selected: 2, // "backend" (0=All, 1=frontend, 2=backend)
         area: None,
