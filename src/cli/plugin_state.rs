@@ -213,6 +213,93 @@ mod tests {
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
 
+    // ─── EMBEDDED_PLUGIN_FILES shape ─────────────────────────────────
+    //
+    // Guard rails against an `include_str!` pointing at the wrong file
+    // (e.g. a placeholder, a renamed artifact, or a build-time swap).
+    // These checks cost a few microseconds at test time and let a
+    // mis-wired tracked file fail loudly instead of silently shipping
+    // a stale-notice detector that can never fire.
+
+    #[test]
+    fn embedded_plugin_files_is_non_empty() {
+        assert!(
+            !EMBEDDED_PLUGIN_FILES.is_empty(),
+            "EMBEDDED_PLUGIN_FILES is empty — `cache_files_outdated` would \
+             never flag a cache as stale, silently disabling the Stale notice"
+        );
+    }
+
+    #[test]
+    fn embedded_plugin_files_have_no_empty_content() {
+        // Every tracked file must carry real bytes. A blank payload
+        // would match any cache file whose embedded copy someone
+        // emptied by accident, masking real drift.
+        for (rel_path, body) in EMBEDDED_PLUGIN_FILES {
+            assert!(
+                !body.trim().is_empty(),
+                "embedded tracked file {rel_path:?} is empty — \
+                 `include_str!` is pointing at the wrong artifact"
+            );
+        }
+    }
+
+    #[test]
+    fn embedded_hook_sh_starts_with_shebang() {
+        // The wrapper is invoked as `bash hook.sh ...` by
+        // `hooks/hooks.json`, so a missing shebang is not a functional
+        // failure — but its absence would also mean `include_str!`
+        // grabbed the wrong file, which is the regression this guards.
+        let (_, hook_sh) = EMBEDDED_PLUGIN_FILES
+            .iter()
+            .find(|(rel, _)| *rel == "hook.sh")
+            .expect("hook.sh must stay in EMBEDDED_PLUGIN_FILES");
+        assert!(
+            hook_sh.starts_with("#!"),
+            "embedded hook.sh does not start with a shebang — \
+             `include_str!` is pointing at the wrong file"
+        );
+    }
+
+    #[test]
+    fn embedded_hooks_json_parses_with_hooks_object() {
+        // Catches accidental newline / UTF-8 BOM drift introduced by
+        // an editor — any such corruption would make every user's
+        // cache look outdated the moment this binary ships.
+        let (_, hooks_json) = EMBEDDED_PLUGIN_FILES
+            .iter()
+            .find(|(rel, _)| *rel == "hooks/hooks.json")
+            .expect("hooks/hooks.json must stay in EMBEDDED_PLUGIN_FILES");
+        let json: serde_json::Value =
+            serde_json::from_str(hooks_json).expect("embedded hooks.json must parse");
+        assert!(
+            json.get("hooks").and_then(|v| v.as_object()).is_some(),
+            "embedded hooks.json is missing a top-level `hooks` object"
+        );
+    }
+
+    #[test]
+    fn embedded_plugin_json_matches_plugin_name() {
+        // If the manifest name ever drifts away from PLUGIN_NAME the
+        // cache lookup (`installed_plugin_install_path_from`) would
+        // silently stop matching the real install entry — guard the
+        // invariant explicitly.
+        let (_, plugin_json) = EMBEDDED_PLUGIN_FILES
+            .iter()
+            .find(|(rel, _)| *rel == ".claude-plugin/plugin.json")
+            .expect(".claude-plugin/plugin.json must stay in EMBEDDED_PLUGIN_FILES");
+        let json: serde_json::Value =
+            serde_json::from_str(plugin_json).expect("embedded plugin.json must parse");
+        let name = json
+            .get("name")
+            .and_then(|v| v.as_str())
+            .expect("embedded plugin.json is missing a `name` field");
+        assert_eq!(
+            name, PLUGIN_NAME,
+            "embedded plugin.json `name` diverged from PLUGIN_NAME"
+        );
+    }
+
     fn unique_dir(label: &str) -> PathBuf {
         let id = COUNTER.fetch_add(1, Ordering::SeqCst);
         let dir = std::env::temp_dir().join(format!("tmux-as-plugin-state-{label}-{id}"));
