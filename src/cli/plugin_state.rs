@@ -43,10 +43,8 @@ const RESIDUAL_HOOK_NEEDLE: &str = "tmux-agent-sidebar/hook.sh";
 /// cache means the cache is behind (or corrupt) and the user needs
 /// `/plugin update` so Claude Code re-reads the affected files.
 ///
-/// Tracked entries:
-/// - `.claude-plugin/plugin.json` — bumped on every release, so it
-///   doubles as the catch-all drift sentinel (cosmetic-only releases
-///   still invalidate the cache).
+/// Tracked entries are scoped to files whose content changes alter
+/// runtime behavior:
 /// - `hook.sh` — the wrapper Claude invokes for every hook event. A
 ///   change here (new fallback paths, error handling) only reaches
 ///   users after `/plugin update` refreshes their cache.
@@ -54,15 +52,18 @@ const RESIDUAL_HOOK_NEEDLE: &str = "tmux-agent-sidebar/hook.sh";
 ///   `hook.sh`. Adding or renaming events requires a cache refresh
 ///   before Claude Code wires the new events up.
 ///
+/// `.claude-plugin/plugin.json` is deliberately excluded: its only
+/// per-release churn is the `version` field, and firing the Stale
+/// notice on every cosmetic version bump would reintroduce the
+/// false-positive noise this design was meant to kill. A release that
+/// only bumps the version number has no functional drift Claude Code
+/// needs to re-read.
+///
 /// Kept as a slice so adding a future file (agent / command markdown,
 /// MCP config) is a one-line change and the comparison semantics —
 /// "outdated iff *any* tracked file differs or is missing" — stay
 /// uniform.
 const EMBEDDED_PLUGIN_FILES: &[(&str, &str)] = &[
-    (
-        ".claude-plugin/plugin.json",
-        include_str!("../../.claude-plugin/plugin.json"),
-    ),
     ("hook.sh", include_str!("../../hook.sh")),
     ("hooks/hooks.json", include_str!("../../hooks/hooks.json")),
 ];
@@ -275,28 +276,6 @@ mod tests {
         assert!(
             json.get("hooks").and_then(|v| v.as_object()).is_some(),
             "embedded hooks.json is missing a top-level `hooks` object"
-        );
-    }
-
-    #[test]
-    fn embedded_plugin_json_matches_plugin_name() {
-        // If the manifest name ever drifts away from PLUGIN_NAME the
-        // cache lookup (`installed_plugin_install_path_from`) would
-        // silently stop matching the real install entry — guard the
-        // invariant explicitly.
-        let (_, plugin_json) = EMBEDDED_PLUGIN_FILES
-            .iter()
-            .find(|(rel, _)| *rel == ".claude-plugin/plugin.json")
-            .expect(".claude-plugin/plugin.json must stay in EMBEDDED_PLUGIN_FILES");
-        let json: serde_json::Value =
-            serde_json::from_str(plugin_json).expect("embedded plugin.json must parse");
-        let name = json
-            .get("name")
-            .and_then(|v| v.as_str())
-            .expect("embedded plugin.json is missing a `name` field");
-        assert_eq!(
-            name, PLUGIN_NAME,
-            "embedded plugin.json `name` diverged from PLUGIN_NAME"
         );
     }
 
