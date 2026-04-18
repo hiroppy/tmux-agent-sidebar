@@ -205,22 +205,20 @@ impl AppState {
     /// Resolve the notices popup inputs once.
     ///
     /// Every input is static for the sidebar's lifetime:
-    /// `claude_plugin_installed_version` and
-    /// `claude_settings_has_residual_hooks` are resolved at `main.rs`
-    /// startup, and `settings.json` / `hooks.json` edits only take
-    /// effect after a sidebar restart — matching the restart-required
-    /// contract already documented for `/plugin install`. So this runs
-    /// once from `main.rs` instead of being pinned to the per-tick
-    /// refresh loop, and the ⓘ badge no longer depends on which pane
-    /// happens to be focused.
+    /// `claude_plugin_status` and `claude_settings_has_residual_hooks`
+    /// are resolved at `main.rs` startup, and `settings.json` /
+    /// `hooks.json` edits only take effect after a sidebar restart —
+    /// matching the restart-required contract already documented for
+    /// `/plugin install`. So this runs once from `main.rs` instead of
+    /// being pinned to the per-tick refresh loop, and the ⓘ badge no
+    /// longer depends on which pane happens to be focused.
     ///
     /// Both Claude and Codex are always evaluated so a user who closes
     /// their last agent pane still sees any outstanding hook setup
     /// warnings.
     pub fn refresh_notices(&mut self) {
         self.notices.claude_plugin_notice = compute_claude_plugin_notice(
-            self.notices.claude_plugin_installed_version.as_deref(),
-            crate::VERSION,
+            &self.notices.claude_plugin_status,
             self.notices.claude_settings_has_residual_hooks,
         );
 
@@ -228,7 +226,7 @@ impl AppState {
         // plugin is installed. Residual legacy entries are already
         // surfaced by the Plugin section's `DuplicateHooks` notice, so
         // re-adding Claude here would only duplicate the warning.
-        let claude_plugin_present = self.notices.claude_plugin_installed_version.is_some();
+        let claude_plugin_present = self.notices.claude_plugin_status.installed;
 
         let resolved_hook = crate::cli::setup::resolve_hook_script();
         let force_missing = debug_forced_display();
@@ -1045,7 +1043,7 @@ fn compute_missing_hook_groups(
 }
 
 /// Build the `Plugin / claude` notice based on the recorded plugin
-/// version and whether residual manual hook entries remain in
+/// status and whether residual manual hook entries remain in
 /// `~/.claude/settings.json`. Priority order:
 ///
 /// - No plugin install → `InstallRecommended` (the migration prompt
@@ -1053,23 +1051,25 @@ fn compute_missing_hook_groups(
 ///   does not matter here).
 /// - Plugin installed + residual entries → `DuplicateHooks`. Takes
 ///   precedence over `Stale` because hooks are firing twice right now
-///   and the cleanup is more urgent than a pending version bump.
-/// - Plugin installed, no residual, version mismatch → `Stale`.
-/// - Plugin installed, no residual, version match → no notice.
+///   and the cleanup is more urgent than a pending update.
+/// - Plugin installed, no residual, any tracked cached file differs
+///   from its embedded snapshot → `Stale`.
+/// - Plugin installed, no residual, every tracked cached file matches
+///   → no notice.
 fn compute_claude_plugin_notice(
-    installed_version: Option<&str>,
-    current_version: &str,
+    status: &crate::cli::plugin_state::ClaudePluginStatus,
     has_residual_hooks: bool,
 ) -> Option<ClaudePluginNotice> {
-    match installed_version {
-        None => Some(ClaudePluginNotice::InstallRecommended),
-        Some(_) if has_residual_hooks => Some(ClaudePluginNotice::DuplicateHooks),
-        Some(v) if v == current_version => None,
-        Some(v) => Some(ClaudePluginNotice::Stale {
-            installed: v.to_string(),
-            current: current_version.to_string(),
-        }),
+    if !status.installed {
+        return Some(ClaudePluginNotice::InstallRecommended);
     }
+    if has_residual_hooks {
+        return Some(ClaudePluginNotice::DuplicateHooks);
+    }
+    if status.cache_outdated {
+        return Some(ClaudePluginNotice::Stale);
+    }
+    None
 }
 
 pub(crate) fn debug_forced_display() -> bool {
@@ -1171,37 +1171,46 @@ mod tests {
 
     // ─── compute_claude_plugin_notice ────────────────────────────────
 
+    use crate::cli::plugin_state::ClaudePluginStatus;
+
+    const STATUS_ABSENT: ClaudePluginStatus = ClaudePluginStatus {
+        installed: false,
+        cache_outdated: false,
+    };
+    const STATUS_IN_SYNC: ClaudePluginStatus = ClaudePluginStatus {
+        installed: true,
+        cache_outdated: false,
+    };
+    const STATUS_OUTDATED: ClaudePluginStatus = ClaudePluginStatus {
+        installed: true,
+        cache_outdated: true,
+    };
+
     #[test]
-    fn plugin_notice_install_recommended_when_version_missing() {
-        // No version recorded → the user has not run `/plugin install`
+    fn plugin_notice_install_recommended_when_plugin_missing() {
+        // Plugin not installed → the user has not run `/plugin install`
         // yet, so the popup should encourage them to. Residual hooks do
         // not change this — the migration prompt cleans them up too.
         assert_eq!(
-            compute_claude_plugin_notice(None, "0.5.0", false),
+            compute_claude_plugin_notice(&STATUS_ABSENT, false),
             Some(ClaudePluginNotice::InstallRecommended)
         );
         assert_eq!(
-            compute_claude_plugin_notice(None, "0.5.0", true),
+            compute_claude_plugin_notice(&STATUS_ABSENT, true),
             Some(ClaudePluginNotice::InstallRecommended)
         );
     }
 
     #[test]
-    fn plugin_notice_none_when_versions_match_and_no_residual() {
-        assert_eq!(
-            compute_claude_plugin_notice(Some("0.5.0"), "0.5.0", false),
-            None
-        );
+    fn plugin_notice_none_when_hooks_match_and_no_residual() {
+        assert_eq!(compute_claude_plugin_notice(&STATUS_IN_SYNC, false), None);
     }
 
     #[test]
-    fn plugin_notice_stale_when_versions_differ_and_no_residual() {
+    fn plugin_notice_stale_when_cached_hooks_differ_and_no_residual() {
         assert_eq!(
-            compute_claude_plugin_notice(Some("0.4.3"), "0.5.0", false),
-            Some(ClaudePluginNotice::Stale {
-                installed: "0.4.3".into(),
-                current: "0.5.0".into(),
-            })
+            compute_claude_plugin_notice(&STATUS_OUTDATED, false),
+            Some(ClaudePluginNotice::Stale)
         );
     }
 
@@ -1209,14 +1218,14 @@ mod tests {
     fn plugin_notice_duplicate_hooks_when_residual_overrides_stale() {
         // Plugin is installed AND legacy entries are still in
         // settings.json. Hooks fire twice. The DuplicateHooks notice
-        // takes precedence over Stale even when the version is also
-        // out of date — cleanup is the more urgent action.
+        // takes precedence over Stale even when the cached hooks.json
+        // is also out of date — cleanup is the more urgent action.
         assert_eq!(
-            compute_claude_plugin_notice(Some("0.4.3"), "0.5.0", true),
+            compute_claude_plugin_notice(&STATUS_OUTDATED, true),
             Some(ClaudePluginNotice::DuplicateHooks)
         );
         assert_eq!(
-            compute_claude_plugin_notice(Some("0.5.0"), "0.5.0", true),
+            compute_claude_plugin_notice(&STATUS_IN_SYNC, true),
             Some(ClaudePluginNotice::DuplicateHooks)
         );
     }

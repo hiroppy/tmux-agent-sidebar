@@ -20,10 +20,11 @@ pub(super) fn init_state(tmux_pane: String) -> AppState {
 
     super::render::refresh_git_for_focused_pane(&mut state);
 
-    // Resolve the installed Claude Code plugin version once at startup,
+    // Resolve the installed Claude Code plugin status once at startup,
     // matching the version_notice pattern. Restart the sidebar after a
-    // /plugin install or /plugin uninstall to pick up the new state.
-    state.notices.claude_plugin_installed_version = plugin_state::installed_plugin_version();
+    // /plugin install, /plugin uninstall, or /plugin update to pick up
+    // the new state.
+    state.notices.claude_plugin_status = plugin_state::installed_plugin_status();
     // Likewise resolve whether the user still has legacy
     // tmux-agent-sidebar/hook.sh entries in ~/.claude/settings.json so
     // the notices popup can warn about duplicate hook execution.

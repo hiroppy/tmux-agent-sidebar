@@ -9,9 +9,21 @@
 //! 1. Suppress the "missing hooks" notice for Claude — the plugin
 //!    guarantees the hooks are wired up, so the user-side
 //!    `~/.claude/settings.json` is allowed to be empty.
-//! 2. Surface a "plugin out of date" notice when the recorded version
-//!    differs from the running binary's version, so the user knows to
-//!    restart Claude Code (which causes the plugin to reload).
+//! 2. Surface a "plugin out of date" notice when the `hooks/hooks.json`
+//!    snapshot in Claude's plugin cache differs from the one embedded
+//!    into this binary at build time, so the user knows to run
+//!    `/plugin update` to pick up new hook declarations.
+//!
+//! Why compare `hooks/hooks.json` instead of the plugin `version`
+//! string: `hook.sh` is a thin wrapper that always dispatches to the
+//! latest-built binary on disk, so a bare version mismatch between the
+//! running binary and the cached manifest is meaningless — the binary
+//! already runs the newest code regardless of which cache directory
+//! holds `hook.sh`. The one thing that *does* require `/plugin update`
+//! is a change to the hook declarations (new events, matcher tweaks),
+//! and those live in `hooks/hooks.json`. Embedding that file via
+//! `include_str!` makes the binary self-describing — no need to go
+//! hunting for the marketplace source tree to find the "live" copy.
 //!
 //! Reading Claude Code's own registry (instead of bridging through a
 //! TMPDIR file written by hook subprocesses) means uninstalls are
@@ -25,12 +37,64 @@ use std::path::{Path, PathBuf};
 const PLUGIN_NAME: &str = "tmux-agent-sidebar";
 const RESIDUAL_HOOK_NEEDLE: &str = "tmux-agent-sidebar/hook.sh";
 
-/// Return the version of the `tmux-agent-sidebar` plugin recorded in
-/// Claude Code's `installed_plugins.json`, or `None` when the plugin is
-/// not installed (or the registry cannot be read). Resolved once at
-/// sidebar startup; see `version_notice` for the analogous pattern.
-pub fn installed_plugin_version() -> Option<String> {
-    installed_plugin_version_from(&claude_plugins_registry_path()?)
+/// Files that ship with *this* binary, snapshotted at compile time via
+/// `include_str!`, paired with their path relative to the plugin root.
+/// Any mismatch — or absence — against the copy in Claude's plugin
+/// cache means the cache is behind (or corrupt) and the user needs
+/// `/plugin update` so Claude Code re-reads the affected files.
+///
+/// Tracked entries:
+/// - `.claude-plugin/plugin.json` — bumped on every release, so it
+///   doubles as the catch-all drift sentinel (cosmetic-only releases
+///   still invalidate the cache).
+/// - `hook.sh` — the wrapper Claude invokes for every hook event. A
+///   change here (new fallback paths, error handling) only reaches
+///   users after `/plugin update` refreshes their cache.
+/// - `hooks/hooks.json` — declares which Claude hook events route to
+///   `hook.sh`. Adding or renaming events requires a cache refresh
+///   before Claude Code wires the new events up.
+///
+/// Kept as a slice so adding a future file (agent / command markdown,
+/// MCP config) is a one-line change and the comparison semantics —
+/// "outdated iff *any* tracked file differs or is missing" — stay
+/// uniform.
+const EMBEDDED_PLUGIN_FILES: &[(&str, &str)] = &[
+    (
+        ".claude-plugin/plugin.json",
+        include_str!("../../.claude-plugin/plugin.json"),
+    ),
+    ("hook.sh", include_str!("../../hook.sh")),
+    ("hooks/hooks.json", include_str!("../../hooks/hooks.json")),
+];
+
+/// Lifetime state of the Claude Code plugin install, resolved once at
+/// sidebar startup. All fields default to "plugin not installed".
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ClaudePluginStatus {
+    /// Whether `tmux-agent-sidebar` is recorded in Claude Code's
+    /// `installed_plugins.json`. Derived from the presence of a matching
+    /// entry with a non-empty install path.
+    pub installed: bool,
+    /// True when the plugin is installed AND at least one of the files
+    /// listed in [`EMBEDDED_PLUGIN_FILES`] differs between its cache
+    /// (resolved via `installPath` from the registry) and the copy
+    /// embedded in this binary. Only meaningful alongside
+    /// `installed: true`; remains `false` for every "not installed"
+    /// path so consumers can branch on `installed` first.
+    pub cache_outdated: bool,
+}
+
+/// Resolve the Claude plugin install status from the user's
+/// `~/.claude/plugins/installed_plugins.json`. Registry-level failure
+/// paths (missing registry, unreadable file, malformed JSON, missing
+/// install path) degrade to "plugin not installed" — the notice popup
+/// is advisory, never blocking. Once the install path resolves, any
+/// missing / divergent tracked file surfaces as `cache_outdated`.
+pub fn installed_plugin_status() -> ClaudePluginStatus {
+    let Some(registry) = claude_plugins_registry_path() else {
+        return ClaudePluginStatus::default();
+    };
+    installed_plugin_status_from(&registry, EMBEDDED_PLUGIN_FILES)
 }
 
 fn claude_plugins_registry_path() -> Option<PathBuf> {
@@ -38,7 +102,24 @@ fn claude_plugins_registry_path() -> Option<PathBuf> {
     Some(PathBuf::from(home).join(".claude/plugins/installed_plugins.json"))
 }
 
-fn installed_plugin_version_from(path: &Path) -> Option<String> {
+fn installed_plugin_status_from(
+    registry_path: &Path,
+    embedded_files: &[(&str, &str)],
+) -> ClaudePluginStatus {
+    match installed_plugin_install_path_from(registry_path) {
+        Some(install_path) => ClaudePluginStatus {
+            installed: true,
+            cache_outdated: cache_files_outdated(&install_path, embedded_files),
+        },
+        None => ClaudePluginStatus::default(),
+    }
+}
+
+/// Extract the recorded `installPath` for the `tmux-agent-sidebar`
+/// plugin, preferring the first entry that carries a non-empty path.
+/// Returns `None` when the plugin is not installed or the registry is
+/// malformed/unreadable.
+fn installed_plugin_install_path_from(path: &Path) -> Option<PathBuf> {
     let raw = fs::read_to_string(path).ok()?;
     let json: serde_json::Value = serde_json::from_str(&raw).ok()?;
     let plugins = json.get("plugins")?.as_object()?;
@@ -50,18 +131,40 @@ fn installed_plugin_version_from(path: &Path) -> Option<String> {
         if name != PLUGIN_NAME {
             continue;
         }
-        if let Some(version) = installs.as_array().and_then(|installs| {
+        if let Some(install_path) = installs.as_array().and_then(|installs| {
             installs.iter().find_map(|install| {
                 install
-                    .get("version")
+                    .get("installPath")
                     .and_then(|v| v.as_str())
                     .filter(|v| !v.is_empty())
+                    .map(PathBuf::from)
             })
         }) {
-            return Some(version.to_string());
+            return Some(install_path);
         }
     }
     None
+}
+
+/// Compare each cached plugin file against the embedded copy baked in
+/// at build time. Returns `true` as soon as **any** file differs or
+/// cannot be read, since either condition warrants `/plugin update`
+/// (or a reinstall).
+///
+/// Every entry in [`EMBEDDED_PLUGIN_FILES`] is a file the plugin is
+/// guaranteed to ship, so a read error (missing, permission denied,
+/// corrupt symlink) means the cache is partial or broken — exactly the
+/// state the user needs to be nagged about. Byte-exact comparison is
+/// intentional: tracked files only diverge during a release, so
+/// surfacing incidental whitespace edits is acceptable (running
+/// `/plugin update` resolves them cleanly).
+fn cache_files_outdated(install_path: &Path, embedded_files: &[(&str, &str)]) -> bool {
+    embedded_files.iter().any(|(rel_path, expected)| {
+        match fs::read_to_string(install_path.join(rel_path)) {
+            Ok(cached) => cached != *expected,
+            Err(_) => true,
+        }
+    })
 }
 
 /// Whether the user's `~/.claude/settings.json` still contains residual
@@ -71,7 +174,7 @@ fn installed_plugin_version_from(path: &Path) -> Option<String> {
 /// fires twice — once via the plugin and once via the user's manual
 /// setting. The notices popup needs to surface this so the user can
 /// clean up the duplicates. Resolved once at sidebar startup, matching
-/// the `installed_plugin_version()` pattern.
+/// the `installed_plugin_status()` pattern.
 pub fn claude_settings_has_residual_hooks() -> bool {
     claude_settings_has_residual_hooks_at(&claude_settings_path())
 }
@@ -110,6 +213,14 @@ mod tests {
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
 
+    fn unique_dir(label: &str) -> PathBuf {
+        let id = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("tmux-as-plugin-state-{label}-{id}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
     fn unique_registry(label: &str) -> PathBuf {
         let id = COUNTER.fetch_add(1, Ordering::SeqCst);
         let path =
@@ -122,8 +233,17 @@ mod tests {
         fs::write(path, body).unwrap();
     }
 
+    /// Write a fake Claude plugin cache with a `hooks/hooks.json` file
+    /// containing `body`, and return its root path.
+    fn write_cache_with_hooks(label: &str, body: &str) -> PathBuf {
+        let root = unique_dir(label);
+        fs::create_dir_all(root.join("hooks")).unwrap();
+        fs::write(root.join("hooks/hooks.json"), body).unwrap();
+        root
+    }
+
     #[test]
-    fn returns_version_when_plugin_is_installed() {
+    fn returns_install_path_when_plugin_is_installed() {
         let path = unique_registry("installed");
         write_registry(
             &path,
@@ -131,19 +251,19 @@ mod tests {
                 "version": 2,
                 "plugins": {
                     "tmux-agent-sidebar@hiroppy": [
-                        {"scope":"user","installPath":"/x","version":"0.5.0"}
+                        {"scope":"user","installPath":"/opt/claude-cache/tmux-agent-sidebar/0.5.0","version":"0.5.0"}
                     ]
                 }
             }"#,
         );
-        assert_eq!(installed_plugin_version_from(&path), Some("0.5.0".into()));
+        assert_eq!(
+            installed_plugin_install_path_from(&path),
+            Some(PathBuf::from("/opt/claude-cache/tmux-agent-sidebar/0.5.0"))
+        );
     }
 
     #[test]
     fn returns_none_when_plugin_not_in_registry() {
-        // Other plugins exist but tmux-agent-sidebar is uninstalled →
-        // notice should re-appear without any stale TMPDIR state to
-        // clean up.
         let path = unique_registry("not-installed");
         write_registry(
             &path,
@@ -151,33 +271,32 @@ mod tests {
                 "version": 2,
                 "plugins": {
                     "code-review@anthropic": [
-                        {"scope":"user","version":"1.0.0"}
+                        {"scope":"user","installPath":"/x","version":"1.0.0"}
                     ]
                 }
             }"#,
         );
-        assert_eq!(installed_plugin_version_from(&path), None);
+        assert_eq!(installed_plugin_install_path_from(&path), None);
     }
 
     #[test]
     fn returns_none_when_registry_file_missing() {
         let path = unique_registry("missing");
-        // Note: file deliberately not written.
-        assert_eq!(installed_plugin_version_from(&path), None);
+        assert_eq!(installed_plugin_install_path_from(&path), None);
     }
 
     #[test]
     fn returns_none_when_registry_is_garbage() {
         let path = unique_registry("garbage");
         write_registry(&path, "not-json");
-        assert_eq!(installed_plugin_version_from(&path), None);
+        assert_eq!(installed_plugin_install_path_from(&path), None);
     }
 
     #[test]
     fn returns_none_when_plugins_field_missing() {
         let path = unique_registry("no-plugins-field");
         write_registry(&path, r#"{"version": 2}"#);
-        assert_eq!(installed_plugin_version_from(&path), None);
+        assert_eq!(installed_plugin_install_path_from(&path), None);
     }
 
     #[test]
@@ -187,7 +306,7 @@ mod tests {
             &path,
             r#"{"version":2,"plugins":{"tmux-agent-sidebar@hiroppy":[]}}"#,
         );
-        assert_eq!(installed_plugin_version_from(&path), None);
+        assert_eq!(installed_plugin_install_path_from(&path), None);
     }
 
     #[test]
@@ -201,33 +320,36 @@ mod tests {
                 "version": 2,
                 "plugins": {
                     "tmux-agent-sidebar@somewhere-else": [
-                        {"scope":"user","version":"0.6.0"}
+                        {"scope":"user","installPath":"/tmp/elsewhere/0.6.0","version":"0.6.0"}
                     ]
                 }
             }"#,
         );
-        assert_eq!(installed_plugin_version_from(&path), Some("0.6.0".into()));
+        assert_eq!(
+            installed_plugin_install_path_from(&path),
+            Some(PathBuf::from("/tmp/elsewhere/0.6.0"))
+        );
     }
 
     #[test]
-    fn returns_none_when_version_field_is_empty_string() {
-        let path = unique_registry("empty-version");
+    fn returns_none_when_install_path_is_empty_string() {
+        let path = unique_registry("empty-install-path");
         write_registry(
             &path,
             r#"{
                 "version": 2,
                 "plugins": {
                     "tmux-agent-sidebar@hiroppy": [
-                        {"scope":"user","version":""}
+                        {"scope":"user","installPath":""}
                     ]
                 }
             }"#,
         );
-        assert_eq!(installed_plugin_version_from(&path), None);
+        assert_eq!(installed_plugin_install_path_from(&path), None);
     }
 
     #[test]
-    fn returns_first_non_empty_version_across_multiple_installs() {
+    fn returns_first_non_empty_install_path_across_multiple_installs() {
         let path = unique_registry("multiple-installs");
         write_registry(
             &path,
@@ -235,13 +357,169 @@ mod tests {
                 "version": 2,
                 "plugins": {
                     "tmux-agent-sidebar@hiroppy": [
-                        {"scope":"user","installPath":"/x","version":""},
-                        {"scope":"project","installPath":"/y","version":"0.6.0"}
+                        {"scope":"user","installPath":""},
+                        {"scope":"project","installPath":"/project/0.6.0","version":"0.6.0"}
                     ]
                 }
             }"#,
         );
-        assert_eq!(installed_plugin_version_from(&path), Some("0.6.0".into()));
+        assert_eq!(
+            installed_plugin_install_path_from(&path),
+            Some(PathBuf::from("/project/0.6.0"))
+        );
+    }
+
+    /// Write a file under the cache root at the given relative path,
+    /// creating parent directories as needed.
+    fn write_cache_file(root: &Path, rel_path: &str, body: &str) {
+        let abs = root.join(rel_path);
+        if let Some(parent) = abs.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(abs, body).unwrap();
+    }
+
+    // ─── cache_files_outdated ────────────────────────────────────────
+
+    #[test]
+    fn files_match_when_single_cached_file_equals_embedded() {
+        let root = write_cache_with_hooks("match", "{\"hooks\":{}}");
+        assert!(!cache_files_outdated(
+            &root,
+            &[("hooks/hooks.json", "{\"hooks\":{}}")]
+        ));
+    }
+
+    #[test]
+    fn files_outdated_when_single_cached_file_differs_from_embedded() {
+        let root = write_cache_with_hooks("differ", "{\"hooks\":{\"Old\":[]}}");
+        assert!(cache_files_outdated(
+            &root,
+            &[("hooks/hooks.json", "{\"hooks\":{\"New\":[]}}")]
+        ));
+    }
+
+    #[test]
+    fn files_outdated_when_cached_file_is_missing() {
+        // Every tracked file is one the plugin is guaranteed to ship.
+        // Missing in the cache means the install is partial or broken,
+        // so the Stale notice must surface so the user runs
+        // `/plugin update` (or reinstalls).
+        let root = unique_dir("missing-file");
+        assert!(cache_files_outdated(
+            &root,
+            &[("hooks/hooks.json", "{\"hooks\":{}}")]
+        ));
+    }
+
+    #[test]
+    fn files_outdated_when_any_tracked_file_diverges() {
+        // Validates the all-match semantics across multiple embedded
+        // files: `hooks.json` is in sync but `.claude-plugin/plugin.json`
+        // drifts, so the overall status must be "outdated".
+        let root = unique_dir("multi-any-diverge");
+        write_cache_file(&root, "hooks/hooks.json", "{\"hooks\":{}}");
+        write_cache_file(
+            &root,
+            ".claude-plugin/plugin.json",
+            "{\"version\":\"0.4.0\"}",
+        );
+        assert!(cache_files_outdated(
+            &root,
+            &[
+                ("hooks/hooks.json", "{\"hooks\":{}}"),
+                (".claude-plugin/plugin.json", "{\"version\":\"0.5.0\"}"),
+            ]
+        ));
+    }
+
+    #[test]
+    fn files_not_outdated_when_all_tracked_files_match() {
+        let root = unique_dir("multi-all-match");
+        write_cache_file(&root, "hooks/hooks.json", "{\"hooks\":{}}");
+        write_cache_file(
+            &root,
+            ".claude-plugin/plugin.json",
+            "{\"version\":\"0.5.0\"}",
+        );
+        assert!(!cache_files_outdated(
+            &root,
+            &[
+                ("hooks/hooks.json", "{\"hooks\":{}}"),
+                (".claude-plugin/plugin.json", "{\"version\":\"0.5.0\"}"),
+            ]
+        ));
+    }
+
+    #[test]
+    fn files_outdated_when_one_of_several_tracked_files_is_missing() {
+        // Partial cache: one matching file, one absent. The missing
+        // file alone is enough to flag the whole install as outdated.
+        let root = unique_dir("multi-one-missing");
+        write_cache_file(&root, "hooks/hooks.json", "{\"hooks\":{}}");
+        // `.claude-plugin/plugin.json` is deliberately not written.
+        assert!(cache_files_outdated(
+            &root,
+            &[
+                ("hooks/hooks.json", "{\"hooks\":{}}"),
+                (".claude-plugin/plugin.json", "{\"version\":\"0.5.0\"}"),
+            ]
+        ));
+    }
+
+    // ─── installed_plugin_status_from (composition) ──────────────────
+
+    #[test]
+    fn status_not_installed_when_registry_missing() {
+        let path = unique_registry("status-missing");
+        let status = installed_plugin_status_from(&path, &[("hooks/hooks.json", "ignored")]);
+        assert_eq!(status, ClaudePluginStatus::default());
+    }
+
+    #[test]
+    fn status_installed_and_in_sync_when_hooks_match() {
+        let root = write_cache_with_hooks("status-match", "{\"hooks\":{}}");
+        let registry = unique_registry("status-match-registry");
+        write_registry(
+            &registry,
+            &format!(
+                r#"{{"version":2,"plugins":{{"tmux-agent-sidebar@hiroppy":[{{"scope":"user","installPath":{:?}}}]}}}}"#,
+                root.to_string_lossy()
+            ),
+        );
+        let status =
+            installed_plugin_status_from(&registry, &[("hooks/hooks.json", "{\"hooks\":{}}")]);
+        assert_eq!(
+            status,
+            ClaudePluginStatus {
+                installed: true,
+                cache_outdated: false
+            }
+        );
+    }
+
+    #[test]
+    fn status_installed_and_outdated_when_hooks_differ() {
+        let root = write_cache_with_hooks("status-stale", "{\"hooks\":{\"Old\":[]}}");
+        let registry = unique_registry("status-stale-registry");
+        write_registry(
+            &registry,
+            &format!(
+                r#"{{"version":2,"plugins":{{"tmux-agent-sidebar@hiroppy":[{{"scope":"user","installPath":{:?}}}]}}}}"#,
+                root.to_string_lossy()
+            ),
+        );
+        let status = installed_plugin_status_from(
+            &registry,
+            &[("hooks/hooks.json", "{\"hooks\":{\"New\":[]}}")],
+        );
+        assert_eq!(
+            status,
+            ClaudePluginStatus {
+                installed: true,
+                cache_outdated: true
+            }
+        );
     }
 
     // ─── claude_settings_has_residual_hooks_at ───────────────────────

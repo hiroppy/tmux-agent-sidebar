@@ -1,8 +1,10 @@
 use std::time::Instant;
 
+use crate::cli::plugin_state::ClaudePluginStatus;
+
 /// Sub-state for the ⓘ notices popup, lifted out of [`AppState`] so its
 /// seven related fields (button column, missing-hook groups, plugin
-/// version, legacy hook flag, plugin notice, copy targets, copy feedback)
+/// status, legacy hook flag, plugin notice, copy targets, copy feedback)
 /// travel as a single unit.
 #[derive(Debug, Clone, Default)]
 pub struct NoticesState {
@@ -12,15 +14,15 @@ pub struct NoticesState {
     /// Missing hooks grouped per agent, shown in the "Missing hooks"
     /// section of the popup.
     pub missing_hook_groups: Vec<NoticesMissingHookGroup>,
-    /// Version of the `tmux-agent-sidebar` Claude Code plugin install
-    /// detected at sidebar startup, or `None` when the plugin is not
-    /// installed. Resolved once from
-    /// `~/.claude/plugins/installed_plugins.json` and cached for the
-    /// lifetime of the TUI process — restart the sidebar after a
-    /// `/plugin install` or `/plugin uninstall` to pick up the change.
-    /// `claude_plugin_notice` and the missing-hooks Claude filter are
-    /// derived from this field.
-    pub claude_plugin_installed_version: Option<String>,
+    /// Status of the `tmux-agent-sidebar` Claude Code plugin install
+    /// (whether it is installed, and whether any tracked file in its
+    /// cache differs from the copy embedded into this binary). Resolved
+    /// once from `~/.claude/plugins/installed_plugins.json` and cached
+    /// for the lifetime of the TUI process — restart the sidebar after
+    /// a `/plugin install`, `/plugin uninstall`, or `/plugin update` to
+    /// pick up the change. `claude_plugin_notice` and the missing-hooks
+    /// Claude filter are derived from this field.
+    pub claude_plugin_status: ClaudePluginStatus,
     /// Whether `~/.claude/settings.json` still contains residual
     /// `tmux-agent-sidebar/hook.sh` entries from the legacy manual
     /// setup. Resolved once at startup. When this is `true` AND the
@@ -29,7 +31,7 @@ pub struct NoticesState {
     pub claude_settings_has_residual_hooks: bool,
     /// Drives the `Plugin / claude` section in the notices popup. See
     /// [`ClaudePluginNotice`] for the full set of variants. Derived from
-    /// `claude_plugin_installed_version` in `refresh_notices`.
+    /// `claude_plugin_status` in `refresh_notices`.
     pub claude_plugin_notice: Option<ClaudePluginNotice>,
     /// Click regions for the `copy` label on each agent row in the popup.
     pub copy_targets: Vec<NoticesCopyTarget>,
@@ -48,8 +50,8 @@ pub struct NoticesMissingHookGroup {
 /// Notice surfaced in the popup's `Plugin / claude` section. The
 /// variants are mutually exclusive and ordered by urgency:
 /// `DuplicateHooks` > `InstallRecommended` > `Stale`. When the plugin
-/// is installed, current, and the user has no residual manual hook
-/// entries, no notice is set.
+/// is installed, its cached hooks match the embedded snapshot, and the
+/// user has no residual manual hook entries, no notice is set.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClaudePluginNotice {
     /// The Claude Code plugin is not installed. The popup offers a
@@ -62,10 +64,16 @@ pub enum ClaudePluginNotice {
     /// via the manual setting. Takes precedence over `Stale` because it
     /// is an actively-broken state, not just a pending update.
     DuplicateHooks,
-    /// The plugin is installed but its `plugin.json` version is older
-    /// than the running binary, so the user needs to restart Claude
-    /// Code to pick up the new bundled hooks.
-    Stale { installed: String, current: String },
+    /// The plugin is installed but at least one file tracked by
+    /// `EMBEDDED_PLUGIN_FILES` differs between its cache and the
+    /// snapshot embedded in the running binary. The user needs
+    /// `/plugin update` so Claude Code re-reads the affected files.
+    /// Comparing file content (rather than the manifest `version`
+    /// string) means the notice only fires when an update actually
+    /// changes fork behavior — the `hook.sh` wrapper already runs the
+    /// latest binary on every invocation, so a bare version bump with
+    /// no content changes is silent.
+    Stale,
 }
 
 /// Click target for the `copy` label next to an agent in the notices popup.

@@ -183,14 +183,14 @@ fn notices_popup_plugin_subitem(notice: Option<&ClaudePluginNotice>) -> Option<P
             body: "cleanup".to_string(),
             show_prompt_button: true,
         }),
-        (_, Some(ClaudePluginNotice::Stale { installed, current })) => Some(PluginSubItem {
-            body: format!("v{} -> v{}", installed, current),
+        (_, Some(ClaudePluginNotice::Stale)) => Some(PluginSubItem {
+            body: "run /plugin update".to_string(),
             show_prompt_button: false,
         }),
         // Debug forced-display fallback when no real notice is set: show
-        // the dummy "vX -> vX" version line so layout is exercised.
+        // the Stale hint so layout is exercised.
         (true, None) => Some(PluginSubItem {
-            body: format!("v{} -> v{}", crate::VERSION, crate::VERSION),
+            body: "run /plugin update".to_string(),
             show_prompt_button: false,
         }),
         (false, None) => None,
@@ -492,12 +492,9 @@ mod tests {
         state
     }
 
-    fn state_with_plugin_stale(installed: &str, current: &str) -> AppState {
+    fn state_with_plugin_stale() -> AppState {
         let mut state = crate::state::AppState::new(String::new());
-        state.notices.claude_plugin_notice = Some(ClaudePluginNotice::Stale {
-            installed: installed.into(),
-            current: current.into(),
-        });
+        state.notices.claude_plugin_notice = Some(ClaudePluginNotice::Stale);
         state
     }
 
@@ -816,24 +813,24 @@ mod tests {
 
     #[test]
     fn rendering_skips_copy_target_for_plugin_stale() {
-        // Stale-version sub-item is informational only — no [prompt]
+        // Stale sub-item is informational only — no [prompt]
         // button, so no copy target should be registered.
-        let mut state = state_with_plugin_stale("0.4.3", "0.5.0");
+        let mut state = state_with_plugin_stale();
         let _ = render_notices_popup_text(&mut state, 40, 10);
         assert!(state.notices.copy_targets.is_empty());
     }
 
     #[test]
     fn snapshot_notices_popup_plugin_stale_only() {
-        let mut state = state_with_plugin_stale("0.4.3", "0.5.0");
+        let mut state = state_with_plugin_stale();
         let text = render_notices_popup_text(&mut state, 40, 10);
         insta::assert_snapshot!(text, @r"
-        ┌─────────────────────────┐
-        │ Notices                 │
-        │   Plugin                │
-        │     claude              │
-        │       v0.4.3 -> v0.5.0  │
-        └─────────────────────────┘
+        ┌───────────────────────────┐
+        │ Notices                   │
+        │   Plugin                  │
+        │     claude                │
+        │       run /plugin update  │
+        └───────────────────────────┘
         ");
     }
 
@@ -841,22 +838,22 @@ mod tests {
     fn snapshot_notices_popup_plugin_stale_with_codex_missing_hooks() {
         // Plugin install path: the Claude row is suppressed (the plugin
         // owns it) and only Codex shows up in the missing-hooks section.
-        let mut state = state_with_plugin_stale("0.4.3", "0.5.0");
+        let mut state = state_with_plugin_stale();
         state.notices.missing_hook_groups = vec![crate::state::NoticesMissingHookGroup {
             agent: "codex".into(),
             hooks: vec!["Stop".into()],
         }];
         let text = render_notices_popup_text(&mut state, 40, 14);
         insta::assert_snapshot!(text, @r"
-        ┌─────────────────────────┐
-        │ Notices                 │
-        │   Plugin                │
-        │     claude              │
-        │       v0.4.3 -> v0.5.0  │
-        │   Missing hooks         │
-        │     codex         [copy]│
-        │     - Stop              │
-        └─────────────────────────┘
+        ┌───────────────────────────┐
+        │ Notices                   │
+        │   Plugin                  │
+        │     claude                │
+        │       run /plugin update  │
+        │   Missing hooks           │
+        │     codex           [copy]│
+        │     - Stop                │
+        └───────────────────────────┘
         ");
     }
 
