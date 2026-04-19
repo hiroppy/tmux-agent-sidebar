@@ -1,0 +1,64 @@
+---
+title: Desktop notifications
+description: Native OS notifications driven by agent hooks.
+---
+
+import { Image } from 'astro:assets';
+import notification from '../../../assets/captures/desktop-notification.png';
+
+<Image src={notification} alt="desktop notification screenshot" densities={[1.5, 2]} />
+
+Desktop notifications are enabled by default. Once the agent hooks are wired up during [Getting Started](/tmux-agent-sidebar/getting-started/installation/), no extra agent-side configuration is needed — the sidebar reads the same hook events it already consumes for status tracking and triggers OS notifications itself.
+
+## Supported events
+
+The **Default** column shows which events fire when `@sidebar_notifications_events` is unset. `task_completed` is the only event off by default — it can be noisy for agents that emit many sub-tasks.
+
+| Event               | Fired when                                                | Agent            | Default |
+| ------------------- | --------------------------------------------------------- | ---------------- | ------- |
+| `stop`              | Assistant finished responding (`Stop` hook)               | Claude, Codex    | ✓       |
+| `notification`      | Permission prompt or other attention request              | Claude only      | ✓       |
+| `stop_failure`      | Assistant ended with an error (`StopFailure` hook)        | Claude only      | ✓       |
+| `permission_denied` | Permission explicitly denied (`PermissionDenied` hook)    | Claude only      | ✓       |
+| `task_completed`    | Sub-agent / Task tool completion (`TaskCompleted` hook)   | Claude only      | —       |
+
+## Filtering events
+
+Restrict which events fire notifications with `@sidebar_notifications_events` (comma-separated event names). `all` fires every event. Unset fires every event **except** `task_completed`.
+
+```bash
+set -g @sidebar_notifications_events "stop,notification"                 # drop error notifications
+set -g @sidebar_notifications_events "stop,notification,task_completed"  # enable sub-agent notifications
+set -g @sidebar_notifications_events all                                 # explicit "fire everything"
+```
+
+An empty value disables every event without touching the master `@sidebar_notifications` switch.
+
+## Platform support
+
+- **macOS** uses `osascript`
+- **Linux** uses `notify-send`
+- **Windows** is not supported yet
+
+If the required notification command is missing, the feature quietly disables itself.
+
+## Notification layout
+
+```
+┌─────────────────────────────────────────────┐
+│  repo (branch) / agent          ← title     │
+│  <event body>                   ← body      │
+└─────────────────────────────────────────────┘
+```
+
+The title falls back to `repo / agent` when the branch is unknown, and to `agent` alone when there is no repo.
+
+### Body per event
+
+| Event               | Body                                                    | Fallback              |
+| ------------------- | ------------------------------------------------------- | --------------------- |
+| `stop`              | Assistant's last message, truncated to 240 chars with `…` | `Task completed`    |
+| `notification`      | Wait reason                                             | `Permission required` |
+| `task_completed`    | `Task completed: {task_subject}`                        | `Task completed`      |
+| `stop_failure`      | `Task failed: {error}`                                  | `Task failed`         |
+| `permission_denied` | (no payload)                                            | `Permission required` |

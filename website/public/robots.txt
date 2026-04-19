@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://hiroppy.github.io/tmux-agent-sidebar/sitemap-index.xml

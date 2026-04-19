@@ -1,0 +1,57 @@
+---
+title: tmux-agent-sidebar
+description: tmux-agent-sidebar — one tmux sidebar that tracks every Claude Code and Codex pane across every session and window. See status, prompts, Git state, activity, and worktrees without switching windows.
+template: splash
+hero:
+  tagline: Every Claude Code and Codex pane across every tmux session and window — status, prompts, Git, and activity in one sidebar.
+  image:
+    alt: tmux-agent-sidebar screenshot
+    file: ../../assets/captures/hero.png
+  actions:
+    - text: Get Started
+      link: /tmux-agent-sidebar/getting-started/installation/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/hiroppy/tmux-agent-sidebar
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## Features
+
+<CardGrid>
+  <Card title="One sidebar, every pane" icon="list-format">
+    Tracks Claude Code and Codex panes across every tmux session and window at
+    once, so context switching stops meaning window switching.
+  </Card>
+  <Card title="Live status, prompts, responses" icon="comment-alt">
+    Prompts, tool calls, response previews, wait reasons, task progress, and
+    subagent trees — all refreshing as the agents work.
+  </Card>
+  <Card title="Worktree-aware" icon="seti:folder">
+    Spawn a fresh worktree + agent from the sidebar, and tear it down —
+    window, worktree, and branch — in a single keystroke.
+  </Card>
+  <Card title="Desktop notifications" icon="signal">
+    Native notifications when an agent finishes, needs a permission, or
+    errors out. Configurable per event.
+  </Card>
+</CardGrid>
+
+## Quick start
+
+Using [TPM](https://github.com/tmux-plugins/tpm):
+
+```bash
+set -g @plugin 'hiroppy/tmux-agent-sidebar'
+```
+
+Reload with `tmux source ~/.tmux.conf`, press `prefix + I` to install, and the
+install wizard downloads a pre-built binary or builds from source.
+
+Next, wire up your agent hooks — [Claude Code](/tmux-agent-sidebar/getting-started/claude-code/)
+installs as a plugin, and [Codex](/tmux-agent-sidebar/getting-started/codex/) is
+a one-paste setup inside its own pane.

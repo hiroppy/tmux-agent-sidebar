@@ -1,0 +1,136 @@
+---
+// Starlight's default <Hero /> pins the image at width={400} height={400}
+// and doesn't request retina densities, so the splash page hero renders
+// blurry on 2x displays. This override mirrors the upstream component
+// but passes densities={[1.5, 2]} to the Image so the browser pulls a
+// sharp variant on Retina.
+//
+import { Image } from 'astro:assets';
+import { LinkButton } from '@astrojs/starlight/components';
+
+const PAGE_TITLE_ID = 'starlight__main-heading';
+
+const { data } = Astro.locals.starlightRoute.entry;
+const { title = data.title, tagline, image, actions = [] } = data.hero || {};
+
+let darkImage: ImageMetadata | undefined;
+let lightImage: ImageMetadata | undefined;
+let rawHtml: string | undefined;
+if (image) {
+  if ('file' in image) {
+    darkImage = image.file;
+  } else if ('dark' in image) {
+    darkImage = image.dark;
+    lightImage = image.light;
+  } else {
+    rawHtml = image.html;
+  }
+}
+
+// Stack layout (copy on top, image full-width beneath). BASE_W sets
+// the srcset 1x width and the HTML width attribute so the browser's
+// implicit aspect-ratio box matches the source — wide screenshots
+// keep their real aspect instead of being letterboxed to a square.
+const BASE_W = 1100;
+const aspectHeight = (src: ImageMetadata | undefined) =>
+  src ? Math.round((BASE_W * src.height) / src.width) : BASE_W;
+
+const imageAttrs = (src: ImageMetadata | undefined) => ({
+  loading: 'eager' as const,
+  decoding: 'async' as const,
+  width: BASE_W,
+  height: aspectHeight(src),
+  densities: [1.5, 2],
+  alt: image?.alt || '',
+});
+---
+
+<div class="hero">
+  <div class="sl-flex stack">
+    <div class="sl-flex copy">
+      <h1 id={PAGE_TITLE_ID} data-page-title set:html={title} />
+      {tagline && <div class="tagline" set:html={tagline} />}
+    </div>
+    {
+      actions.length > 0 && (
+        <div class="sl-flex actions">
+          {actions.map(
+            ({ attrs: { class: className, ...attrs } = {}, icon, link: href, text, variant }) => (
+              <LinkButton {href} {variant} icon={icon?.name} class:list={[className]} {...attrs}>
+                {text}
+                {icon?.html && <Fragment set:html={icon.html} />}
+              </LinkButton>
+            )
+          )}
+        </div>
+      )
+    }
+  </div>
+  {
+    darkImage && (
+      <Image
+        src={darkImage}
+        {...imageAttrs(darkImage)}
+        class:list={{ 'light:sl-hidden': Boolean(lightImage) }}
+      />
+    )
+  }
+  {lightImage && <Image src={lightImage} {...imageAttrs(lightImage)} class="dark:sl-hidden" />}
+  {rawHtml && <div class="hero-html sl-flex" set:html={rawHtml} />}
+</div>
+
+<style>
+  @layer starlight.core {
+    .hero {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: clamp(1.5rem, 4vw, 2.5rem);
+      padding-block: clamp(2rem, calc(1rem + 6vmin), 4.5rem);
+    }
+
+    .hero > img,
+    .hero > .hero-html {
+      object-fit: contain;
+      width: 100%;
+      max-width: min(100%, 1100px);
+      height: auto;
+      margin-inline: auto;
+    }
+
+    .stack {
+      flex-direction: column;
+      gap: clamp(1.25rem, calc(1rem + 1vw), 1.75rem);
+      text-align: center;
+      align-items: center;
+    }
+
+    .copy {
+      flex-direction: column;
+      gap: 1rem;
+      align-items: center;
+    }
+
+    .copy > * {
+      max-width: 60ch;
+    }
+
+    h1 {
+      font-size: clamp(var(--sl-text-3xl), calc(0.25rem + 4vw), var(--sl-text-5xl));
+      line-height: var(--sl-line-height-headings);
+      font-weight: 600;
+      color: var(--sl-color-white);
+    }
+
+    .tagline {
+      font-size: clamp(var(--sl-text-base), calc(0.0625rem + 1.2vw), var(--sl-text-lg));
+      color: var(--sl-color-gray-2);
+    }
+
+    .actions {
+      gap: 1rem 2rem;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+  }
+</style>

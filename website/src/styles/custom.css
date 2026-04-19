@@ -1,0 +1,93 @@
+/*
+ * Theme tuned to the tmux-agent-sidebar UI accent color.
+ * accent = xterm 256 #153 = #AFD7FF (the focus marker ┃ in src/ui/colors.rs).
+ */
+
+:root {
+  /* Accent high matches the UI focus color exactly. */
+  --sl-color-accent-low: #0f2438;
+  --sl-color-accent: #3e9dff;
+  --sl-color-accent-high: #afd7ff;
+
+  /* Slight cool tint on the dark background so the blue pops. */
+  --sl-color-bg: #0b1220;
+  --sl-color-bg-nav: #0a111e;
+  --sl-color-bg-sidebar: #0a111e;
+  --sl-color-bg-inline-code: #13233c;
+
+  /* Code block background picks up the accent hue faintly. */
+  --sl-color-bg-code: #0e1b2e;
+
+  /* Soft horizontal rules and borders. */
+  --sl-color-hairline-light: #1d2b44;
+  --sl-color-hairline: #16253d;
+  --sl-color-hairline-shade: #12203a;
+}
+
+/* Hero gradient in the splash landing page. */
+.hero {
+  position: relative;
+  isolation: isolate;
+}
+
+.hero::before {
+  content: '';
+  position: absolute;
+  inset: -10% -10% auto auto;
+  height: 110%;
+  width: 80%;
+  background: radial-gradient(
+    closest-side,
+    rgba(175, 215, 255, 0.28),
+    rgba(175, 215, 255, 0) 70%
+  );
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* Primary CTA in the hero — keep the UI accent consistent. */
+.hero .sl-link-button.primary {
+  background: linear-gradient(
+    135deg,
+    var(--sl-color-accent) 0%,
+    var(--sl-color-accent-high) 100%
+  );
+  color: #0b1220;
+  border: none;
+}
+
+/* Rounded corners on every captured/illustration image — matches the
+   mac-window radius baked into the PNGs and softens the gradient
+   padding. Applies to the hero splash image and any <Image> inside
+   markdown content (features, getting-started). */
+.hero > img,
+.sl-markdown-content img {
+  border-radius: 12px;
+}
+
+/* Cards on the landing page feel like sidebar panels — thin border, focus-marker hint. */
+.card {
+  border: 1px solid var(--sl-color-hairline-light);
+  transition: border-color 150ms ease, transform 150ms ease;
+}
+
+.card:hover {
+  border-color: var(--sl-color-accent-high);
+  transform: translateY(-2px);
+}
+
+/* Left marker on active sidebar link — mirrors the ┃ focus marker in the UI. */
+.sidebar-content a[aria-current='page'] {
+  position: relative;
+}
+
+.sidebar-content a[aria-current='page']::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.35rem;
+  bottom: 0.35rem;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--sl-color-accent-high);
+}

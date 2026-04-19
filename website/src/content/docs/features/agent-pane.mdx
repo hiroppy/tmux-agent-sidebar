@@ -1,0 +1,101 @@
+---
+title: Agent pane
+description: Every element rendered in the sidebar's agent pane rows.
+---
+
+import { Image } from 'astro:assets';
+import agentPane from '../../../assets/captures/agent-pane-focus.png';
+
+<Image src={agentPane} alt="agent pane screenshot" densities={[1.5, 2]} />
+
+The sidebar renders one row per agent pane across all tmux sessions and windows. Each row is packed with live metadata pulled from the agent's hooks and from tmux itself.
+
+## Filter bar
+
+The top row of the sidebar filters the agent list by status. Each entry is an icon + live count; selecting one hides rows whose status doesn't match.
+
+### Status filter
+
+- `≡N` — all panes
+- `●N` — running
+- `◐N` — waiting
+- `○N` — idle
+- `✕N` — error
+
+Cycle with `h` / `l` (or `←` / `→`), or click an entry. `Tab` advances through the filter one step at a time.
+
+### Repo filter
+
+Below the status row, a repo selector (`▾`) narrows the list to a single repository. Open it with `r` or by clicking the arrow; `—` means no repo filter is active.
+
+## Row elements
+
+### Status icon
+
+- `●` running
+- `◐` waiting
+- `○` idle
+- `✕` error
+
+### Permission badge
+
+- `plan` — plan mode
+- `edit` — auto-edit
+- `auto` — auto-accept
+- `dontAsk` — skip every permission prompt for the session
+- `defer` — wait for an explicit decision before applying
+- `!` — bypass permissions (dangerous)
+
+### Session name
+
+Defaults to the agent name. Can be changed through Claude Code's `/rename`.
+
+### `+` marker
+
+Indicates the pane sits in a git worktree (any worktree, not only sidebar-created ones). Sidebar-spawned worktrees additionally show a `×` button for one-keystroke teardown. See [Worktree](/tmux-agent-sidebar/features/worktree/) for details.
+
+### Branch
+
+Current Git branch for the pane's cwd. Claude updates dynamically through the `CwdChanged` hook.
+
+### Elapsed time
+
+Time since the last user prompt.
+
+### Task progress
+
+Synchronized from the agent's task list. Each task gets a glyph for its state; the trailing count is `completed/total`.
+
+- `✔` — completed
+- `◼` — in progress
+- `◻` — pending
+
+```text
+  ✔✔◼◻ 2/4
+```
+
+### Subagent tree
+
+Parent-child branches for spawned sub-agents. Middle entries use `├`, the last uses `└`. Each row shows the subagent kind followed by `#<id>`.
+
+```text
+├ Explore #a1b2
+├ Plan    #d4e5
+└ Bash    #dead
+```
+
+### Listening ports
+
+Localhost ports the pane's process is listening on.
+
+### Response arrow (`▷`)
+
+Preview of the latest agent response.
+
+### Prompt text
+
+Latest user prompt.
+
+### Wait reason
+
+Why the agent is waiting — populated from Claude's `Notification`, `PermissionDenied`, and `TeammateIdle` hooks.

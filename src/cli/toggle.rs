@@ -238,8 +238,7 @@ pub(crate) fn cmd_auto_close(args: &[String]) -> i32 {
         None => return 0,
     };
 
-    let list_panes_output =
-        tmux::run_tmux(&["list-panes", "-t", window_id, "-F", "#{@pane_role}"]);
+    let list_panes_output = tmux::run_tmux(&["list-panes", "-t", window_id, "-F", "#{@pane_role}"]);
 
     let session_windows = tmux::run_tmux(&[
         "display-message",

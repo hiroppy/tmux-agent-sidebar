@@ -1,0 +1,39 @@
+---
+title: Git status
+description: Branch, diff, PR number, and ahead/behind state for the focused pane.
+---
+
+import { Image } from 'astro:assets';
+import gitFocus from '../../../assets/captures/git-focus.png';
+
+<Image src={gitFocus} alt="Git tab screenshot" densities={[1.5, 2]} />
+
+The bottom panel's **Git** tab surfaces the git state of the pane's cwd.
+
+## Header
+
+The top rows summarise the pane's branch state.
+
+- **Branch** — current branch name
+- **Ahead / behind** — `↑N` / `↓N` counts vs. the configured upstream
+- **PR number** — `#123` when [GitHub CLI](https://cli.github.com/) (`gh`) resolves a pull request for the branch; the overlay is a clickable hyperlink in terminals that support OSC 8
+- **Diff shortstat** — combined added / deleted line counts and changed file total
+
+## File sections
+
+Changed paths are grouped into three sections, each prefixed with a single-character status and followed by a right-aligned `+added/-deleted` numstat (omitted for untracked entries).
+
+- **Staged** — content already added to the index
+- **Unstaged** — tracked files with working-tree changes
+- **Untracked** — files the index has never seen
+
+Status letters:
+
+- `A` — added
+- `M` — modified
+- `D` — deleted
+- `?` — untracked
+
+Each section lists up to 10 entries and collapses the rest into a `+N more` row.
+
+Git data is refreshed from a background polling thread, so interaction with the sidebar stays snappy even in repositories with slow git operations.

@@ -1,0 +1,51 @@
+---
+title: Worktrees
+description: Spawn and remove git worktrees — with their agent — from inside the sidebar.
+---
+
+import { Image } from 'astro:assets';
+import spawn from '../../../assets/captures/worktree-spawn.png';
+
+<Image src={spawn} alt="worktree spawn popup" densities={[1.5, 2]} />
+
+The sidebar can create a git worktree, open a new tmux window, and launch an agent in it — all from one keystroke. Closing is symmetric: window, worktree, and branch go together.
+
+## Spawn modal
+
+Opened with `n` or by clicking the `+` button next to a repo header.
+
+| Key                                | Action                                                                                           |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Text keys                          | Type the name (used as the branch slug and tmux window name, e.g. `add login form` → `agent/add-login-form`) |
+| `↑` / `↓` / `Tab` / `Shift+Tab`    | Move focus between `NAME` / `AGENT` / `MODE` fields                                              |
+| `←` / `→`                          | Cycle the value when the agent or mode field has focus                                           |
+| `Enter`                            | Create the worktree + window and launch the agent                                                |
+| `Esc` / click outside              | Cancel                                                                                           |
+
+### What gets created
+
+The modal's `NAME` field is slugified (lowercase, non-alphanumeric → `-`) and reused as:
+
+- **Branch** — `<prefix><slug>`, where `<prefix>` defaults to `agent/` (e.g. `add login form` → `agent/add-login-form`). Colliding slugs get an incrementing suffix (`-2`, `-3`, …).
+- **Worktree path** — `<parent>/<repo-name>-worktrees/<slug>`, a sibling directory of the repo.
+- **tmux window** — the slug is used as the window name; the agent you picked in the modal (`claude` / `codex`) launches inside it with the selected permission `MODE`.
+
+Defaults for the agent and branch prefix live in tmux options — see [tmux options](/tmux-agent-sidebar/reference/tmux-options/) for the full list.
+
+## Close pane modal
+
+Opened with `x` on a spawn-created pane, or by clicking the `×` button next to the branch name.
+
+| Key             | Action                                                                                                                                 |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `y` / `Enter`   | Close the tmux window, remove the git worktree (`--force`), **and** delete the branch the spawn created (`git branch -D`)             |
+| `c`             | Close the tmux window only, keep the worktree and branch on disk                                                                       |
+| `n` / `Esc`     | Cancel                                                                                                                                 |
+
+### Why `-D` and not `-d`?
+
+Spawn-created branches are auto-generated under the `agent/` prefix for short-lived explorations, and the close modal opts into `git branch -D` so it works even when the branch has not been merged upstream. Recover via `git reflog` if you delete one by mistake.
+
+## Availability
+
+Worktree lifecycle tracking is Claude-only today — it needs the `WorktreeCreate` / `WorktreeRemove` hooks, which Codex does not emit.
