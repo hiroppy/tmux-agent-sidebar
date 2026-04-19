@@ -43,11 +43,17 @@ fn run_loop(opts: &Opts) -> Result<(), String> {
     }
     // Clamp to at least one frame — the default `duration_ms=1, fps=1`
     // would otherwise truncate to zero and write only the manifest.
-    let frame_count = ((opts.duration_ms as u64 * opts.fps as u64) / 1000).max(1);
+    // Cap at u32::MAX before the loop so the iteration count and the
+    // number written to `manifest.json` can't disagree (the loop index
+    // is u32; an uncapped u64 cast would silently truncate).
+    let raw_frame_count = ((opts.duration_ms as u64 * opts.fps as u64) / 1000).max(1);
+    let frame_count: u32 = raw_frame_count
+        .try_into()
+        .map_err(|_| format!("too many frames requested: {raw_frame_count}"))?;
     let interval = std::time::Duration::from_nanos(1_000_000_000u64 / opts.fps as u64);
     let start = std::time::Instant::now();
 
-    for frame in 0..frame_count as u32 {
+    for frame in 0..frame_count {
         let html = capture_window_html(opts)?;
         let path = std::path::PathBuf::from(dir).join(format!("frame{frame:04}.html"));
         fs::write(&path, html).map_err(|e| format!("write {}: {e}", path.display()))?;
@@ -85,7 +91,7 @@ fn run_single(opts: &Opts) -> Result<(), String> {
 
 fn capture_window_html(opts: &Opts) -> Result<String, String> {
     let panes = list_panes(&opts.session, opts.window.as_deref())?;
-    let (cols, rows) = window_bounds(&panes);
+    let (cols, rows) = window_bounds(&panes)?;
     let mut contents = Vec::with_capacity(panes.len());
     for geom in panes {
         let bytes = capture_pane(&geom.pane_id)?;
@@ -113,10 +119,25 @@ fn capture_window_html(opts: &Opts) -> Result<String, String> {
     Ok(render_html::render_html(&grid))
 }
 
-fn window_bounds(panes: &[tmux_probe::PaneGeom]) -> (u16, u16) {
-    let cols = panes.iter().map(|p| p.left + p.width).max().unwrap_or(0);
-    let rows = panes.iter().map(|p| p.top + p.height).max().unwrap_or(0);
-    (cols, rows)
+fn window_bounds(panes: &[tmux_probe::PaneGeom]) -> Result<(u16, u16), String> {
+    // Use checked_add so a malformed `tmux list-panes` row where
+    // left+width (or top+height) wraps past u16::MAX fails loudly
+    // instead of silently wrapping to a tiny canvas.
+    let mut cols: u16 = 0;
+    let mut rows: u16 = 0;
+    for p in panes {
+        let right = p
+            .left
+            .checked_add(p.width)
+            .ok_or_else(|| format!("pane {} geometry overflows u16 width", p.pane_id))?;
+        let bottom = p
+            .top
+            .checked_add(p.height)
+            .ok_or_else(|| format!("pane {} geometry overflows u16 height", p.pane_id))?;
+        cols = cols.max(right);
+        rows = rows.max(bottom);
+    }
+    Ok((cols, rows))
 }
 
 #[derive(Debug)]
