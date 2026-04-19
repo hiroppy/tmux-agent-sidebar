@@ -18,4 +18,4 @@ npm run build     # generates dist/
 npm run preview   # serves built site locally
 ```
 
-Published to GitHub Pages automatically on `main` push via `.github/workflows/deploy-website.yml`.
+Deployed to GitHub Pages by `.github/workflows/deploy-website.yml` on every push to `main` that touches `website/**` or the workflow file itself.

@@ -86,10 +86,12 @@ impl Perform for State<'_> {
         }
         let mut iter = params.iter();
         while let Some(p) = iter.next() {
-            if p.is_empty() {
-                continue;
-            }
-            match p[0] {
+            // Bare `CSI m` (empty param) is equivalent to `CSI 0 m` per
+            // ECMA-48 — treat a missing code as 0 (reset) instead of
+            // skipping, otherwise the previous cell's fg/bg/bold/etc.
+            // leaks into the next one.
+            let code = p.first().copied().unwrap_or(0);
+            match code {
                 0 => {
                     self.style = StyledCell {
                         ch: self.style.ch,
@@ -105,22 +107,18 @@ impl Perform for State<'_> {
                 39 => self.style.fg = None,
                 49 => self.style.bg = None,
                 38 => {
-                    // Colon-delimited: p == &[38, 5, N]
                     if p.len() >= 3 && p[1] == 5 {
                         self.style.fg = Some(p[2] as u8);
                     } else if let (Some(mode), Some(color)) = (iter.next(), iter.next()) {
-                        // Semicolon-delimited: separate params [38], [5], [N]
                         if !mode.is_empty() && mode[0] == 5 && !color.is_empty() {
                             self.style.fg = Some(color[0] as u8);
                         }
                     }
                 }
                 48 => {
-                    // Colon-delimited: p == &[48, 5, N]
                     if p.len() >= 3 && p[1] == 5 {
                         self.style.bg = Some(p[2] as u8);
                     } else if let (Some(mode), Some(color)) = (iter.next(), iter.next()) {
-                        // Semicolon-delimited: separate params [48], [5], [N]
                         if !mode.is_empty() && mode[0] == 5 && !color.is_empty() {
                             self.style.bg = Some(color[0] as u8);
                         }

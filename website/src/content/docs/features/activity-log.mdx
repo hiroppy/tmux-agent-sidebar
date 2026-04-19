@@ -44,7 +44,7 @@ Tool names map to a stable color so `Read` / `Edit` / `Bash` etc. stay distingui
 | Agent       | Covered tools                                         |
 | ----------- | ----------------------------------------------------- |
 | Claude Code | Every tool the hook payload exposes                   |
-| Codex       | `Bash` only — Codex's `PostToolUse` fires only for Bash (its `tool_input` is typed `{ command: string }`), so `Read` / `Edit` / `Write` / `Grep` / `Glob` and other tool calls are **not** reported |
+| Codex       | `Bash` only — Codex's `PostToolUse` fires for Bash alone (its `tool_input` is typed `{ command: string }`), so `Read` / `Edit` / `Write` / `Grep` / `Glob` and other tool calls are **not** reported |
 
 ## Switching tabs
 

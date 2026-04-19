@@ -26,7 +26,11 @@ impl PaneGeom {
             top: parse_u16(parts[2])?,
             width: parse_u16(parts[3])?,
             height: parse_u16(parts[4])?,
-            active: parts[5] == "1",
+            active: match parts[5] {
+                "1" => true,
+                "0" => false,
+                other => return Err(format!("invalid active flag: {other}")),
+            },
         })
     }
 }

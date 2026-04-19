@@ -7,7 +7,7 @@
 # throwaway repo:
 #   - feat/login-redirect is 2 commits ahead of origin
 #   - origin/feat/login-redirect is 1 commit ahead of the merge base
-#   - one staged, two unstaged, two untracked files
+#   - three staged (A/M/D), three unstaged (M/M/D), three untracked
 #   - a stubbed `gh` on PATH that returns PR #42
 #
 # The repo lives under $TMUX_DIR and is wiped by cleanup.

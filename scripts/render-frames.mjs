@@ -23,6 +23,12 @@ const scaleIdx = argv.indexOf("--scale");
 // headroom on 2x displays. Astro's Image component won't upscale
 // beyond source, so the source has to carry those pixels itself.
 const scale = scaleIdx >= 0 ? Number(argv[scaleIdx + 1]) : 4;
+if (!Number.isFinite(scale) || scale <= 0) {
+  console.error(
+    `render-frames: --scale must be a positive number (got "${argv[scaleIdx + 1] ?? ""}")`,
+  );
+  process.exit(1);
+}
 
 const s = await stat(dir).catch(() => null);
 if (!s || !s.isDirectory()) {

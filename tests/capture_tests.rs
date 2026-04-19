@@ -103,11 +103,15 @@ fn canvas_assembles_two_panes_side_by_side_with_border() {
     let geom = WindowGeom { cols: 9, rows: 2 };
     let canvas = assemble(&geom, &panes);
 
-    let row_to_string = |row: &[StyledCell]| -> String { row.iter().map(|c| c.ch).collect() };
-
-    // Row 0: "LLLL│RRRR"
-    assert_eq!(row_to_string(&canvas[0]), "LLLL│RRRR");
-    assert_eq!(row_to_string(&canvas[1]), "LLLL│RRRR");
+    let rendered: String = canvas
+        .iter()
+        .map(|row| row.iter().map(|c| c.ch).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n");
+    insta::assert_snapshot!(rendered, @r"
+    LLLL│RRRR
+    LLLL│RRRR
+    ");
 }
 
 #[test]
@@ -151,13 +155,18 @@ fn canvas_assembles_2x2_grid_resolves_center_cross() {
     let geom = WindowGeom { cols: 5, rows: 5 };
     let canvas = assemble(&geom, &panes);
 
-    let row_to_string = |row: &[StyledCell]| -> String { row.iter().map(|c| c.ch).collect() };
-
-    assert_eq!(row_to_string(&canvas[0]), "AA│BB");
-    assert_eq!(row_to_string(&canvas[1]), "AA│BB");
-    assert_eq!(row_to_string(&canvas[2]), "──┼──");
-    assert_eq!(row_to_string(&canvas[3]), "CC│DD");
-    assert_eq!(row_to_string(&canvas[4]), "CC│DD");
+    let rendered: String = canvas
+        .iter()
+        .map(|row| row.iter().map(|c| c.ch).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n");
+    insta::assert_snapshot!(rendered, @r"
+    AA│BB
+    AA│BB
+    ──┼──
+    CC│DD
+    CC│DD
+    ");
 }
 
 #[test]

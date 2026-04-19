@@ -41,7 +41,9 @@ fn run_loop(opts: &Opts) -> Result<(), String> {
     if opts.fps == 0 {
         return Err("--fps must be > 0".into());
     }
-    let frame_count = (opts.duration_ms as u64 * opts.fps as u64) / 1000;
+    // Clamp to at least one frame — the default `duration_ms=1, fps=1`
+    // would otherwise truncate to zero and write only the manifest.
+    let frame_count = ((opts.duration_ms as u64 * opts.fps as u64) / 1000).max(1);
     let interval = std::time::Duration::from_nanos(1_000_000_000u64 / opts.fps as u64);
     let start = std::time::Instant::now();
 
@@ -198,6 +200,9 @@ fn parse_args(args: &[String]) -> Result<Opts, String> {
             }
             other => return Err(format!("unknown flag: {other}")),
         }
+    }
+    if frame_out.is_some() && frames_out.is_some() {
+        return Err("--frame-out and --frames-out are mutually exclusive".into());
     }
     Ok(Opts {
         session: session.ok_or("--session required")?,

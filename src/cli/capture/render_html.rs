@@ -102,17 +102,22 @@ pub fn render_html(cells: &[Vec<StyledCell>]) -> String {
         for cell in row {
             out.push_str("<span");
             let mut styles: Vec<String> = Vec::new();
-            if let Some(n) = cell.fg {
+            // ANSI reverse (SGR 7) swaps fg and bg rather than inverting
+            // every colour channel — `filter:invert(1)` would give the
+            // wrong hue on coloured backgrounds.
+            let (fg, bg) = if cell.reversed {
+                (cell.bg, cell.fg)
+            } else {
+                (cell.fg, cell.bg)
+            };
+            if let Some(n) = fg {
                 styles.push(format!("color:#{:06x}", ansi_256_to_rgb(n)));
             }
-            if let Some(n) = cell.bg {
+            if let Some(n) = bg {
                 styles.push(format!("background:#{:06x}", ansi_256_to_rgb(n)));
             }
             if cell.bold {
                 styles.push("font-weight:700".into());
-            }
-            if cell.reversed {
-                styles.push("filter:invert(1)".into());
             }
             if cell.underlined {
                 styles.push("text-decoration:underline".into());
