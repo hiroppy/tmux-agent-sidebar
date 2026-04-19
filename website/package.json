@@ -11,12 +11,12 @@
     "astro": "astro"
   },
   "dependencies": {
-    "@astrojs/sitemap": "^3.7.2",
+    "@astrojs/sitemap": "3.7.2",
     "@astrojs/starlight": "0.38.3",
-    "astro": "^6.1.6",
+    "astro": "6.1.6",
     "sharp": "0.34.5"
   },
   "devDependencies": {
-    "playwright": "^1.59.1"
+    "playwright": "1.59.1"
   }
 }
