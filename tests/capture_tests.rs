@@ -197,14 +197,28 @@ fn capture_frames_sequence_integration() {
     use std::process::Command;
     use tmux_agent_sidebar::cli;
 
+    // Run every `tmux` invocation on an isolated server so the test can't
+    // touch the user's live tmux (it would otherwise steal focus and
+    // create a `cap-seq` session on their daily driver).
+    let tmux_root = tempfile::tempdir().unwrap();
+    // SAFETY: this #[ignore]-d integration test runs single-threaded per
+    // `cargo test -- --ignored --test-threads=1` (see the comment on
+    // `cleanup` below); all `Command::new("tmux")` calls below inherit
+    // this env so they land on the throwaway server.
+    unsafe {
+        std::env::set_var("TMUX_TMPDIR", tmux_root.path());
+        std::env::remove_var("TMUX");
+        std::env::remove_var("TMUX_PANE");
+    }
+
     Command::new("tmux")
         .args(["new-session", "-d", "-s", "cap-seq", "-x", "40", "-y", "10"])
         .status()
         .expect("tmux new-session");
     let _cleanup = scopeguard::guard((), |_| {
-        let _ = Command::new("tmux")
-            .args(["kill-session", "-t", "cap-seq"])
-            .status();
+        // `kill-server` (not just kill-session) so the isolated server
+        // exits cleanly when the temp dir drops.
+        let _ = Command::new("tmux").args(["kill-server"]).status();
     });
 
     Command::new("tmux")
@@ -246,14 +260,21 @@ fn capture_single_frame_integration() {
     use std::process::Command;
     use tmux_agent_sidebar::cli;
 
+    // Same isolation as capture_frames_sequence_integration — don't
+    // touch the user's live tmux server.
+    let tmux_root = tempfile::tempdir().unwrap();
+    unsafe {
+        std::env::set_var("TMUX_TMPDIR", tmux_root.path());
+        std::env::remove_var("TMUX");
+        std::env::remove_var("TMUX_PANE");
+    }
+
     Command::new("tmux")
         .args(["new-session", "-d", "-s", "cap-it", "-x", "40", "-y", "10"])
         .status()
         .expect("tmux new-session");
     let _cleanup = scopeguard::guard((), |_| {
-        let _ = Command::new("tmux")
-            .args(["kill-session", "-t", "cap-it"])
-            .status();
+        let _ = Command::new("tmux").args(["kill-server"]).status();
     });
 
     Command::new("tmux")
