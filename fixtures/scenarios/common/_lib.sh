@@ -185,11 +185,18 @@ build_layout() {
     run_fake_agent "$PANE_ERROR" claude 3456
 
     # Default focus = MAIN_PANE. Scenarios override via FOCUS.
-    local focus_var="${FOCUS:-MAIN_PANE}"
-    local focus_pane="${!focus_var}"
-    if [[ -z "$focus_pane" ]]; then
-        focus_pane="$MAIN_PANE"
-    fi
+    # `${!var}` indirection under `set -u` fails hard if FOCUS points at
+    # an unset variable, so collect the known pane names through a case
+    # rather than trusting the caller's FOCUS string unconditionally.
+    local focus_pane="$MAIN_PANE"
+    case "${FOCUS:-MAIN_PANE}" in
+        SIDEBAR_PANE)    focus_pane="$SIDEBAR_PANE" ;;
+        MAIN_PANE)       focus_pane="$MAIN_PANE" ;;
+        PANE_WAITING)    focus_pane="$PANE_WAITING" ;;
+        PANE_RUNNING_2) focus_pane="$PANE_RUNNING_2" ;;
+        PANE_ERROR)      focus_pane="$PANE_ERROR" ;;
+        *) echo "build_layout: unknown FOCUS=${FOCUS}" >&2; return 1 ;;
+    esac
 
     # has_focus requires BOTH window_active=1 AND pane_active=1. If the
     # focused pane lives in the extras window, activate that window

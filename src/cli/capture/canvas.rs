@@ -52,11 +52,14 @@ fn draw_vertical_dividers(canvas: &mut [Vec<StyledCell>], win: &WindowGeom, pane
             continue; // no divider to the left of a pane at x=0
         }
         let div_col = (pane.geom.left - 1) as usize;
-        let top = pane.geom.top as usize;
+        if div_col >= win.cols as usize {
+            continue;
+        }
+        let top = (pane.geom.top as usize).min(win.rows as usize);
         let bottom =
             ((pane.geom.top as usize) + (pane.geom.height as usize)).min(win.rows as usize);
         for row in canvas[top..bottom].iter_mut() {
-            if is_blank(&row[div_col]) {
+            if div_col < row.len() && is_blank(&row[div_col]) {
                 row[div_col] = divider_cell('│');
             }
         }
@@ -73,9 +76,15 @@ fn draw_horizontal_dividers(
             continue;
         }
         let div_row = (pane.geom.top - 1) as usize;
-        let left = pane.geom.left as usize;
+        if div_row >= canvas.len() {
+            continue;
+        }
+        let left = (pane.geom.left as usize).min(win.cols as usize);
         let right = ((pane.geom.left as usize) + (pane.geom.width as usize)).min(win.cols as usize);
-        for cell in canvas[div_row][left..right].iter_mut() {
+        let row = &mut canvas[div_row];
+        let left = left.min(row.len());
+        let right = right.min(row.len());
+        for cell in row[left..right].iter_mut() {
             if is_blank(cell) {
                 *cell = divider_cell('─');
             }

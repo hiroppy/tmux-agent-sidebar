@@ -16,7 +16,7 @@ Inside Claude Code:
 /plugin install tmux-agent-sidebar@hiroppy
 ```
 
-Either install path wires up the Claude Code hooks.
+The `/plugin install` step wires up the Claude Code hooks.
 
 ### Reload the plugin
 
