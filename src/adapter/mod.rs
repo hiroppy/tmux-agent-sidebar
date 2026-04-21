@@ -1,5 +1,6 @@
 pub mod claude;
 pub mod codex;
+pub mod opencode;
 
 use crate::event::AgentEventKind;
 
@@ -10,6 +11,10 @@ pub(crate) fn json_str<'a>(val: &'a serde_json::Value, key: &str) -> &'a str {
 pub(crate) fn optional_str(val: &serde_json::Value, key: &str) -> Option<String> {
     let s = json_str(val, key);
     if s.is_empty() { None } else { Some(s.into()) }
+}
+
+pub(crate) fn json_value_or_null(val: &serde_json::Value, key: &str) -> serde_json::Value {
+    val.get(key).cloned().unwrap_or(serde_json::Value::Null)
 }
 
 /// Binding between an upstream agent-side hook trigger (as it appears in the

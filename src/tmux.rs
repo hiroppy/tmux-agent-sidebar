@@ -3,6 +3,7 @@ use std::process::Command;
 
 pub const CLAUDE_AGENT: &str = "claude";
 pub const CODEX_AGENT: &str = "codex";
+pub const OPENCODE_AGENT: &str = "opencode";
 
 // Field indices in `tmux list-panes -F` output. Keep in lock-step with
 // the `PANE_FORMAT` format string. When adding a new field, update both
@@ -133,6 +134,7 @@ impl PermissionMode {
 pub enum AgentType {
     Claude,
     Codex,
+    OpenCode,
     #[allow(dead_code)]
     Unknown,
 }
@@ -159,6 +161,7 @@ impl AgentType {
         match s {
             CLAUDE_AGENT => Some(Self::Claude),
             CODEX_AGENT => Some(Self::Codex),
+            OPENCODE_AGENT => Some(Self::OpenCode),
             _ => None,
         }
     }
@@ -167,6 +170,7 @@ impl AgentType {
         match self {
             Self::Claude => CLAUDE_AGENT,
             Self::Codex => CODEX_AGENT,
+            Self::OpenCode => OPENCODE_AGENT,
             Self::Unknown => "unknown",
         }
     }
@@ -380,10 +384,18 @@ pub(crate) fn parse_pane_fields(parts: &[String]) -> Option<PaneInfo> {
     let agent = AgentType::from_label(&parts[pane_line_field::AGENT])?;
     let current_command = parts[pane_line_field::PANE_CURRENT_COMMAND].as_str();
 
-    // Codex panes can leave stale tmux metadata behind after the agent exits
-    // and the pane falls back to the user's shell. In that case, ignore the
-    // pane so the sidebar stops displaying a non-existent Codex session.
-    if agent == AgentType::Codex && is_shell_command(current_command) {
+    // Codex / OpenCode panes can leave stale tmux metadata behind after the
+    // agent exits and the pane falls back to the user's shell. Neither
+    // agent exposes a reliable "process exit" hook (Codex has no such
+    // hook, OpenCode runs under Bun where `process.on("exit")` does not
+    // fire our handlers), so the Rust polling side must own teardown:
+    // wipe pane options + activity log the first poll after the agent
+    // is gone. Subsequent polls short-circuit at the `AgentType::from_label`
+    // check above once `@pane_agent` has been cleared. Claude is excluded
+    // because its SessionEnd hook drives cleanup instead.
+    if matches!(agent, AgentType::Codex | AgentType::OpenCode) && is_shell_command(current_command)
+    {
+        clear_agent_pane_state(&parts[pane_line_field::PANE_ID]);
         return None;
     }
 
@@ -397,8 +409,8 @@ pub(crate) fn parse_pane_fields(parts: &[String]) -> Option<PaneInfo> {
         parts[pane_line_field::PANE_CURRENT_PATH].to_string()
     };
 
-    // Claude: read permission_mode from hook-set tmux variable
-    // Codex: no permission_mode in hooks, detect from process args later
+    // Claude: read permission_mode from hook-set tmux variable.
+    // Codex / OpenCode: no permission_mode in hooks, keep the default.
     let permission_mode = if agent == AgentType::Claude {
         PermissionMode::from_label(&parts[pane_line_field::PERMISSION_MODE])
     } else {
@@ -440,6 +452,39 @@ pub(crate) fn parse_pane_fields(parts: &[String]) -> Option<PaneInfo> {
         session_name: String::new(),
         sidebar_spawned: parts[pane_line_field::SIDEBAR_SPAWNED] == "1",
     })
+}
+
+/// Wipe all agent-tracked tmux pane options and the activity log file for
+/// `pane_id`. Triggered by `parse_pane_fields` when it detects a Codex or
+/// OpenCode pane that has dropped back to the user's shell, since neither
+/// CLI fires a reliable process-exit hook. Claude panes are never routed
+/// here because Claude has its own SessionEnd hook. The set of keys
+/// mirrors `clear_all_meta` + `clear_run_state` + status/attention clears
+/// in `src/cli/hook/context.rs`; keep them in sync when a new `@pane_*`
+/// key is added.
+fn clear_agent_pane_state(pane_id: &str) {
+    const KEYS: &[&str] = &[
+        "@pane_agent",
+        "@pane_prompt",
+        "@pane_prompt_source",
+        "@pane_subagents",
+        "@pane_cwd",
+        "@pane_permission_mode",
+        "@pane_worktree_name",
+        "@pane_worktree_branch",
+        "@pane_session_id",
+        "@pane_pending_session_end",
+        "@pane_pending_worktree_remove",
+        "@pane_started_at",
+        "@pane_wait_reason",
+        "@pane_attention",
+        "@pane_status",
+    ];
+    for key in KEYS {
+        unset_pane_option(pane_id, key);
+    }
+    let log_path = crate::activity::log_file_path(pane_id);
+    let _ = std::fs::remove_file(log_path);
 }
 
 fn is_shell_command(command: &str) -> bool {
@@ -1019,6 +1064,7 @@ mod tests {
     fn agent_type_from_str_all() {
         assert_eq!(AgentType::from_label("claude"), Some(AgentType::Claude));
         assert_eq!(AgentType::from_label("codex"), Some(AgentType::Codex));
+        assert_eq!(AgentType::from_label("opencode"), Some(AgentType::OpenCode));
         assert_eq!(AgentType::from_label("unknown"), None);
         assert_eq!(AgentType::from_label(""), None);
     }
@@ -1027,6 +1073,7 @@ mod tests {
     fn agent_type_label() {
         assert_eq!(AgentType::Claude.label(), "claude");
         assert_eq!(AgentType::Codex.label(), "codex");
+        assert_eq!(AgentType::OpenCode.label(), "opencode");
         assert_eq!(AgentType::Unknown.label(), "unknown");
     }
 
@@ -1564,6 +1611,125 @@ mod tests {
         assert!(
             parse_pane_line(&line).is_none(),
             "shell detection should handle paths, args, and case differences"
+        );
+    }
+
+    #[test]
+    fn parse_pane_line_does_not_wipe_claude_on_shell_command() {
+        // Claude owns its own SessionEnd hook, so Rust must NOT sweep its
+        // pane state even when `current_command` is a shell — otherwise
+        // we race with the hook and lose legitimate prompt/status.
+        let _guard = test_mock::install();
+        let pane = "%CLAUDE_SHELL";
+        test_mock::set(pane, "@pane_agent", "claude");
+        test_mock::set(pane, "@pane_prompt", "keep me");
+        test_mock::set(pane, "@pane_status", "running");
+
+        let mut fields = full_fields();
+        fields[pane_line_field::PANE_ID] = pane;
+        fields[pane_line_field::AGENT] = "claude";
+        fields[pane_line_field::PANE_CURRENT_COMMAND] = "bash";
+        let _ = parse_pane_line(&make_pane_line(&fields));
+
+        assert!(test_mock::contains(pane, "@pane_agent"));
+        assert!(test_mock::contains(pane, "@pane_prompt"));
+        assert_eq!(
+            test_mock::get(pane, "@pane_prompt").as_deref(),
+            Some("keep me"),
+            "claude prompt must survive — SessionEnd hook is the clear path",
+        );
+    }
+
+    #[test]
+    fn parse_pane_line_wipes_stale_state_for_codex_shell_pane() {
+        // Codex shares the same shell-fallback sweep path as OpenCode —
+        // neither fires a reliable process-exit hook, so the Rust poller
+        // must clear @pane_* keys and the activity log when the pane
+        // reverts to a shell. Mirrors the OpenCode regression test below.
+        let _guard = test_mock::install();
+        let pane = "%CODEX_STALE";
+        test_mock::set(pane, "@pane_agent", "codex");
+        test_mock::set(pane, "@pane_prompt", "previous codex prompt");
+        test_mock::set(pane, "@pane_prompt_source", "user");
+        test_mock::set(pane, "@pane_status", "waiting");
+        test_mock::set(pane, "@pane_started_at", "1700000000");
+        test_mock::set(pane, "@pane_cwd", "/repo/codex");
+        test_mock::set(pane, "@pane_wait_reason", "permission");
+        let log = crate::activity::log_file_path(pane);
+        let _ = std::fs::create_dir_all(log.parent().unwrap());
+        std::fs::write(&log, "1234|Bash|pytest\n").unwrap();
+
+        let mut fields = full_fields();
+        fields[pane_line_field::PANE_ID] = pane;
+        fields[pane_line_field::AGENT] = "codex";
+        fields[pane_line_field::PANE_CURRENT_COMMAND] = "zsh";
+        let line = make_pane_line(&fields);
+
+        assert!(parse_pane_line(&line).is_none());
+        for key in &[
+            "@pane_agent",
+            "@pane_prompt",
+            "@pane_prompt_source",
+            "@pane_status",
+            "@pane_started_at",
+            "@pane_cwd",
+            "@pane_wait_reason",
+        ] {
+            assert!(
+                !test_mock::contains(pane, key),
+                "{key} must be cleared when a codex pane falls back to shell"
+            );
+        }
+        assert!(
+            !log.exists(),
+            "codex activity log must be removed once the agent process is gone"
+        );
+    }
+
+    #[test]
+    fn parse_pane_line_wipes_stale_state_for_opencode_shell_pane() {
+        // When an OpenCode pane falls back to the user's shell, the Rust
+        // polling side owns teardown because OpenCode has no reliable
+        // process-exit hook. The detector must unset every @pane_* key it
+        // seeded and remove the activity log so the next launch starts
+        // from a clean slate without flashing stale prompt/status.
+        let _guard = test_mock::install();
+        let pane = "%OPENCODE_STALE";
+        test_mock::set(pane, "@pane_agent", "opencode");
+        test_mock::set(pane, "@pane_prompt", "previous run");
+        test_mock::set(pane, "@pane_prompt_source", "user");
+        test_mock::set(pane, "@pane_status", "running");
+        test_mock::set(pane, "@pane_started_at", "1700000000");
+        test_mock::set(pane, "@pane_cwd", "/repo");
+        test_mock::set(pane, "@pane_session_id", "ses-1");
+        let log = crate::activity::log_file_path(pane);
+        let _ = std::fs::create_dir_all(log.parent().unwrap());
+        std::fs::write(&log, "1234|Bash|ls\n").unwrap();
+
+        let mut fields = full_fields();
+        fields[pane_line_field::PANE_ID] = pane;
+        fields[pane_line_field::AGENT] = "opencode";
+        fields[pane_line_field::PANE_CURRENT_COMMAND] = "fish";
+        let line = make_pane_line(&fields);
+
+        assert!(parse_pane_line(&line).is_none());
+        for key in &[
+            "@pane_agent",
+            "@pane_prompt",
+            "@pane_prompt_source",
+            "@pane_status",
+            "@pane_started_at",
+            "@pane_cwd",
+            "@pane_session_id",
+        ] {
+            assert!(
+                !test_mock::contains(pane, key),
+                "{key} must be cleared after shell fallback sweep"
+            );
+        }
+        assert!(
+            !log.exists(),
+            "activity log must be removed when the agent process is gone"
         );
     }
 

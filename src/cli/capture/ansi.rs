@@ -109,19 +109,23 @@ impl Perform for State<'_> {
                 38 => {
                     if p.len() >= 3 && p[1] == 5 {
                         self.style.fg = Some(p[2] as u8);
-                    } else if let (Some(mode), Some(color)) = (iter.next(), iter.next()) {
-                        if !mode.is_empty() && mode[0] == 5 && !color.is_empty() {
-                            self.style.fg = Some(color[0] as u8);
-                        }
+                    } else if let (Some(mode), Some(color)) = (iter.next(), iter.next())
+                        && !mode.is_empty()
+                        && mode[0] == 5
+                        && !color.is_empty()
+                    {
+                        self.style.fg = Some(color[0] as u8);
                     }
                 }
                 48 => {
                     if p.len() >= 3 && p[1] == 5 {
                         self.style.bg = Some(p[2] as u8);
-                    } else if let (Some(mode), Some(color)) = (iter.next(), iter.next()) {
-                        if !mode.is_empty() && mode[0] == 5 && !color.is_empty() {
-                            self.style.bg = Some(color[0] as u8);
-                        }
+                    } else if let (Some(mode), Some(color)) = (iter.next(), iter.next())
+                        && !mode.is_empty()
+                        && mode[0] == 5
+                        && !color.is_empty()
+                    {
+                        self.style.bg = Some(color[0] as u8);
                     }
                 }
                 _ => {}

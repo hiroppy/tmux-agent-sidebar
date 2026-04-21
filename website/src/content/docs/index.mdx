@@ -1,9 +1,9 @@
 ---
 title: tmux-agent-sidebar
-description: tmux-agent-sidebar — one tmux sidebar that tracks every Claude Code and Codex pane across every session and window. See status, prompts, Git state, activity, and worktrees without switching windows.
+description: tmux-agent-sidebar — one tmux sidebar that tracks every Claude Code, Codex, and OpenCode pane across every session and window. See status, prompts, Git state, activity, and worktrees without switching windows.
 template: splash
 hero:
-  tagline: Every Claude Code and Codex pane across every tmux session and window — status, prompts, Git, and activity in one sidebar.
+  tagline: 'Every <span class="hero-agent"><img src="/tmux-agent-sidebar/brands/claude.ico" alt="" aria-hidden="true" width="16" height="16" />Claude Code</span>, <span class="hero-agent"><img src="/tmux-agent-sidebar/brands/codex.png" alt="" aria-hidden="true" width="16" height="16" />Codex</span>, and <span class="hero-agent"><img src="/tmux-agent-sidebar/brands/opencode.svg" alt="" aria-hidden="true" width="16" height="20" />OpenCode</span> pane across every tmux session and window — status, prompts, Git, and activity in one sidebar.'
   image:
     alt: tmux-agent-sidebar screenshot
     file: ../../assets/captures/hero.png
@@ -24,7 +24,7 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 
 <CardGrid>
   <Card title="One sidebar, every pane" icon="list-format">
-    Tracks Claude Code and Codex panes across every tmux session and window at
+    Tracks Claude Code, Codex, and OpenCode panes across every tmux session and window at
     once, so context switching stops meaning window switching.
   </Card>
   <Card title="Live status, prompts, responses" icon="comment-alt">
@@ -53,5 +53,6 @@ Reload with `tmux source ~/.tmux.conf`, press `prefix + I` to install, and the
 install wizard downloads a pre-built binary or builds from source.
 
 Next, wire up your agent hooks — [Claude Code](/tmux-agent-sidebar/getting-started/claude-code/)
-installs as a plugin, and [Codex](/tmux-agent-sidebar/getting-started/codex/) is
-a one-paste setup inside its own pane.
+installs as a plugin, [Codex](/tmux-agent-sidebar/getting-started/codex/) is a
+one-paste setup inside its own pane, and [OpenCode](/tmux-agent-sidebar/getting-started/opencode/)
+uses the bundled plugin bridge.

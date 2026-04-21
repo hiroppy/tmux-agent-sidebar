@@ -1,5 +1,7 @@
 # TODO: バックグラウンドシェル実行中の状態検知
 
+**Status: not-started** — `PaneStatus::Background` / `@pane_bg_shells` はまだソースに存在しない（2026-04-21 時点）。下記は未着手の設計メモ。
+
 ## 問題
 
 Claude Code が `run_in_background: true` で Bash コマンドを実行した後、モデルの応答完了で `stop` フックが発火し sidebar は "idle" と表示する。しかし実際にはバックグラウンドプロセスがまだ実行中。

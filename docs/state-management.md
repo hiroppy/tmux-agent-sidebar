@@ -33,7 +33,7 @@ Pane options written to tmux:
 
 | Tmux Option | Update Trigger | Description |
 |-------------|----------------|-------------|
-| `@pane_agent` | SessionStart | Agent type ("claude" / "codex") |
+| `@pane_agent` | SessionStart | Agent type ("claude" / "codex" / "opencode") |
 | `@pane_status` | Every event | Status ("running" / "waiting" / "idle" / "error") |
 | `@pane_cwd` | SessionStart, CwdChanged | Working directory |
 | `@pane_permission_mode` | SessionStart, hook event | Permission mode |
@@ -101,7 +101,7 @@ Per-pane file-based state:
 | `tmux_pane` | Once at startup | This sidebar's own tmux pane ID |
 | `pane_states.seen` | Every 1s | Set of pane IDs that have been seen as agents (bundled with `pane_states.map` under the `PaneRuntimeMap` wrapper) |
 | `version_notice` | Once at startup (bg fetch) | GitHub release update notice, `None` when up-to-date |
-| `sessions.names` | Every 10s (background thread) | `session_id → session name` map; scanned by `session_poll_loop` in `main.rs` so the TUI thread never blocks on filesystem I/O |
+| `sessions.names` | Every 10s (background thread) | `session_id → session name` map; scanned by `session_poll_loop` in `app/workers.rs` so the TUI thread never blocks on filesystem I/O |
 | `sessions.dirty` | On session map refresh / application tick | Marks the session map as changed so the per-pane session label walk only runs when needed |
 
 ---
@@ -161,7 +161,7 @@ Agent hooks (hook.sh)
     → resolve_adapter() (event.rs) → adapter.parse() → AgentEvent
     → handle_event() writes @pane_* tmux options + /tmp activity log files
                         ↓
-TUI main loop (main.rs)
+TUI main loop (app::run in app.rs; submodules app/{setup,workers,input,render})
   → startup plugin-state reads (cli/plugin_state.rs)
     → installed_plugins.json / ~/.claude/settings.json
     → initializes Claude notices state once
@@ -191,7 +191,7 @@ enum StatusFilter { All, Running, Waiting, Idle, Error }
 enum RepoFilter { All, Repo(String) }
 enum BottomTab { Activity, GitStatus }
 enum PaneStatus { Running, Waiting, Idle, Error, Unknown }
-enum AgentType { Claude, Codex, Unknown }
+enum AgentType { Claude, Codex, OpenCode, Unknown }
 enum PermissionMode { Default, Plan, AcceptEdits, Auto, DontAsk, BypassPermissions, Defer }
 
 /// At-most-one popup state. The enum encodes both which popup is open

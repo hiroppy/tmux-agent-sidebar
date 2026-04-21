@@ -69,3 +69,4 @@ The sidebar receives status updates through agent hooks — continue with the ag
 
 - [Claude Code setup](/tmux-agent-sidebar/getting-started/claude-code/)
 - [Codex setup](/tmux-agent-sidebar/getting-started/codex/)
+- [OpenCode setup](/tmux-agent-sidebar/getting-started/opencode/)

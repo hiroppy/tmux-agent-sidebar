@@ -16,9 +16,9 @@ The **Default** column shows which events fire when `@sidebar_notifications_even
 
 | Event               | Fired when                                                | Agent            | Default |
 | ------------------- | --------------------------------------------------------- | ---------------- | ------- |
-| `stop`              | Assistant finished responding (`Stop` hook)               | Claude, Codex    | ✓       |
-| `notification`      | Permission prompt or other attention request              | Claude only      | ✓       |
-| `stop_failure`      | Assistant ended with an error (`StopFailure` hook)        | Claude only      | ✓       |
+| `stop`              | Assistant finished responding (`Stop` hook)               | Claude, Codex, OpenCode | ✓       |
+| `notification`      | Permission prompt or other attention request              | Claude, OpenCode | ✓       |
+| `stop_failure`      | Assistant ended with an error (`StopFailure` hook)        | Claude, OpenCode | ✓       |
 | `permission_denied` | Permission explicitly denied (`PermissionDenied` hook)    | Claude only      | ✓       |
 | `task_completed`    | Sub-agent / Task tool completion (`TaskCompleted` hook)   | Claude only      | —       |
 

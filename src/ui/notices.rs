@@ -49,8 +49,15 @@ pub(crate) fn prompt_for_agent(agent: &str) -> Option<String> {
         CODEX_AGENT => {
             let exe_path = std::env::current_exe().ok()?.to_string_lossy().into_owned();
             Some(format!(
-                "Run {exe_path} setup codex. Add these hooks to ~/.codex/hooks.json. \
-                 If hooks already exist, merge them without making destructive changes."
+                "Run {exe_path} setup codex. Before pasting the hooks, make sure \
+                 ~/.codex/config.toml contains:\n\
+                 \n\
+                 [features]\n\
+                 codex_hooks = true\n\
+                 \n\
+                 Add these hooks to ~/.codex/hooks.json. If hooks already \
+                 exist, merge them without making destructive changes. Restart \
+                 Codex after changing config.toml so the feature flag takes effect."
             ))
         }
         _ => None,
@@ -526,7 +533,10 @@ mod tests {
             "codex prompt missing current_exe path: {codex}"
         );
         assert!(codex.contains("setup codex"));
+        assert!(codex.contains("~/.codex/config.toml"));
         assert!(codex.contains("~/.codex/hooks.json"));
+        assert!(codex.contains("codex_hooks = true"));
+        assert!(codex.contains("Restart Codex"));
     }
 
     #[test]
