@@ -65,16 +65,11 @@
 }
 
 .hero .hero-agent img {
-  display: inline-block;
   width: auto;
   height: 0.88em;
-  max-height: 0.88em;
+  object-fit: contain;
   position: relative;
   top: 0.08em;
-}
-
-.hero .hero-agent span {
-  display: inline-block;
 }
 
 /* Rounded corners on every captured/illustration image — matches the

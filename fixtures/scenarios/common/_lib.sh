@@ -73,6 +73,7 @@ setup() {
     mkdir -p "$FAKE_BIN_DIR"
     ln -sf /bin/sleep "$FAKE_BIN_DIR/claude"
     ln -sf /bin/sleep "$FAKE_BIN_DIR/codex"
+    ln -sf /bin/sleep "$FAKE_BIN_DIR/opencode"
     export FAKE_BIN_DIR
 }
 
@@ -165,14 +166,14 @@ build_layout() {
         started_s=45
     run_fake_agent "$PANE_WAITING" codex
 
-    # Second Claude running — long-lived refactor (12 m 45 s).
+    # Second running — OpenCode on a long-lived refactor (12 m 45 s).
     export PANE_RUNNING_2="${extras[1]}"
     _seed_pane "$PANE_RUNNING_2" \
-        agent=claude status=running \
+        agent=opencode status=running \
         branch=refactor/api-layer \
         prompt="split the monolithic handler into typed routers" \
         started_s=765
-    run_fake_agent "$PANE_RUNNING_2" claude
+    run_fake_agent "$PANE_RUNNING_2" opencode
 
     # Error pane — cause surfaced via @pane_wait_reason (matches the hook
     # convention in src/cli/hook/handlers.rs). Listens on :3456 — the
@@ -285,8 +286,13 @@ paint_stream() {
 run_fake_agent() {
     local pane="$1" agent="$2" port="${3:-}"
     if [[ -n "$port" ]]; then
+        # Background the listener, then `exec` replaces the wrapping sh with
+        # the agent binary so tmux reports pane_current_command=$agent. The
+        # Codex/OpenCode stale-shell filter in parse_pane_fields drops panes
+        # whose current command is a shell, so a lingering `sh -c … & wait`
+        # wrapper would hide the pane from the sidebar entirely.
         tmux respawn-pane -k -t "$pane" \
-            "sh -c '$FAKE_BIN_DIR/$agent 999999 & python3 -m http.server $port >/dev/null 2>&1 & wait'"
+            "sh -c 'python3 -m http.server $port >/dev/null 2>&1 & exec $FAKE_BIN_DIR/$agent 999999'"
     else
         tmux respawn-pane -k -t "$pane" "$FAKE_BIN_DIR/$agent 999999"
     fi

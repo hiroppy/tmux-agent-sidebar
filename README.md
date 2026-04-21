@@ -21,7 +21,7 @@
 - **Desktop notifications** 
   — native alerts when an agent finishes, needs permission, or errors out
 
-OpenCode uses a small local plugin bridge instead of per-event hook config. The plugin lives at `.opencode/plugins/tmux-agent-sidebar.js` and can be symlinked into `~/.config/opencode/plugins/` for global use.
+OpenCode uses a small local plugin bridge instead of per-event hook config. The plugin lives at `.opencode/plugins/tmux-agent-sidebar.js` and can be symlinked as a single file into `~/.config/opencode/plugins/` so it coexists with any existing plugins.
 
 ## Requirements
 
@@ -51,12 +51,12 @@ Reload tmux (`tmux source ~/.tmux.conf`), then press `prefix + I`. The install w
   ```
 
 - **Codex** — open a Codex pane, press `prefix + e`, click the yellow `ⓘ` badge, copy the setup snippet, paste it into the Codex pane.
-- **OpenCode** — symlink the bundled plugin directory into OpenCode's global plugin directory:
+- **OpenCode** — symlink just the plugin file so your existing `~/.config/opencode/plugins/` contents stay untouched:
 
   ```sh
   mkdir -p ~/.config/opencode/plugins
-  ln -s ~/.tmux/plugins/tmux-agent-sidebar/.opencode/plugins \
-    ~/.config/opencode/plugins/tmux-agent-sidebar
+  ln -sf ~/.tmux/plugins/tmux-agent-sidebar/.opencode/plugins/tmux-agent-sidebar.js \
+    ~/.config/opencode/plugins/tmux-agent-sidebar.js
   ```
 
 Full walkthroughs: [Claude Code setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/claude-code/) · [Codex setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/codex/)

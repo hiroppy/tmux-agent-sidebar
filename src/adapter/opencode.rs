@@ -3,7 +3,7 @@ use serde_json::Value;
 use crate::event::{AgentEvent, EventAdapter};
 use crate::tmux::OPENCODE_AGENT;
 
-use super::{json_str, optional_str};
+use super::{json_str, json_value_or_null, optional_str};
 
 pub struct OpenCodeAdapter;
 
@@ -64,8 +64,8 @@ impl EventAdapter for OpenCodeAdapter {
                 }
                 Some(AgentEvent::ActivityLog {
                     tool_name: tool_name.into(),
-                    tool_input: input.get("tool_input").cloned().unwrap_or(Value::Null),
-                    tool_response: input.get("tool_response").cloned().unwrap_or(Value::Null),
+                    tool_input: json_value_or_null(input, "tool_input"),
+                    tool_response: json_value_or_null(input, "tool_response"),
                 })
             }
             _ => None,

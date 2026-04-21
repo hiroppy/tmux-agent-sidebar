@@ -2,7 +2,7 @@ use crate::event::{AgentEvent, AgentEventKind, EventAdapter};
 use crate::tmux::CODEX_AGENT;
 use serde_json::Value;
 
-use super::{HookRegistration, json_str};
+use super::{HookRegistration, json_str, json_value_or_null};
 
 pub struct CodexAdapter;
 
@@ -81,12 +81,10 @@ impl EventAdapter for CodexAdapter {
                 if tool_name.is_empty() {
                     return None;
                 }
-                let tool_input = input.get("tool_input").cloned().unwrap_or(Value::Null);
-                let tool_response = input.get("tool_response").cloned().unwrap_or(Value::Null);
                 Some(AgentEvent::ActivityLog {
                     tool_name: tool_name.into(),
-                    tool_input,
-                    tool_response,
+                    tool_input: json_value_or_null(input, "tool_input"),
+                    tool_response: json_value_or_null(input, "tool_response"),
                 })
             }
             _ => None,
