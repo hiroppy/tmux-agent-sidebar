@@ -1615,6 +1615,78 @@ mod tests {
     }
 
     #[test]
+    fn parse_pane_line_does_not_wipe_claude_on_shell_command() {
+        // Claude owns its own SessionEnd hook, so Rust must NOT sweep its
+        // pane state even when `current_command` is a shell — otherwise
+        // we race with the hook and lose legitimate prompt/status.
+        let _guard = test_mock::install();
+        let pane = "%CLAUDE_SHELL";
+        test_mock::set(pane, "@pane_agent", "claude");
+        test_mock::set(pane, "@pane_prompt", "keep me");
+        test_mock::set(pane, "@pane_status", "running");
+
+        let mut fields = full_fields();
+        fields[pane_line_field::PANE_ID] = pane;
+        fields[pane_line_field::AGENT] = "claude";
+        fields[pane_line_field::PANE_CURRENT_COMMAND] = "bash";
+        let _ = parse_pane_line(&make_pane_line(&fields));
+
+        assert!(test_mock::contains(pane, "@pane_agent"));
+        assert!(test_mock::contains(pane, "@pane_prompt"));
+        assert_eq!(
+            test_mock::get(pane, "@pane_prompt").as_deref(),
+            Some("keep me"),
+            "claude prompt must survive — SessionEnd hook is the clear path",
+        );
+    }
+
+    #[test]
+    fn parse_pane_line_wipes_stale_state_for_codex_shell_pane() {
+        // Codex shares the same shell-fallback sweep path as OpenCode —
+        // neither fires a reliable process-exit hook, so the Rust poller
+        // must clear @pane_* keys and the activity log when the pane
+        // reverts to a shell. Mirrors the OpenCode regression test below.
+        let _guard = test_mock::install();
+        let pane = "%CODEX_STALE";
+        test_mock::set(pane, "@pane_agent", "codex");
+        test_mock::set(pane, "@pane_prompt", "previous codex prompt");
+        test_mock::set(pane, "@pane_prompt_source", "user");
+        test_mock::set(pane, "@pane_status", "waiting");
+        test_mock::set(pane, "@pane_started_at", "1700000000");
+        test_mock::set(pane, "@pane_cwd", "/repo/codex");
+        test_mock::set(pane, "@pane_wait_reason", "permission");
+        let log = crate::activity::log_file_path(pane);
+        let _ = std::fs::create_dir_all(log.parent().unwrap());
+        std::fs::write(&log, "1234|Bash|pytest\n").unwrap();
+
+        let mut fields = full_fields();
+        fields[pane_line_field::PANE_ID] = pane;
+        fields[pane_line_field::AGENT] = "codex";
+        fields[pane_line_field::PANE_CURRENT_COMMAND] = "zsh";
+        let line = make_pane_line(&fields);
+
+        assert!(parse_pane_line(&line).is_none());
+        for key in &[
+            "@pane_agent",
+            "@pane_prompt",
+            "@pane_prompt_source",
+            "@pane_status",
+            "@pane_started_at",
+            "@pane_cwd",
+            "@pane_wait_reason",
+        ] {
+            assert!(
+                !test_mock::contains(pane, key),
+                "{key} must be cleared when a codex pane falls back to shell"
+            );
+        }
+        assert!(
+            !log.exists(),
+            "codex activity log must be removed once the agent process is gone"
+        );
+    }
+
+    #[test]
     fn parse_pane_line_wipes_stale_state_for_opencode_shell_pane() {
         // When an OpenCode pane falls back to the user's shell, the Rust
         // polling side owns teardown because OpenCode has no reliable
