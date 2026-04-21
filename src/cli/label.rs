@@ -1,5 +1,7 @@
 use serde_json::Value;
 
+use crate::tool_name::CanonicalTool;
+
 /// How a tool's label should be derived from its input/response payload.
 /// Keeping this as data (rather than a giant `match` with inline closures)
 /// makes adding a new tool a one-line edit in [`STRATEGY_TABLE`] and lets
@@ -20,37 +22,56 @@ enum LabelStrategy {
 
 /// Tool name → extraction strategy. Order is preserved for readability;
 /// dispatch is O(N) but N is ~30 so a linear scan is fine and avoids the
-/// overhead/lifetime constraints of a static `HashMap`.
-const STRATEGY_TABLE: &[(&str, LabelStrategy)] = &[
-    ("Read", LabelStrategy::FilePath("file_path")),
-    ("Edit", LabelStrategy::FilePath("file_path")),
-    ("Write", LabelStrategy::FilePath("file_path")),
-    ("NotebookEdit", LabelStrategy::FilePath("notebook_path")),
-    ("Bash", LabelStrategy::Field("command")),
-    ("PowerShell", LabelStrategy::Field("command")),
-    ("Monitor", LabelStrategy::Field("command")),
-    ("PushNotification", LabelStrategy::Field("message")),
-    ("Glob", LabelStrategy::Field("pattern")),
-    ("Grep", LabelStrategy::Field("pattern")),
-    ("WebFetch", LabelStrategy::UrlStrip("url")),
-    ("WebSearch", LabelStrategy::Field("query")),
-    ("ToolSearch", LabelStrategy::Field("query")),
-    ("Skill", LabelStrategy::Field("skill")),
-    ("SendMessage", LabelStrategy::Field("to")),
-    ("TeamCreate", LabelStrategy::Field("team_name")),
-    ("LSP", LabelStrategy::Field("operation")),
-    ("CronCreate", LabelStrategy::Field("cron")),
-    ("CronDelete", LabelStrategy::Field("id")),
-    ("EnterWorktree", LabelStrategy::Field("name")),
-    ("ExitWorktree", LabelStrategy::Field("name")),
-    ("Agent", LabelStrategy::Custom(label_agent)),
-    ("TaskCreate", LabelStrategy::Custom(label_task_create)),
-    ("TaskUpdate", LabelStrategy::Custom(label_task_update)),
-    ("TaskGet", LabelStrategy::Custom(label_task_id)),
-    ("TaskStop", LabelStrategy::Custom(label_task_id)),
-    ("TaskOutput", LabelStrategy::Custom(label_task_id)),
+/// overhead/lifetime constraints of a static `HashMap`. Keys are
+/// [`CanonicalTool`] so typos become compile errors.
+const STRATEGY_TABLE: &[(CanonicalTool, LabelStrategy)] = &[
+    (CanonicalTool::Read, LabelStrategy::FilePath("file_path")),
+    (CanonicalTool::Edit, LabelStrategy::FilePath("file_path")),
+    (CanonicalTool::Write, LabelStrategy::FilePath("file_path")),
     (
-        "AskUserQuestion",
+        CanonicalTool::NotebookEdit,
+        LabelStrategy::FilePath("notebook_path"),
+    ),
+    (CanonicalTool::Bash, LabelStrategy::Field("command")),
+    (CanonicalTool::PowerShell, LabelStrategy::Field("command")),
+    (CanonicalTool::Monitor, LabelStrategy::Field("command")),
+    (
+        CanonicalTool::PushNotification,
+        LabelStrategy::Field("message"),
+    ),
+    (CanonicalTool::Glob, LabelStrategy::Field("pattern")),
+    (CanonicalTool::Grep, LabelStrategy::Field("pattern")),
+    (CanonicalTool::WebFetch, LabelStrategy::UrlStrip("url")),
+    (CanonicalTool::WebSearch, LabelStrategy::Field("query")),
+    (CanonicalTool::ToolSearch, LabelStrategy::Field("query")),
+    (CanonicalTool::Skill, LabelStrategy::Field("skill")),
+    (CanonicalTool::SendMessage, LabelStrategy::Field("to")),
+    (CanonicalTool::TeamCreate, LabelStrategy::Field("team_name")),
+    (CanonicalTool::Lsp, LabelStrategy::Field("operation")),
+    (CanonicalTool::CronCreate, LabelStrategy::Field("cron")),
+    (CanonicalTool::CronDelete, LabelStrategy::Field("id")),
+    (CanonicalTool::EnterWorktree, LabelStrategy::Field("name")),
+    (CanonicalTool::ExitWorktree, LabelStrategy::Field("name")),
+    (CanonicalTool::Agent, LabelStrategy::Custom(label_agent)),
+    (
+        CanonicalTool::TaskCreate,
+        LabelStrategy::Custom(label_task_create),
+    ),
+    (
+        CanonicalTool::TaskUpdate,
+        LabelStrategy::Custom(label_task_update),
+    ),
+    (CanonicalTool::TaskGet, LabelStrategy::Custom(label_task_id)),
+    (
+        CanonicalTool::TaskStop,
+        LabelStrategy::Custom(label_task_id),
+    ),
+    (
+        CanonicalTool::TaskOutput,
+        LabelStrategy::Custom(label_task_id),
+    ),
+    (
+        CanonicalTool::AskUserQuestion,
         LabelStrategy::Custom(label_ask_user_question),
     ),
 ];
@@ -62,7 +83,7 @@ pub(crate) fn extract_tool_label(
 ) -> String {
     let strategy = STRATEGY_TABLE
         .iter()
-        .find(|(name, _)| *name == tool_name)
+        .find(|(name, _)| name.as_str() == tool_name)
         .map(|(_, s)| s)
         .unwrap_or(&LabelStrategy::None);
 

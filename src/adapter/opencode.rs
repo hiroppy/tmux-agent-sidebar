@@ -2,6 +2,7 @@ use serde_json::{Map, Value};
 
 use crate::event::{AgentEvent, EventAdapter};
 use crate::tmux::OPENCODE_AGENT;
+use crate::tool_name::CanonicalTool;
 
 use super::{json_str, json_value_or_null, optional_str};
 
@@ -12,23 +13,22 @@ pub struct OpenCodeAdapter;
 /// names. Normalise here so the activity log and its strategy table share
 /// a single vocabulary across agents.
 fn normalize_tool_name(raw: &str) -> String {
-    match raw {
-        "bash" => "Bash",
-        "read" => "Read",
-        "write" => "Write",
-        "edit" => "Edit",
-        "multiedit" => "Edit",
-        "glob" => "Glob",
-        "grep" => "Grep",
-        "webfetch" => "WebFetch",
-        "websearch" => "WebSearch",
-        "task" => "Agent",
-        "skill" => "Skill",
-        "lsp" => "LSP",
-        "todowrite" => "TodoWrite",
+    let canonical = match raw {
+        "bash" => CanonicalTool::Bash,
+        "read" => CanonicalTool::Read,
+        "write" => CanonicalTool::Write,
+        "edit" | "multiedit" => CanonicalTool::Edit,
+        "glob" => CanonicalTool::Glob,
+        "grep" => CanonicalTool::Grep,
+        "webfetch" => CanonicalTool::WebFetch,
+        "websearch" => CanonicalTool::WebSearch,
+        "task" => CanonicalTool::Agent,
+        "skill" => CanonicalTool::Skill,
+        "lsp" => CanonicalTool::Lsp,
+        "todowrite" => CanonicalTool::TodoWrite,
         other => return other.to_string(),
-    }
-    .to_string()
+    };
+    canonical.as_str().to_string()
 }
 
 /// Translate OpenCode's camelCase tool arguments into the snake_case keys
