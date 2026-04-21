@@ -62,10 +62,30 @@ const errorMessage = (err) => {
   return String(err);
 };
 
+const extractPromptText = (parts) => {
+  if (!Array.isArray(parts)) return "";
+  const chunks = [];
+  for (const part of parts) {
+    if (!part || part.type !== "text") continue;
+    if (part.synthetic || part.ignored) continue;
+    if (typeof part.text === "string" && part.text) {
+      chunks.push(part.text);
+    }
+  }
+  return chunks.join("\n");
+};
+
 export const TmuxAgentSidebar = async ({ directory }) => {
   const cwd = typeof directory === "string" ? directory : "";
 
   return {
+    "chat.message": async (input, output) => {
+      const session_id =
+        typeof input?.sessionID === "string" ? input.sessionID : "";
+      const prompt = extractPromptText(output?.parts);
+      hook("user-prompt-submit", { cwd, session_id, prompt });
+    },
+
     event: async ({ event }) => {
       if (!event || !event.type) return;
       const props = event.properties ?? {};
@@ -77,7 +97,13 @@ export const TmuxAgentSidebar = async ({ directory }) => {
           return;
 
         case "session.status": {
-          // Status is a union: { type: "idle" | "busy" | "retry", ... }
+          // Status is a union: { type: "idle" | "busy" | "retry", ... }.
+          // `busy` is a secondary status-transition signal — the real prompt
+          // text is written via the `chat.message` hook, which fires with
+          // the UserMessage parts. When both fire, the empty-prompt call
+          // here is a no-op for @pane_prompt (handler guard) but still
+          // advances status to "running" for cases where chat.message is
+          // delayed or missing (e.g. retry → busy).
           const statusType = props.status?.type;
           if (statusType === "busy") {
             hook("user-prompt-submit", { cwd, session_id, prompt: "" });
