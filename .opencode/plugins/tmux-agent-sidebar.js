@@ -1,9 +1,10 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const resolveHookScript = () => {
-  let dir = dirname(new URL(import.meta.url).pathname);
+  let dir = dirname(fileURLToPath(import.meta.url));
   for (let i = 0; i < 4; i += 1) {
     const candidate = resolve(dir, "hook.sh");
     if (existsSync(candidate)) {
