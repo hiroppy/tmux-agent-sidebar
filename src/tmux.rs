@@ -3,6 +3,7 @@ use std::process::Command;
 
 pub const CLAUDE_AGENT: &str = "claude";
 pub const CODEX_AGENT: &str = "codex";
+pub const OPENCODE_AGENT: &str = "opencode";
 
 // Field indices in `tmux list-panes -F` output. Keep in lock-step with
 // the `PANE_FORMAT` format string. When adding a new field, update both
@@ -133,6 +134,7 @@ impl PermissionMode {
 pub enum AgentType {
     Claude,
     Codex,
+    OpenCode,
     #[allow(dead_code)]
     Unknown,
 }
@@ -159,6 +161,7 @@ impl AgentType {
         match s {
             CLAUDE_AGENT => Some(Self::Claude),
             CODEX_AGENT => Some(Self::Codex),
+            OPENCODE_AGENT => Some(Self::OpenCode),
             _ => None,
         }
     }
@@ -167,6 +170,7 @@ impl AgentType {
         match self {
             Self::Claude => CLAUDE_AGENT,
             Self::Codex => CODEX_AGENT,
+            Self::OpenCode => OPENCODE_AGENT,
             Self::Unknown => "unknown",
         }
     }
@@ -380,10 +384,11 @@ pub(crate) fn parse_pane_fields(parts: &[String]) -> Option<PaneInfo> {
     let agent = AgentType::from_label(&parts[pane_line_field::AGENT])?;
     let current_command = parts[pane_line_field::PANE_CURRENT_COMMAND].as_str();
 
-    // Codex panes can leave stale tmux metadata behind after the agent exits
-    // and the pane falls back to the user's shell. In that case, ignore the
-    // pane so the sidebar stops displaying a non-existent Codex session.
-    if agent == AgentType::Codex && is_shell_command(current_command) {
+    // Codex / OpenCode panes can leave stale tmux metadata behind after the
+    // agent exits and the pane falls back to the user's shell. In that case,
+    // ignore the pane so the sidebar stops displaying a non-existent session.
+    if matches!(agent, AgentType::Codex | AgentType::OpenCode) && is_shell_command(current_command)
+    {
         return None;
     }
 
@@ -397,8 +402,8 @@ pub(crate) fn parse_pane_fields(parts: &[String]) -> Option<PaneInfo> {
         parts[pane_line_field::PANE_CURRENT_PATH].to_string()
     };
 
-    // Claude: read permission_mode from hook-set tmux variable
-    // Codex: no permission_mode in hooks, detect from process args later
+    // Claude: read permission_mode from hook-set tmux variable.
+    // Codex / OpenCode: no permission_mode in hooks, keep the default.
     let permission_mode = if agent == AgentType::Claude {
         PermissionMode::from_label(&parts[pane_line_field::PERMISSION_MODE])
     } else {
@@ -1019,6 +1024,7 @@ mod tests {
     fn agent_type_from_str_all() {
         assert_eq!(AgentType::from_label("claude"), Some(AgentType::Claude));
         assert_eq!(AgentType::from_label("codex"), Some(AgentType::Codex));
+        assert_eq!(AgentType::from_label("opencode"), Some(AgentType::OpenCode));
         assert_eq!(AgentType::from_label("unknown"), None);
         assert_eq!(AgentType::from_label(""), None);
     }
@@ -1027,6 +1033,7 @@ mod tests {
     fn agent_type_label() {
         assert_eq!(AgentType::Claude.label(), "claude");
         assert_eq!(AgentType::Codex.label(), "codex");
+        assert_eq!(AgentType::OpenCode.label(), "opencode");
         assert_eq!(AgentType::Unknown.label(), "unknown");
     }
 

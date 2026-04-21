@@ -1,6 +1,6 @@
 <h1 align="center">tmux-agent-sidebar</h1>
 
-<p align="center">One tmux sidebar that tracks every Claude Code and Codex pane across every session and window. See status, prompts, Git state, activity, and worktrees without switching windows.</p>
+<p align="center">One tmux sidebar that tracks every Claude Code, Codex, and OpenCode pane across every session and window. See status, prompts, Git state, activity, and worktrees without switching windows.</p>
 
 <p align="center"><img src="website/src/assets/captures/hero.png" alt="tmux-agent-sidebar hero" /></p>
 
@@ -13,13 +13,15 @@
 ## Features
 
 - **Every pane, one view** 
-  — tracks Claude Code and Codex panes across all tmux sessions and windows
+  — tracks Claude Code, Codex, and OpenCode panes across all tmux sessions and windows
 - **Live metadata** 
   — prompts, tool calls, response previews, wait reasons, task progress, and subagent trees refresh as the agents work
 - **Worktrees, included** 
   — spawn a fresh worktree + agent from the sidebar and tear it down — window, worktree, and branch — in one keystroke
 - **Desktop notifications** 
   — native alerts when an agent finishes, needs permission, or errors out
+
+OpenCode uses a small local plugin bridge instead of per-event hook config. The plugin lives at `.opencode/plugins/tmux-agent-sidebar.js` and can be symlinked into `~/.config/opencode/plugins/` for global use.
 
 ## Requirements
 
@@ -49,6 +51,13 @@ Reload tmux (`tmux source ~/.tmux.conf`), then press `prefix + I`. The install w
   ```
 
 - **Codex** — open a Codex pane, press `prefix + e`, click the yellow `ⓘ` badge, copy the setup snippet, paste it into the Codex pane.
+- **OpenCode** — symlink the bundled plugin directory into OpenCode's global plugin directory:
+
+  ```sh
+  mkdir -p ~/.config/opencode/plugins
+  ln -s ~/.tmux/plugins/tmux-agent-sidebar/.opencode/plugins \
+    ~/.config/opencode/plugins/tmux-agent-sidebar
+  ```
 
 Full walkthroughs: [Claude Code setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/claude-code/) · [Codex setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/codex/)
 

@@ -7,7 +7,7 @@ const SITE = 'https://hiroppy.github.io';
 const BASE = '/tmux-agent-sidebar';
 const OG_IMAGE = `${SITE}${BASE}/og-image.png`;
 const DESCRIPTION =
-  'tmux-agent-sidebar — one tmux sidebar that tracks every Claude Code and Codex pane across every session and window. See status, prompts, Git state, activity, and worktrees without switching windows.';
+  'tmux-agent-sidebar — one tmux sidebar that tracks every Claude Code, Codex, and OpenCode pane across every session and window. See status, prompts, Git state, activity, and worktrees without switching windows.';
 
 export default defineConfig({
   site: SITE,
@@ -99,6 +99,7 @@ export default defineConfig({
             { slug: 'getting-started/installation' },
             { slug: 'getting-started/claude-code' },
             { slug: 'getting-started/codex' },
+            { slug: 'getting-started/opencode' },
           ],
         },
         {
@@ -117,6 +118,7 @@ export default defineConfig({
             { slug: 'agents' },
             { slug: 'agents/claude-code' },
             { slug: 'agents/codex' },
+            { slug: 'agents/opencode' },
           ],
         },
         {

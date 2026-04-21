@@ -78,7 +78,7 @@ pub const BRANCH_PREFIX_OPTION: &str = "@agent-sidebar-branch-prefix";
 
 const MAX_COLLISION_ATTEMPTS: usize = 99;
 
-pub const AGENTS: &[&str] = &["claude", "codex"];
+pub const AGENTS: &[&str] = &["claude", "codex", "opencode"];
 pub const CLAUDE_MODES: &[&str] = &[
     "default",
     "plan",
@@ -87,10 +87,12 @@ pub const CLAUDE_MODES: &[&str] = &[
     "bypassPermissions",
 ];
 pub const CODEX_MODES: &[&str] = &["default", "auto", "bypassPermissions"];
+pub const OPENCODE_MODES: &[&str] = &["default"];
 
 pub fn modes_for(agent: &str) -> &'static [&'static str] {
     match agent {
         "codex" => CODEX_MODES,
+        "opencode" => OPENCODE_MODES,
         _ => CLAUDE_MODES,
     }
 }
@@ -105,6 +107,7 @@ pub fn agent_command(agent: &str, mode: &str) -> String {
         ("codex", "auto") => "codex --full-auto".into(),
         ("codex", "bypassPermissions") => "codex --dangerously-bypass-approvals-and-sandbox".into(),
         ("codex", _) => "codex".into(),
+        ("opencode", _) => "opencode".into(),
         (a, _) => a.to_string(),
     }
 }

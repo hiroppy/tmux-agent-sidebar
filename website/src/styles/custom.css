@@ -56,6 +56,27 @@
   border: none;
 }
 
+.hero .hero-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.18rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.hero .hero-agent img {
+  display: inline-block;
+  width: auto;
+  height: 0.88em;
+  max-height: 0.88em;
+  position: relative;
+  top: 0.08em;
+}
+
+.hero .hero-agent span {
+  display: inline-block;
+}
+
 /* Rounded corners on every captured/illustration image — matches the
    mac-window radius baked into the PNGs and softens the gradient
    padding. Applies to the hero splash image and any <Image> inside

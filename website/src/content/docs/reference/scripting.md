@@ -14,7 +14,7 @@ tmux show -t "$pane_id" -pv @pane_status
 
 # Get agent type
 tmux show -t "$pane_id" -pv @pane_agent
-# → claude / codex / (empty)
+# → claude / codex / opencode / (empty)
 ```
 
 ## Available pane options
@@ -23,7 +23,7 @@ tmux show -t "$pane_id" -pv @pane_agent
 | -------------------------- | ------------------------------------------------------------------ |
 | `@pane_status`             | `running` / `waiting` / `idle` / `error` / empty                   |
 | `@pane_attention`          | `1` while the pane is flagged for attention, otherwise empty        |
-| `@pane_agent`              | `claude` / `codex` / empty                                          |
+| `@pane_agent`              | `claude` / `codex` / `opencode` / empty                             |
 | `@pane_name`               | Friendly agent/session name (from `/rename` on Claude)              |
 | `@pane_role`               | `sidebar` for the sidebar pane itself; empty for agent panes        |
 | `@pane_prompt`             | Latest user prompt text or response preview                         |
