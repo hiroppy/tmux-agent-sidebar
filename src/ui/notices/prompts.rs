@@ -23,7 +23,12 @@ pub(crate) fn prompt_for_agent(agent: &str) -> Option<String> {
             plugin_root_from_exe().as_deref(),
         )),
         CODEX_AGENT => {
-            let exe_path = std::env::current_exe().ok()?.to_string_lossy().into_owned();
+            // Shell-quote the path so an install location containing
+            // spaces (e.g. macOS `/Applications/tmux-agent-sidebar/…`)
+            // still yields a runnable command when the user pastes
+            // this prompt into their shell.
+            let exe_path =
+                crate::cli::setup::shell_quote(&std::env::current_exe().ok()?.to_string_lossy());
             Some(format!(
                 "Run {exe_path} setup codex. Before pasting the hooks, make sure \
                  ~/.codex/config.toml contains:\n\
@@ -241,5 +246,31 @@ mod tests {
     fn prompt_for_agent_none_for_unknown_agent() {
         assert_eq!(prompt_for_agent("gemini"), None);
         assert_eq!(prompt_for_agent(""), None);
+    }
+
+    #[test]
+    fn prompt_for_agent_codex_shell_quotes_executable_path() {
+        // Regression: the Codex prompt is rendered as ready-to-paste
+        // shell text, so an install path with whitespace (or any
+        // metacharacter) must go through the same `shell_quote`
+        // helper that the setup writer uses. Without quoting, a user
+        // who installs the plugin under `/Applications/tmux agent/`
+        // gets a broken command when they paste the prompt.
+        //
+        // We can't control `std::env::current_exe()` in tests, so
+        // the assertion compares against the quoted form of whatever
+        // the test binary path happens to be — the point is that
+        // the emitted prompt mirrors the canonical quoting helper.
+        let exe = std::env::current_exe()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let quoted = crate::cli::setup::shell_quote(&exe);
+        let codex = prompt_for_agent("codex").unwrap();
+        assert!(
+            codex.contains(&format!("Run {quoted} setup codex")),
+            "codex prompt should embed `shell_quote(current_exe())`: \
+             quoted={quoted}, prompt={codex}"
+        );
     }
 }

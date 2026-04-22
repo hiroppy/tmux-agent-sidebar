@@ -23,7 +23,12 @@ pub(in crate::cli::hook) fn on_notification(
     }
     set_status(pane, "waiting");
     set_attention(pane, "notification");
-    if !wait_reason.is_empty() {
+    if wait_reason.is_empty() {
+        // An explicit-but-empty wait_reason is the hook's way of saying
+        // "no reason"; drop any prior value so the sidebar doesn't keep
+        // rendering a stale cause from the previous notification.
+        tmux::unset_pane_option(pane, "@pane_wait_reason");
+    } else {
         tmux::set_pane_option(pane, "@pane_wait_reason", wait_reason);
     }
     let repo = repo_label_from_ctx(ctx);
@@ -183,6 +188,36 @@ mod tests {
         assert_eq!(
             tmux::test_mock::get(pane, "@pane_wait_reason").as_deref(),
             Some("permission")
+        );
+    }
+
+    #[test]
+    fn on_notification_empty_wait_reason_clears_stale_value() {
+        // Regression: an empty wait_reason used to be a no-op, which
+        // left the previously-written reason on the pane. A later
+        // notification that genuinely has no reason must drop the
+        // stale one so the sidebar does not keep rendering the wrong
+        // cause.
+        let _guard = tmux::test_mock::install();
+        let pane = "%NOTIF_STALE";
+        tmux::test_mock::set(pane, "@pane_wait_reason", "permission");
+
+        let ctx = AgentContext {
+            agent: "claude",
+            cwd: "/repo",
+            permission_mode: "default",
+            worktree: &None,
+            session_id: &None,
+        };
+        let notifications = desktop_notification::DesktopNotificationSettings {
+            enabled: false,
+            events: Default::default(),
+        };
+        on_notification(pane, &ctx, "", /* meta_only */ false, &notifications);
+
+        assert!(
+            !tmux::test_mock::contains(pane, "@pane_wait_reason"),
+            "empty wait_reason must clear a prior value"
         );
     }
 

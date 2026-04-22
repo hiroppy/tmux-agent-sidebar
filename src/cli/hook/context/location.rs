@@ -24,13 +24,21 @@ pub(in crate::cli::hook) fn resolve_cwd<'a>(
 }
 
 /// Sync worktree name/branch pane options from hook payload.
-/// Clears both options when worktree is None.
+///
+/// Clears both options when worktree is `None`. When worktree is `Some`
+/// but an individual field is empty, also clears that field so an
+/// explicit "no longer in a worktree" payload cannot leave stale
+/// metadata from a previous run behind.
 pub(in crate::cli::hook) fn sync_worktree_meta(pane: &str, worktree: &Option<WorktreeInfo>) {
     if let Some(wt) = worktree {
-        if !wt.name.is_empty() {
+        if wt.name.is_empty() {
+            tmux::unset_pane_option(pane, "@pane_worktree_name");
+        } else {
             tmux::set_pane_option(pane, "@pane_worktree_name", &wt.name);
         }
-        if !wt.branch.is_empty() {
+        if wt.branch.is_empty() {
+            tmux::unset_pane_option(pane, "@pane_worktree_branch");
+        } else {
             tmux::set_pane_option(pane, "@pane_worktree_branch", &wt.branch);
         }
     } else {
@@ -206,6 +214,38 @@ mod tests {
 
         assert!(!tmux::test_mock::contains(pane, "@pane_worktree_name"));
         assert!(!tmux::test_mock::contains(pane, "@pane_worktree_branch"));
+    }
+
+    #[test]
+    fn sync_worktree_meta_clears_individual_empty_fields() {
+        // Regression: a Some(worktree) payload with only `name`
+        // populated must still drop a stale `@pane_worktree_branch`
+        // that a previous run set — otherwise the sidebar keeps
+        // rendering the old branch.
+        let _guard = tmux::test_mock::install();
+        let pane = "%PARTIAL";
+        tmux::test_mock::set(pane, "@pane_worktree_name", "old-name");
+        tmux::test_mock::set(pane, "@pane_worktree_branch", "feat/old");
+
+        sync_worktree_meta(
+            pane,
+            &Some(WorktreeInfo {
+                name: "new-name".into(),
+                path: "/wt/new".into(),
+                branch: String::new(),
+                original_repo_dir: "/repo".into(),
+            }),
+        );
+
+        assert_eq!(
+            tmux::test_mock::get(pane, "@pane_worktree_name").as_deref(),
+            Some("new-name"),
+            "non-empty name must overwrite"
+        );
+        assert!(
+            !tmux::test_mock::contains(pane, "@pane_worktree_branch"),
+            "empty branch must clear the stale option"
+        );
     }
 
     #[test]

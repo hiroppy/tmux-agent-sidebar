@@ -30,7 +30,14 @@ pub fn modes_for(agent: &str) -> &'static [&'static str] {
 pub fn agent_command(agent: &str, mode: &str) -> String {
     match (agent, mode) {
         ("claude", "" | "default") => "claude".into(),
-        ("claude", m) => format!("claude --permission-mode {m}"),
+        // Only forward modes that Claude Code's `--permission-mode`
+        // actually accepts; an unrecognised value (e.g. a stale tmux
+        // option from an old build) would otherwise make `claude` exit
+        // with an argument error instead of starting up.
+        ("claude", m @ ("plan" | "acceptEdits" | "dontAsk" | "bypassPermissions")) => {
+            format!("claude --permission-mode {m}")
+        }
+        ("claude", _) => "claude".into(),
         ("codex", "auto") => "codex --full-auto".into(),
         ("codex", "bypassPermissions") => "codex --dangerously-bypass-approvals-and-sandbox".into(),
         ("codex", _) => "codex".into(),
@@ -110,6 +117,32 @@ mod tests {
     #[test]
     fn agent_command_unknown_agent_passes_through() {
         assert_eq!(agent_command("gemini", "default"), "gemini");
+    }
+
+    #[test]
+    fn agent_command_claude_unknown_mode_falls_back_to_bare_claude() {
+        // Regression: an unknown / stale Claude mode (e.g. persisted
+        // from an older build whose mode list has since been removed)
+        // used to be forwarded verbatim into `--permission-mode`,
+        // making `claude` exit with an argument error on spawn. The
+        // documented contract is "fall back to launching the agent
+        // with no flags"; this test pins that behaviour.
+        assert_eq!(agent_command("claude", "unknown"), "claude");
+        assert_eq!(agent_command("claude", "legacy-mode-from-v0"), "claude");
+    }
+
+    #[test]
+    fn agent_command_claude_all_whitelisted_modes_forwarded() {
+        // Every mode the popup offers must still round-trip through
+        // `--permission-mode` after the whitelist was introduced.
+        for mode in CLAUDE_MODES {
+            let got = agent_command("claude", mode);
+            let expected = match *mode {
+                "default" => "claude".to_string(),
+                m => format!("claude --permission-mode {m}"),
+            };
+            assert_eq!(got, expected, "mode {mode} must match doc contract");
+        }
     }
 
     #[test]

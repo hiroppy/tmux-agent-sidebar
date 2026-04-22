@@ -142,8 +142,13 @@ pub(in crate::ui) fn render_notices_popup(frame: &mut Frame, state: &mut AppStat
             }
         }
     }
-    // Width: padding(1 left + 1 right) + widest rendered line + borders(2)
-    let popup_width = (widest_line + 4).min(area.width as usize).max(12) as u16;
+    // Width: padding(1 left + 1 right) + widest rendered line + borders(2).
+    // Apply the 12-wide minimum BEFORE clamping to `area` so it cannot
+    // push the popup past the available sidebar width on a very narrow
+    // split — an oversize popup would otherwise leave `state.popup`
+    // with an invalid hit-test region whose click rects extend past
+    // the terminal buffer.
+    let popup_width = (widest_line + 4).max(12).min(area.width as usize) as u16;
     // Left-aligned, below the 2-row header. Clamp the height to the space
     // *below* the header so the rect never extends past the widget bottom
     // on short sidebars (capping against `area.height` would overflow).
@@ -151,7 +156,21 @@ pub(in crate::ui) fn render_notices_popup(frame: &mut Frame, state: &mut AppStat
     let popup_y = area.y + 2;
     let height_budget = area.height.saturating_sub(2);
     // `lines_len` counts the inner text rows; add 2 for the border frame.
-    let popup_height = ((lines_len as u16) + 2).min(height_budget).max(3);
+    // Same ordering as `popup_width`: enforce the 3-row floor first so
+    // the final `.min(height_budget)` still caps the rect to a short
+    // sidebar instead of overflowing it.
+    let popup_height = ((lines_len as u16) + 2).max(3).min(height_budget);
+
+    // On a sidebar that genuinely has no room (the header alone already
+    // fills it, or the terminal is only a couple of columns wide) there
+    // is nothing the popup can paint. Dropping the hit-test region here
+    // is safer than rendering a degenerate one that swallows clicks
+    // outside the visible popup.
+    if popup_height < 3 || popup_width < 2 {
+        state.popup.set_notices_area(None);
+        state.notices.copy_targets.clear();
+        return;
+    }
 
     let popup_rect = Rect::new(popup_x, popup_y, popup_width, popup_height);
     state.popup.set_notices_area(Some(popup_rect));
@@ -226,15 +245,22 @@ pub(in crate::ui) fn render_notices_popup(frame: &mut Frame, state: &mut AppStat
             let label_slot_start = inner_width - LABEL_MAX_WIDTH;
             let gap_before_label = inner_width - head_width - label_width;
             let line_index = lines.len();
-            copy_targets.push(NoticesCopyTarget {
-                area: Rect::new(
-                    inner.x + label_slot_start as u16,
-                    inner.y + line_index as u16,
-                    LABEL_MAX_WIDTH as u16,
-                    1,
-                ),
-                agent: CLAUDE_AGENT.to_string(),
-            });
+            // Only register the click hit region for rows that the
+            // paragraph will actually render. When the popup is
+            // height-clipped, a label belonging to a hidden row
+            // would otherwise intercept clicks that land OUTSIDE
+            // the visible popup.
+            if line_index < inner.height as usize {
+                copy_targets.push(NoticesCopyTarget {
+                    area: Rect::new(
+                        inner.x + label_slot_start as u16,
+                        inner.y + line_index as u16,
+                        LABEL_MAX_WIDTH as u16,
+                        1,
+                    ),
+                    agent: CLAUDE_AGENT.to_string(),
+                });
+            }
             lines.push(Line::from(vec![
                 Span::styled(head, Style::default().fg(theme.status_waiting)),
                 Span::raw(" ".repeat(gap_before_label)),
@@ -280,15 +306,21 @@ pub(in crate::ui) fn render_notices_popup(frame: &mut Frame, state: &mut AppStat
                 let gap_before_label = inner_width - head_width - label_width;
                 let leading_slot_pad = LABEL_MAX_WIDTH - label_width;
 
-                copy_targets.push(NoticesCopyTarget {
-                    area: Rect::new(
-                        inner.x + label_slot_start as u16,
-                        inner.y + line_index as u16,
-                        LABEL_MAX_WIDTH as u16,
-                        1,
-                    ),
-                    agent: group.agent.clone(),
-                });
+                // Same clipping guard as the plugin subitem path:
+                // skip the click target when this row falls outside
+                // the paragraph's visible area so hidden labels do
+                // not intercept clicks below the rendered widget.
+                if line_index < inner.height as usize {
+                    copy_targets.push(NoticesCopyTarget {
+                        area: Rect::new(
+                            inner.x + label_slot_start as u16,
+                            inner.y + line_index as u16,
+                            LABEL_MAX_WIDTH as u16,
+                            1,
+                        ),
+                        agent: group.agent.clone(),
+                    });
+                }
 
                 // `gap_before_label` stretches to keep the label flush-right;
                 // `leading_slot_pad` right-aligns the (shorter) `[copy]`
@@ -778,6 +810,48 @@ mod tests {
         let mut state = state_with(None, vec![("codex", vec!["ThisIsAnExtremelyLongHookName"])]);
         let _ = render_notices_popup_text(&mut state, 20, 8);
         assert!(state.notices.copy_targets.is_empty());
+    }
+
+    #[test]
+    fn rendering_drops_popup_when_area_is_too_small() {
+        // Regression: the `.max(12)` / `.max(3)` floors used to run
+        // AFTER `.min(area)` so the popup_rect could exceed the
+        // terminal buffer on a tiny sidebar. Guard now drops the
+        // hit-test region entirely when there is no room.
+        let mut state = state_with(None, vec![("codex", vec!["Stop"])]);
+        // 1 column × 2 rows leaves no space for a bordered popup.
+        let _ = render_notices_popup_text(&mut state, 1, 2);
+        assert!(
+            state.notices.copy_targets.is_empty(),
+            "tiny area must not register click targets"
+        );
+    }
+
+    #[test]
+    fn rendering_height_clipped_rows_do_not_register_click_targets() {
+        // Regression: a height-clipped popup used to still push a
+        // click target for the clipped `[copy]` row, so clicks
+        // below the visible popup would land on a hidden hit
+        // region. The paragraph scrolls nothing, so rows beyond
+        // `inner.height` should be treated as invisible.
+        let mut state = state_with(None, vec![("codex", vec!["Stop"])]);
+        // Force the popup taller than the clip window — height 5
+        // means `popup_height` gets clamped and the "[copy]" row
+        // for codex (row index 3 within inner) should fall outside
+        // the visible 1-row inner area after border subtraction.
+        let _ = render_notices_popup_text(&mut state, 40, 5);
+        for target in &state.notices.copy_targets {
+            let inner_y_max = target.area.y;
+            // Every surviving target must land within the rendered
+            // popup rect. The popup starts at y=2 (below the 2-row
+            // header) and its inner region height is
+            // `popup_height - 2`. If our guard worked, no target
+            // should be at or below `popup_y + popup_height`.
+            // With height_budget=3 the popup is 3 rows total, inner
+            // is 1 row, so any target past y=3 means a clipped row
+            // slipped through.
+            assert!(inner_y_max < 5, "clipped click target at y={inner_y_max}");
+        }
     }
 
     #[test]

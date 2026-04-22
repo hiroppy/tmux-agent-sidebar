@@ -1224,6 +1224,73 @@ mod tests {
     }
 
     #[test]
+    fn mouse_click_on_repo_popup_title_row_does_not_confirm() {
+        // Regression: clicking the popup's top border/title row used
+        // to collapse to `item_index == 0` via `saturating_sub(1)` and
+        // immediately switch the filter to the first repo.
+        let mut state = AppState::new("%99".into());
+        state.repo_groups = vec![
+            RepoGroup {
+                name: "alpha".into(),
+                has_focus: true,
+                panes: vec![(test_pane("%1"), PaneGitInfo::default())],
+            },
+            RepoGroup {
+                name: "beta".into(),
+                has_focus: false,
+                panes: vec![(test_pane("%2"), PaneGitInfo::default())],
+            },
+        ];
+        state.global.repo_filter = RepoFilter::Repo("beta".into());
+        state.popup = PopupState::Repo {
+            selected: 2,
+            area: Some(ratatui::layout::Rect::new(0, 3, 20, 5)),
+        };
+
+        // Click the top border row (row == area.y = 3).
+        state.handle_mouse_click(3, 5);
+
+        assert!(
+            state.is_repo_popup_open(),
+            "title-row click must keep the popup open"
+        );
+        assert_eq!(
+            state.global.repo_filter,
+            RepoFilter::Repo("beta".into()),
+            "title-row click must not confirm a selection"
+        );
+    }
+
+    #[test]
+    fn mouse_click_on_repo_popup_item_row_confirms_selection() {
+        // Companion to the regression test above: clicks on the item
+        // rows (area.y + 1, area.y + 2, …) should still confirm.
+        let mut state = AppState::new("%99".into());
+        state.repo_groups = vec![
+            RepoGroup {
+                name: "alpha".into(),
+                has_focus: true,
+                panes: vec![(test_pane("%1"), PaneGitInfo::default())],
+            },
+            RepoGroup {
+                name: "beta".into(),
+                has_focus: false,
+                panes: vec![(test_pane("%2"), PaneGitInfo::default())],
+            },
+        ];
+        state.popup = PopupState::Repo {
+            selected: 0,
+            area: Some(ratatui::layout::Rect::new(0, 3, 20, 5)),
+        };
+
+        // Click row area.y + 1 (first list entry = "All").
+        state.handle_mouse_click(4, 5);
+
+        assert!(!state.is_repo_popup_open());
+        assert_eq!(state.global.repo_filter, RepoFilter::All);
+    }
+
+    #[test]
     fn mouse_click_with_scroll_offset() {
         let mut state = AppState::new("%99".into());
         state.layout.pane_row_targets = vec![

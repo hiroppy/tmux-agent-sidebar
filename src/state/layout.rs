@@ -198,10 +198,17 @@ impl AppState {
             if let Some(area) = self.repo_popup_area()
                 && point_in_rect(row, col, area)
             {
-                let item_index = (row - area.y).saturating_sub(1) as usize;
-                if item_index < self.repo_names().len() {
-                    self.set_repo_popup_selected(item_index);
-                    self.confirm_repo_popup();
+                // Skip clicks on the popup chrome (top border / title row).
+                // Without this guard `saturating_sub(1)` collapses a click on
+                // the title row into `item_index == 0`, switching the filter
+                // to the first repo the moment the user reaches for the
+                // popup.
+                if row > area.y {
+                    let item_index = (row - area.y - 1) as usize;
+                    if item_index < self.repo_names().len() {
+                        self.set_repo_popup_selected(item_index);
+                        self.confirm_repo_popup();
+                    }
                 }
                 return;
             }

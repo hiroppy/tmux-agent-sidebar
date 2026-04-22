@@ -24,7 +24,16 @@ pub(in crate::cli::hook) fn on_session_start(
     set_notification_run_id(pane);
     tmux::unset_pane_option(pane, "@pane_prompt");
     tmux::unset_pane_option(pane, "@pane_prompt_source");
-    tmux::unset_pane_option(pane, "@pane_subagents");
+    // `@pane_subagents` is deliberately preserved across SessionStart.
+    // Subagents share the parent's `$TMUX_PANE`, so when a subagent
+    // fires its own SessionStart after SubagentStart has populated the
+    // list, clearing it here would drop the marker that
+    // `should_update_cwd` and `drain_pending_teardowns` rely on. The
+    // normal teardown paths (`run_session_end_teardown` via
+    // `clear_all_meta`) already clear the list when a real session
+    // ends, so the only state this would skip clearing is a subagent
+    // list stranded by a hard crash — acceptable vs. racing against
+    // legitimate subagent activity.
     // A fresh session overrides any deferred teardown that was waiting
     // for the previous run's subagents to drain.
     tmux::unset_pane_option(pane, PENDING_SESSION_END);
@@ -182,6 +191,26 @@ mod tests {
         assert!(
             !tmux::test_mock::contains(pane, "@pane_prompt"),
             "SessionStart should clear any stale prompt"
+        );
+    }
+
+    #[test]
+    fn on_session_start_preserves_subagents_list() {
+        // Regression: a subagent's own SessionStart arriving after
+        // SubagentStart seeded @pane_subagents must NOT drop the
+        // parent's list. If it did, should_update_cwd would start
+        // returning true and the next hook from either side could
+        // clobber the parent's cwd/worktree metadata.
+        let _guard = tmux::test_mock::install();
+        let pane = "%SUBAGENT_LIVE";
+        tmux::test_mock::set(pane, "@pane_subagents", "Explore:sub-1");
+
+        on_session_start(pane, &basic_ctx(), "");
+
+        assert_eq!(
+            tmux::test_mock::get(pane, "@pane_subagents").as_deref(),
+            Some("Explore:sub-1"),
+            "SessionStart must not wipe an active subagent list"
         );
     }
 

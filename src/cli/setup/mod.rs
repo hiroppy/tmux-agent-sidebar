@@ -26,7 +26,7 @@ const _CODEX_TABLE_REACHABLE: &[HookRegistration] = CodexAdapter::HOOK_REGISTRAT
 /// Slow path: wrap the value in single quotes and escape any internal
 /// single quotes as `'\''`. Safe for paths containing spaces, `$`, `;`,
 /// backticks, and other shell metacharacters.
-fn shell_quote(s: &str) -> String {
+pub(crate) fn shell_quote(s: &str) -> String {
     fn is_safe(c: char) -> bool {
         c.is_ascii_alphanumeric()
             || matches!(c, '/' | '-' | '_' | '.' | '~' | '+' | '=' | ',' | '@' | ':')

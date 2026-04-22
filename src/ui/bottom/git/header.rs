@@ -79,7 +79,10 @@ pub(super) fn render_git_header(
 
         if let Some(ref pr) = pr_text {
             let gap = pad_to(branch_w + right_w, inner_w);
-            let pr_x_offset = (inner_w - pr_w) as u16;
+            // `saturating_sub` so a very narrow tmux split (pane
+            // width smaller than the PR label) can't panic in debug
+            // builds or underflow-wrap in release builds.
+            let pr_x_offset = inner_w.saturating_sub(pr_w) as u16;
             left_spans.push(Span::raw(gap));
             left_spans.extend(movement_spans);
             if movement_w > 0 {
@@ -152,4 +155,27 @@ pub(super) fn render_git_header(
     )));
 
     (lines, pr_link_info)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_git_header_narrow_pane_does_not_panic() {
+        // Regression: `inner_w - pr_w` used to underflow on debug
+        // builds when the pane was narrower than the PR label
+        // (`#1234`). The sidebar can genuinely get this narrow on a
+        // two-column split; header rendering must stay panic-free.
+        let mut state = AppState::new("%99".into());
+        state.git.branch = "main".into();
+        state.git.pr_number = Some("12345".into());
+        state.git.remote_url = "https://github.com/o/r".into();
+
+        // `inner_w=3` is narrower than the "#12345" PR label (6).
+        let (lines, link) = render_git_header(&state, 3);
+        assert!(!lines.is_empty(), "header must render something");
+        // The overlay x_offset is clamped to 0 instead of underflowing.
+        assert_eq!(link.map(|l| l.x_offset), Some(0));
+    }
 }
