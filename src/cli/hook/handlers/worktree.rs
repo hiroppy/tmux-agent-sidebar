@@ -1,17 +1,14 @@
-use crate::tmux;
-
 use super::super::context::{
-    PENDING_WORKTREE_REMOVE, mark_pending, run_worktree_remove_teardown, should_update_cwd,
+    PENDING_WORKTREE_REMOVE, mark_pending, pane_writes_allowed, run_worktree_remove_teardown,
 };
 
 pub(in crate::cli::hook) fn on_worktree_remove(pane: &str) -> i32 {
     // If subagents are active, the removed worktree may belong to one of
     // them — we can't distinguish parent from child at this point, so the
     // safe default is to leave the parent's pane-scoped metadata intact.
-    // Same deferred-drain idea as `on_session_end`: record the intent and
-    // let `on_subagent_stop` execute it once children are gone.
-    let current_subagents = tmux::get_pane_option_value(pane, "@pane_subagents");
-    if !should_update_cwd(&current_subagents) {
+    // Record the intent and let `on_subagent_stop` execute it once
+    // children are gone.
+    if !pane_writes_allowed(pane) {
         mark_pending(pane, PENDING_WORKTREE_REMOVE);
         return 0;
     }
@@ -22,6 +19,7 @@ pub(in crate::cli::hook) fn on_worktree_remove(pane: &str) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tmux;
 
     #[test]
     fn on_worktree_remove_preserves_parent_state_when_subagents_active() {

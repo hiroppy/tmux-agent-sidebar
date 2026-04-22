@@ -5,8 +5,8 @@ use crate::tmux;
 
 use super::super::context::{
     AgentContext, PENDING_SESSION_END, PENDING_WORKTREE_REMOVE, branch_label_from_pane,
-    clear_run_state, repo_label_from_pane, run_session_end_teardown, set_agent_meta,
-    should_update_cwd,
+    clear_run_state, pane_writes_allowed, repo_label_from_pane, run_session_end_teardown,
+    set_agent_meta,
 };
 use super::super::notifications::{
     notification_run_id, notify_desktop, session_end_body, session_end_fingerprint,
@@ -70,8 +70,7 @@ pub(in crate::cli::hook) fn on_session_end(
     // metadata until the next SessionStart clears it. Compared to
     // clobbering a live parent, the stale-metadata failure mode is
     // far safer and the one the user can recover from.
-    let current_subagents = tmux::get_pane_option_value(pane, "@pane_subagents");
-    if !should_update_cwd(&current_subagents) {
+    if !pane_writes_allowed(pane) {
         return 0;
     }
 

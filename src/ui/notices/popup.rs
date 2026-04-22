@@ -304,7 +304,6 @@ pub(in crate::ui) fn render_notices_popup(frame: &mut Frame, state: &mut AppStat
                 let label_width = display_width(label_text);
                 let label_slot_start = inner_width - LABEL_MAX_WIDTH;
                 let gap_before_label = inner_width - head_width - label_width;
-                let leading_slot_pad = LABEL_MAX_WIDTH - label_width;
 
                 // Same clipping guard as the plugin subitem path:
                 // skip the click target when this row falls outside
@@ -322,11 +321,6 @@ pub(in crate::ui) fn render_notices_popup(frame: &mut Frame, state: &mut AppStat
                     });
                 }
 
-                // `gap_before_label` stretches to keep the label flush-right;
-                // `leading_slot_pad` right-aligns the (shorter) `[copy]`
-                // label within the reserved `[copied]`-sized slot so the
-                // glyph always ends at `inner_width`.
-                let _ = leading_slot_pad;
                 lines.push(Line::from(vec![
                     Span::styled(
                         head,

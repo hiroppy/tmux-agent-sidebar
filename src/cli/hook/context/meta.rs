@@ -93,8 +93,7 @@ pub(in crate::cli::hook) fn now_epoch_millis() -> u64 {
 /// Skipped while subagents are still active so a parent Stop event doesn't
 /// wipe task state children are still driving.
 pub(in crate::cli::hook) fn mark_task_reset(pane: &str) {
-    let current_subagents = tmux::get_pane_option_value(pane, "@pane_subagents");
-    if !current_subagents.is_empty() {
+    if !pane_writes_allowed(pane) {
         return;
     }
     crate::cli::hook::activity::write_activity_entry(pane, crate::activity::TASK_RESET_MARKER, "");
