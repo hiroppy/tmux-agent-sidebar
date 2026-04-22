@@ -358,6 +358,34 @@ fn detect_codex_permission_mode(args: &str) -> PermissionMode {
     PermissionMode::Default
 }
 
+fn process_basename(command: &str) -> &str {
+    let command = command.trim_matches('"');
+    Path::new(command)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(command)
+}
+
+fn first_command_arg(args: &str) -> Option<&str> {
+    let args = args.trim();
+    if args.is_empty() {
+        return None;
+    }
+    if let Some(rest) = args.strip_prefix('"') {
+        return rest.split_once('"').map(|(cmd, _)| cmd).or(Some(rest));
+    }
+    args.split_whitespace().next()
+}
+
+fn process_matches_agent(info: &ProcessInfo, agent_name: &str) -> bool {
+    if process_basename(&info.comm) == agent_name {
+        return true;
+    }
+    first_command_arg(&info.args)
+        .map(|command| process_basename(command) == agent_name)
+        .unwrap_or(false)
+}
+
 #[derive(Debug, Clone)]
 struct ProcessInfo {
     comm: String,
@@ -441,7 +469,7 @@ fn apply_codex_permission_modes(
             let Some(info) = info_by_pid.get(&descendant) else {
                 continue;
             };
-            if info.comm != CODEX_AGENT {
+            if !process_matches_agent(info, CODEX_AGENT) {
                 continue;
             }
             if let Some(pane) = panes.get_mut(*idx) {
@@ -602,6 +630,29 @@ mod tests {
         let mut panes = vec![test_pane_codex("%1")];
         let pids = vec![(0, 101)];
         let ps_out = "101 1 bash /bin/bash\n102 101 sh -c wrapper\n103 102 codex /usr/local/bin/codex --yolo\n";
+        let (children_of, info_by_pid) = parse_ps_processes(ps_out);
+
+        apply_codex_permission_modes(&mut panes, &pids, &children_of, &info_by_pid);
+        assert_eq!(panes[0].permission_mode, PermissionMode::BypassPermissions);
+    }
+
+    #[test]
+    fn apply_codex_permission_modes_matches_path_comm() {
+        let mut panes = vec![test_pane_codex("%1")];
+        let pids = vec![(0, 101)];
+        let ps_out = "101 1 /bin/zsh /bin/zsh\n102 101 /opt/homebrew/bin/codex /opt/homebrew/bin/codex --full-auto\n";
+        let (children_of, info_by_pid) = parse_ps_processes(ps_out);
+
+        apply_codex_permission_modes(&mut panes, &pids, &children_of, &info_by_pid);
+        assert_eq!(panes[0].permission_mode, PermissionMode::Auto);
+    }
+
+    #[test]
+    fn apply_codex_permission_modes_matches_quoted_args_command() {
+        let mut panes = vec![test_pane_codex("%1")];
+        let pids = vec![(0, 101)];
+        let ps_out =
+            "101 1 /bin/zsh /bin/zsh\n102 101 node \"/opt/Codex Tools/bin/codex\" --yolo\n";
         let (children_of, info_by_pid) = parse_ps_processes(ps_out);
 
         apply_codex_permission_modes(&mut panes, &pids, &children_of, &info_by_pid);

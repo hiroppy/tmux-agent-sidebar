@@ -1,4 +1,5 @@
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::path::Path;
 use std::process::Command;
 
 use crate::tmux::{AgentType, SessionInfo};
@@ -108,16 +109,33 @@ fn process_tree_has_agent(
 }
 
 fn process_matches_agent(info: &ProcessInfo, agent_name: &str) -> bool {
-    if info.comm == agent_name {
+    if process_basename(&info.comm) == agent_name {
         return true;
     }
 
-    let Some(command) = info.args.split_whitespace().next() else {
+    let Some(command) = first_command_arg(&info.args) else {
         return false;
     };
+    process_basename(command) == agent_name
+}
+
+fn process_basename(command: &str) -> &str {
     let command = command.trim_matches('"');
-    let basename = command.rsplit('/').next().unwrap_or(command);
-    basename == agent_name
+    Path::new(command)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(command)
+}
+
+fn first_command_arg(args: &str) -> Option<&str> {
+    let args = args.trim();
+    if args.is_empty() {
+        return None;
+    }
+    if let Some(rest) = args.strip_prefix('"') {
+        return rest.split_once('"').map(|(cmd, _)| cmd).or(Some(rest));
+    }
+    args.split_whitespace().next()
 }
 
 fn is_shell_command(basename: &str) -> bool {
@@ -140,7 +158,7 @@ fn best_command_for_pane(
         let Some(info) = info_by_pid.get(&pid) else {
             continue;
         };
-        let basename = info.comm.as_str();
+        let basename = process_basename(&info.comm);
         if basename.is_empty() || is_shell_command(basename) {
             continue;
         }
@@ -326,6 +344,30 @@ mod tests {
     }
 
     #[test]
+    fn best_command_for_pane_treats_path_comm_as_shell() {
+        let children = HashMap::from([(10, vec![11]), (11, vec![])]);
+        let info = HashMap::from([
+            (
+                10,
+                ProcessInfo {
+                    comm: "/bin/zsh".to_string(),
+                    args: "/bin/zsh".to_string(),
+                },
+            ),
+            (
+                11,
+                ProcessInfo {
+                    comm: "/usr/bin/node".to_string(),
+                    args: "/usr/bin/node /tmp/server.js --port 3000".to_string(),
+                },
+            ),
+        ]);
+
+        let command = best_command_for_pane(10, &children, &info).unwrap();
+        assert_eq!(command, "/usr/bin/node /tmp/server.js --port 3000");
+    }
+
+    #[test]
     fn descendant_pids_walks_process_tree() {
         let children = HashMap::from([(1, vec![2, 3]), (2, vec![4]), (4, vec![5])]);
         let seen = descendant_pids(&[1], &children);
@@ -396,6 +438,20 @@ mod tests {
             &ProcessInfo {
                 comm: "codex".to_string(),
                 args: "\"/usr/local/bin/codex\" run".to_string(),
+            },
+            "codex"
+        ));
+        assert!(process_matches_agent(
+            &ProcessInfo {
+                comm: "/opt/homebrew/bin/codex".to_string(),
+                args: "/opt/homebrew/bin/codex --full-auto".to_string(),
+            },
+            "codex"
+        ));
+        assert!(process_matches_agent(
+            &ProcessInfo {
+                comm: "node".to_string(),
+                args: "\"/opt/Codex Tools/bin/codex\" --full-auto".to_string(),
             },
             "codex"
         ));
