@@ -8,11 +8,11 @@ use crate::tmux;
 /// deferred-teardown dance was too dangerous to keep. The constant is
 /// retained so `clear_all_meta` and `on_session_start` can still sweep
 /// a stale marker left behind by a pre-fix install.
-pub(in crate::cli::hook) const PENDING_SESSION_END: &str = "@pane_pending_session_end";
+pub(in crate::cli::hook) const PENDING_SESSION_END: &str = tmux::PANE_PENDING_SESSION_END;
 /// Tmux pane option set when WorktreeRemove is deferred because
 /// subagents are still active. Drained by `on_subagent_stop` once
 /// `@pane_subagents` becomes empty.
-pub(in crate::cli::hook) const PENDING_WORKTREE_REMOVE: &str = "@pane_pending_worktree_remove";
+pub(in crate::cli::hook) const PENDING_WORKTREE_REMOVE: &str = tmux::PANE_PENDING_WORKTREE_REMOVE;
 
 pub(in crate::cli::hook) fn mark_pending(pane: &str, key: &str) {
     tmux::set_pane_option(pane, key, "1");
@@ -51,5 +51,5 @@ pub(in crate::cli::hook) fn run_worktree_remove_teardown(pane: &str) {
     sync_worktree_meta(pane, &None);
     // Clear hook-set cwd so query_sessions() falls back to
     // pane_current_path, avoiding stale worktree path association.
-    tmux::unset_pane_option(pane, "@pane_cwd");
+    tmux::unset_pane_option(pane, tmux::PANE_CWD);
 }

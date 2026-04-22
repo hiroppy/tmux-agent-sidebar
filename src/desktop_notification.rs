@@ -209,9 +209,9 @@ struct NotificationStamp {
 
 fn stamp_option_key(kind: DesktopNotificationKind) -> &'static str {
     match kind {
-        DesktopNotificationKind::TaskCompleted => "@pane_os_notify_task_completed",
-        DesktopNotificationKind::TaskFailed => "@pane_os_notify_task_failed",
-        DesktopNotificationKind::PermissionRequired => "@pane_os_notify_permission_required",
+        DesktopNotificationKind::TaskCompleted => tmux::PANE_OS_NOTIFY_TASK_COMPLETED,
+        DesktopNotificationKind::TaskFailed => tmux::PANE_OS_NOTIFY_TASK_FAILED,
+        DesktopNotificationKind::PermissionRequired => tmux::PANE_OS_NOTIFY_PERMISSION_REQUIRED,
     }
 }
 

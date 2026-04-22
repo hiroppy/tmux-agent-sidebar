@@ -13,9 +13,9 @@ pub(in crate::cli::hook) fn on_subagent_start(
     let Some(id) = agent_id.filter(|s| !s.is_empty()) else {
         return 0;
     };
-    let current = tmux::get_pane_option_value(pane, "@pane_subagents");
+    let current = tmux::get_pane_option_value(pane, tmux::PANE_SUBAGENTS);
     let new_val = append_subagent(&current, agent_type, id);
-    tmux::set_pane_option(pane, "@pane_subagents", &new_val);
+    tmux::set_pane_option(pane, tmux::PANE_SUBAGENTS, &new_val);
     0
 }
 
@@ -23,15 +23,15 @@ pub(in crate::cli::hook) fn on_subagent_stop(pane: &str, agent_id: Option<&str>)
     let Some(id) = agent_id.filter(|s| !s.is_empty()) else {
         return 0;
     };
-    let current = tmux::get_pane_option_value(pane, "@pane_subagents");
+    let current = tmux::get_pane_option_value(pane, tmux::PANE_SUBAGENTS);
     let drained_to_empty = match remove_subagent(&current, id) {
         None => false,
         Some(new_val) if new_val.is_empty() => {
-            tmux::unset_pane_option(pane, "@pane_subagents");
+            tmux::unset_pane_option(pane, tmux::PANE_SUBAGENTS);
             true
         }
         Some(new_val) => {
-            tmux::set_pane_option(pane, "@pane_subagents", &new_val);
+            tmux::set_pane_option(pane, tmux::PANE_SUBAGENTS, &new_val);
             false
         }
     };
@@ -65,12 +65,12 @@ mod tests {
         let pane = "%SUB_START";
         on_subagent_start(pane, "Explore", Some("sub-1"));
         assert_eq!(
-            tmux::test_mock::get(pane, "@pane_subagents").as_deref(),
+            tmux::test_mock::get(pane, tmux::PANE_SUBAGENTS).as_deref(),
             Some("Explore:sub-1")
         );
         on_subagent_start(pane, "Plan", Some("sub-2"));
         assert_eq!(
-            tmux::test_mock::get(pane, "@pane_subagents").as_deref(),
+            tmux::test_mock::get(pane, tmux::PANE_SUBAGENTS).as_deref(),
             Some("Explore:sub-1,Plan:sub-2")
         );
     }
@@ -80,9 +80,9 @@ mod tests {
         let _guard = tmux::test_mock::install();
         let pane = "%SUB_NO_ID";
         on_subagent_start(pane, "Explore", None);
-        assert!(!tmux::test_mock::contains(pane, "@pane_subagents"));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_SUBAGENTS));
         on_subagent_start(pane, "Explore", Some(""));
-        assert!(!tmux::test_mock::contains(pane, "@pane_subagents"));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_SUBAGENTS));
     }
 
     // ─── deferred teardown regression tests ─────────────────────────
@@ -107,10 +107,10 @@ mod tests {
         // skip the event entirely and leave the parent's state alone.
         let _guard = tmux::test_mock::install();
         let pane = "%CHILD_SESSIONEND";
-        tmux::test_mock::set(pane, "@pane_subagents", "Explore:sub-1");
-        tmux::test_mock::set(pane, "@pane_agent", "claude");
-        tmux::test_mock::set(pane, "@pane_cwd", "/repo/parent");
-        tmux::test_mock::set(pane, "@pane_status", "running");
+        tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "Explore:sub-1");
+        tmux::test_mock::set(pane, tmux::PANE_AGENT, "claude");
+        tmux::test_mock::set(pane, tmux::PANE_CWD, "/repo/parent");
+        tmux::test_mock::set(pane, tmux::PANE_STATUS, "running");
         let log_path = crate::activity::log_file_path(pane);
         let _ = fs::create_dir_all(log_path.parent().unwrap());
         fs::write(&log_path, "1234567890|Read|main.rs\n").unwrap();
@@ -121,15 +121,15 @@ mod tests {
             "child SessionEnd must not record a pending teardown"
         );
         // Every parent field must survive.
-        assert!(tmux::test_mock::contains(pane, "@pane_agent"));
-        assert!(tmux::test_mock::contains(pane, "@pane_cwd"));
-        assert!(tmux::test_mock::contains(pane, "@pane_status"));
+        assert!(tmux::test_mock::contains(pane, tmux::PANE_AGENT));
+        assert!(tmux::test_mock::contains(pane, tmux::PANE_CWD));
+        assert!(tmux::test_mock::contains(pane, tmux::PANE_STATUS));
         assert!(log_path.exists());
 
         // Subsequent subagent stop must not trigger a teardown either.
         on_subagent_stop(pane, Some("sub-1"));
         assert!(
-            tmux::test_mock::contains(pane, "@pane_agent"),
+            tmux::test_mock::contains(pane, tmux::PANE_AGENT),
             "SubagentStop draining an empty list must not tear down a live parent"
         );
         assert!(log_path.exists());
@@ -141,23 +141,23 @@ mod tests {
     fn pending_worktree_remove_drains_when_last_subagent_stops() {
         let _guard = tmux::test_mock::install();
         let pane = "%PARENT_WT_DEFER";
-        tmux::test_mock::set(pane, "@pane_subagents", "Explore:sub-1");
-        tmux::test_mock::set(pane, "@pane_worktree_name", "feat");
-        tmux::test_mock::set(pane, "@pane_worktree_branch", "feat");
-        tmux::test_mock::set(pane, "@pane_cwd", "/wt/feat");
+        tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "Explore:sub-1");
+        tmux::test_mock::set(pane, tmux::PANE_WORKTREE_NAME, "feat");
+        tmux::test_mock::set(pane, tmux::PANE_WORKTREE_BRANCH, "feat");
+        tmux::test_mock::set(pane, tmux::PANE_CWD, "/wt/feat");
 
         on_worktree_remove(pane);
         assert!(
             tmux::test_mock::contains(pane, PENDING_WORKTREE_REMOVE),
             "WorktreeRemove must be deferred via the pending marker"
         );
-        assert!(tmux::test_mock::contains(pane, "@pane_worktree_name"));
+        assert!(tmux::test_mock::contains(pane, tmux::PANE_WORKTREE_NAME));
 
         on_subagent_stop(pane, Some("sub-1"));
 
-        assert!(!tmux::test_mock::contains(pane, "@pane_worktree_name"));
-        assert!(!tmux::test_mock::contains(pane, "@pane_worktree_branch"));
-        assert!(!tmux::test_mock::contains(pane, "@pane_cwd"));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_WORKTREE_NAME));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_WORKTREE_BRANCH));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_CWD));
         assert!(
             !tmux::test_mock::contains(pane, PENDING_WORKTREE_REMOVE),
             "pending marker must be cleared once teardown runs"
@@ -172,10 +172,10 @@ mod tests {
         // above `session_end_while_subagents_active_is_a_no_op`).
         let _guard = tmux::test_mock::install();
         let pane = "%PARENT_WT_PARTIAL";
-        tmux::test_mock::set(pane, "@pane_subagents", "Explore:sub-1,Plan:sub-2");
-        tmux::test_mock::set(pane, "@pane_worktree_name", "feat");
-        tmux::test_mock::set(pane, "@pane_worktree_branch", "feat");
-        tmux::test_mock::set(pane, "@pane_cwd", "/wt/feat");
+        tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "Explore:sub-1,Plan:sub-2");
+        tmux::test_mock::set(pane, tmux::PANE_WORKTREE_NAME, "feat");
+        tmux::test_mock::set(pane, tmux::PANE_WORKTREE_BRANCH, "feat");
+        tmux::test_mock::set(pane, tmux::PANE_CWD, "/wt/feat");
 
         on_worktree_remove(pane);
         assert!(tmux::test_mock::contains(pane, PENDING_WORKTREE_REMOVE));
@@ -183,14 +183,14 @@ mod tests {
         // First child stops — list still has sub-2, teardown must NOT fire.
         on_subagent_stop(pane, Some("sub-1"));
         assert!(
-            tmux::test_mock::contains(pane, "@pane_worktree_name"),
+            tmux::test_mock::contains(pane, tmux::PANE_WORKTREE_NAME),
             "teardown must wait for the LAST subagent"
         );
         assert!(tmux::test_mock::contains(pane, PENDING_WORKTREE_REMOVE));
 
         // Last child stops — now teardown fires.
         on_subagent_stop(pane, Some("sub-2"));
-        assert!(!tmux::test_mock::contains(pane, "@pane_worktree_name"));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_WORKTREE_NAME));
         assert!(!tmux::test_mock::contains(pane, PENDING_WORKTREE_REMOVE));
     }
 }

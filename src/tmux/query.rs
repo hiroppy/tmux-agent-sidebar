@@ -2,7 +2,12 @@ use std::path::Path;
 use std::process::Command;
 
 use super::commands::run_tmux;
-use super::options::unset_pane_option;
+use super::options::{
+    PANE_AGENT, PANE_ATTENTION, PANE_CWD, PANE_PENDING_SESSION_END, PANE_PENDING_WORKTREE_REMOVE,
+    PANE_PERMISSION_MODE, PANE_PROMPT, PANE_PROMPT_SOURCE, PANE_SESSION_ID, PANE_STARTED_AT,
+    PANE_STATUS, PANE_SUBAGENTS, PANE_WAIT_REASON, PANE_WORKTREE_BRANCH, PANE_WORKTREE_NAME,
+    unset_pane_option,
+};
 use super::types::{
     AgentType, CODEX_AGENT, PaneInfo, PaneStatus, PermissionMode, SessionInfo, WindowInfo,
     WorktreeMetadata,
@@ -284,21 +289,21 @@ pub(crate) fn parse_pane_fields(parts: &[String]) -> Option<PaneInfo> {
 /// key is added.
 fn clear_agent_pane_state(pane_id: &str) {
     const KEYS: &[&str] = &[
-        "@pane_agent",
-        "@pane_prompt",
-        "@pane_prompt_source",
-        "@pane_subagents",
-        "@pane_cwd",
-        "@pane_permission_mode",
-        "@pane_worktree_name",
-        "@pane_worktree_branch",
-        "@pane_session_id",
-        "@pane_pending_session_end",
-        "@pane_pending_worktree_remove",
-        "@pane_started_at",
-        "@pane_wait_reason",
-        "@pane_attention",
-        "@pane_status",
+        PANE_AGENT,
+        PANE_PROMPT,
+        PANE_PROMPT_SOURCE,
+        PANE_SUBAGENTS,
+        PANE_CWD,
+        PANE_PERMISSION_MODE,
+        PANE_WORKTREE_NAME,
+        PANE_WORKTREE_BRANCH,
+        PANE_SESSION_ID,
+        PANE_PENDING_SESSION_END,
+        PANE_PENDING_WORKTREE_REMOVE,
+        PANE_STARTED_AT,
+        PANE_WAIT_REASON,
+        PANE_ATTENTION,
+        PANE_STATUS,
     ];
     for key in KEYS {
         unset_pane_option(pane_id, key);
@@ -909,9 +914,9 @@ mod tests {
         // we race with the hook and lose legitimate prompt/status.
         let _guard = test_mock::install();
         let pane = "%CLAUDE_SHELL";
-        test_mock::set(pane, "@pane_agent", "claude");
-        test_mock::set(pane, "@pane_prompt", "keep me");
-        test_mock::set(pane, "@pane_status", "running");
+        test_mock::set(pane, PANE_AGENT, "claude");
+        test_mock::set(pane, PANE_PROMPT, "keep me");
+        test_mock::set(pane, PANE_STATUS, "running");
 
         let mut fields = full_fields();
         fields[pane_line_field::PANE_ID] = pane;
@@ -919,10 +924,10 @@ mod tests {
         fields[pane_line_field::PANE_CURRENT_COMMAND] = "bash";
         let _ = parse_pane_line(&make_pane_line(&fields));
 
-        assert!(test_mock::contains(pane, "@pane_agent"));
-        assert!(test_mock::contains(pane, "@pane_prompt"));
+        assert!(test_mock::contains(pane, PANE_AGENT));
+        assert!(test_mock::contains(pane, PANE_PROMPT));
         assert_eq!(
-            test_mock::get(pane, "@pane_prompt").as_deref(),
+            test_mock::get(pane, PANE_PROMPT).as_deref(),
             Some("keep me"),
             "claude prompt must survive — SessionEnd hook is the clear path",
         );
@@ -936,13 +941,13 @@ mod tests {
         // reverts to a shell. Mirrors the OpenCode regression test below.
         let _guard = test_mock::install();
         let pane = "%CODEX_STALE";
-        test_mock::set(pane, "@pane_agent", "codex");
-        test_mock::set(pane, "@pane_prompt", "previous codex prompt");
-        test_mock::set(pane, "@pane_prompt_source", "user");
-        test_mock::set(pane, "@pane_status", "waiting");
-        test_mock::set(pane, "@pane_started_at", "1700000000");
-        test_mock::set(pane, "@pane_cwd", "/repo/codex");
-        test_mock::set(pane, "@pane_wait_reason", "permission");
+        test_mock::set(pane, PANE_AGENT, "codex");
+        test_mock::set(pane, PANE_PROMPT, "previous codex prompt");
+        test_mock::set(pane, PANE_PROMPT_SOURCE, "user");
+        test_mock::set(pane, PANE_STATUS, "waiting");
+        test_mock::set(pane, PANE_STARTED_AT, "1700000000");
+        test_mock::set(pane, PANE_CWD, "/repo/codex");
+        test_mock::set(pane, PANE_WAIT_REASON, "permission");
         let log = crate::activity::log_file_path(pane);
         let _ = std::fs::create_dir_all(log.parent().unwrap());
         std::fs::write(&log, "1234|Bash|pytest\n").unwrap();
@@ -955,13 +960,13 @@ mod tests {
 
         assert!(parse_pane_line(&line).is_none());
         for key in &[
-            "@pane_agent",
-            "@pane_prompt",
-            "@pane_prompt_source",
-            "@pane_status",
-            "@pane_started_at",
-            "@pane_cwd",
-            "@pane_wait_reason",
+            PANE_AGENT,
+            PANE_PROMPT,
+            PANE_PROMPT_SOURCE,
+            PANE_STATUS,
+            PANE_STARTED_AT,
+            PANE_CWD,
+            PANE_WAIT_REASON,
         ] {
             assert!(
                 !test_mock::contains(pane, key),
@@ -983,13 +988,13 @@ mod tests {
         // from a clean slate without flashing stale prompt/status.
         let _guard = test_mock::install();
         let pane = "%OPENCODE_STALE";
-        test_mock::set(pane, "@pane_agent", "opencode");
-        test_mock::set(pane, "@pane_prompt", "previous run");
-        test_mock::set(pane, "@pane_prompt_source", "user");
-        test_mock::set(pane, "@pane_status", "running");
-        test_mock::set(pane, "@pane_started_at", "1700000000");
-        test_mock::set(pane, "@pane_cwd", "/repo");
-        test_mock::set(pane, "@pane_session_id", "ses-1");
+        test_mock::set(pane, PANE_AGENT, "opencode");
+        test_mock::set(pane, PANE_PROMPT, "previous run");
+        test_mock::set(pane, PANE_PROMPT_SOURCE, "user");
+        test_mock::set(pane, PANE_STATUS, "running");
+        test_mock::set(pane, PANE_STARTED_AT, "1700000000");
+        test_mock::set(pane, PANE_CWD, "/repo");
+        test_mock::set(pane, PANE_SESSION_ID, "ses-1");
         let log = crate::activity::log_file_path(pane);
         let _ = std::fs::create_dir_all(log.parent().unwrap());
         std::fs::write(&log, "1234|Bash|ls\n").unwrap();
@@ -1002,13 +1007,13 @@ mod tests {
 
         assert!(parse_pane_line(&line).is_none());
         for key in &[
-            "@pane_agent",
-            "@pane_prompt",
-            "@pane_prompt_source",
-            "@pane_status",
-            "@pane_started_at",
-            "@pane_cwd",
-            "@pane_session_id",
+            PANE_AGENT,
+            PANE_PROMPT,
+            PANE_PROMPT_SOURCE,
+            PANE_STATUS,
+            PANE_STARTED_AT,
+            PANE_CWD,
+            PANE_SESSION_ID,
         ] {
             assert!(
                 !test_mock::contains(pane, key),

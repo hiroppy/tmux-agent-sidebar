@@ -11,13 +11,13 @@ pub(super) fn notification_settings() -> desktop_notification::DesktopNotificati
 pub(super) fn set_notification_run_id(pane: &str) {
     tmux::set_pane_option(
         pane,
-        "@pane_notification_run_id",
+        tmux::PANE_NOTIFICATION_RUN_ID,
         &now_epoch_millis().to_string(),
     );
 }
 
 pub(super) fn notification_run_id(pane: &str) -> Option<u64> {
-    tmux::get_pane_option_value(pane, "@pane_notification_run_id")
+    tmux::get_pane_option_value(pane, tmux::PANE_NOTIFICATION_RUN_ID)
         .parse::<u64>()
         .ok()
 }
@@ -128,7 +128,7 @@ mod tests {
     fn notification_run_id_reads_tmux_option() {
         let _guard = tmux::test_mock::install();
         let pane = "%PANE_STARTED";
-        tmux::test_mock::set(pane, "@pane_notification_run_id", "1700000123456");
+        tmux::test_mock::set(pane, tmux::PANE_NOTIFICATION_RUN_ID, "1700000123456");
         assert_eq!(notification_run_id(pane), Some(1_700_000_123_456));
     }
 
@@ -184,7 +184,7 @@ mod tests {
         let _guard = tmux::test_mock::install();
         let pane = "%PANE_SET_RUN_ID";
         set_notification_run_id(pane);
-        let written = tmux::test_mock::get(pane, "@pane_notification_run_id");
+        let written = tmux::test_mock::get(pane, tmux::PANE_NOTIFICATION_RUN_ID);
         assert!(
             written
                 .as_deref()
