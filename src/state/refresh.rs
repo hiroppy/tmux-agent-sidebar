@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use crate::activity::{self, TaskProgress};
 use crate::tmux::{self, PaneStatus, SessionInfo};
@@ -46,10 +46,7 @@ pub(crate) fn classify_task_progress(
 
 impl AppState {
     pub(crate) fn refresh_now(&mut self) {
-        self.now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+        self.now = crate::time::now_epoch_secs();
     }
 
     pub(crate) fn apply_session_snapshot(

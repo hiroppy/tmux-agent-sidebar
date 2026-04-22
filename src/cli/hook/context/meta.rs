@@ -72,20 +72,6 @@ pub(in crate::cli::hook) fn clear_all_meta(pane: &str) {
     clear_run_state(pane);
 }
 
-pub(in crate::cli::hook) fn now_epoch_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
-pub(in crate::cli::hook) fn now_epoch_millis() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
-
 /// Write a task-reset marker to the activity log so `parse_task_progress`
 /// treats the upcoming run as a fresh batch — otherwise in-progress or
 /// abandoned tasks from a previous run would accumulate into the next one.
@@ -314,17 +300,5 @@ mod tests {
                 "expected {key} cleared"
             );
         }
-    }
-
-    #[test]
-    fn now_epoch_secs_and_millis_are_monotonic_pair() {
-        let secs = now_epoch_secs();
-        let ms = now_epoch_millis();
-        // Millis must be in the ballpark of secs (within ~2s) — we just
-        // care that they both reflect the same system clock.
-        assert!(
-            ms / 1000 >= secs && ms / 1000 <= secs + 2,
-            "secs={secs}, ms={ms}"
-        );
     }
 }

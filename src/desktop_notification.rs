@@ -2,8 +2,9 @@ use std::collections::{HashMap, HashSet};
 use std::process::Command;
 use std::process::Stdio;
 use std::thread::sleep;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
+use crate::time::now_epoch_secs;
 use crate::tmux;
 
 pub(crate) const DESKTOP_NOTIFICATION_COOLDOWN_SECS: u64 = 120;
@@ -229,13 +230,6 @@ fn parse_stamp(raw: &str) -> Option<NotificationStamp> {
 
 fn normalize_fingerprint(value: &str) -> String {
     value.replace(['|', '\n', '\r'], " ")
-}
-
-fn now_epoch_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
 }
 
 fn send_desktop_notification(title: &str, body: &str) -> Result<(), String> {

@@ -147,12 +147,7 @@ impl AppState {
         self.notices
             .copy_targets
             .iter()
-            .find(|t| {
-                row >= t.area.y
-                    && row < t.area.y + t.area.height
-                    && col >= t.area.x
-                    && col < t.area.x + t.area.width
-            })
+            .find(|t| super::layout::point_in_rect(row, col, t.area))
             .map(|t| t.agent.as_str())
     }
 

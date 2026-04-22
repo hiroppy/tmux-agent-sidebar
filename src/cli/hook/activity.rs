@@ -1,8 +1,9 @@
+use crate::time::now_epoch_secs;
 use crate::tmux;
 
 use super::super::label::extract_tool_label;
 use super::super::{local_time_hhmm, sanitize_tmux_value, set_status};
-use super::context::{now_epoch_secs, pane_writes_allowed};
+use super::context::pane_writes_allowed;
 
 /// Write a single activity entry to the log file and trim if needed.
 pub(super) fn write_activity_entry(pane: &str, tool_name: &str, label: &str) {

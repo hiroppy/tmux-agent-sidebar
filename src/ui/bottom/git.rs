@@ -1,12 +1,40 @@
-use ratatui::{Frame, layout::Rect, text::Line, widgets::Paragraph};
+use ratatui::{
+    Frame,
+    layout::Rect,
+    style::Style,
+    text::{Line, Span},
+    widgets::Paragraph,
+};
 
 use crate::state::AppState;
+use crate::ui::colors::ColorTheme;
+use crate::ui::text::display_width;
 
 mod files;
 mod header;
 
 use files::{render_file_section, render_untracked_section};
 use header::render_git_header;
+
+/// Build the `+ins/-del` trio that appears in both the git header's
+/// diff-summary line and each changed file row. Returns the styled
+/// spans along with their total rendered width so callers can pad the
+/// surrounding gap correctly.
+pub(super) fn diff_stat_spans(
+    ins: usize,
+    del: usize,
+    theme: &ColorTheme,
+) -> (Vec<Span<'static>>, usize) {
+    let s_ins = format!("+{ins}");
+    let s_del = format!("-{del}");
+    let width = display_width(&s_ins) + 1 + display_width(&s_del);
+    let spans = vec![
+        Span::styled(s_ins, Style::default().fg(theme.diff_added)),
+        Span::styled("/", Style::default().fg(theme.text_muted)),
+        Span::styled(s_del, Style::default().fg(theme.diff_deleted)),
+    ];
+    (spans, width)
+}
 
 pub(super) fn draw_git_content(frame: &mut Frame, state: &mut AppState, inner: Rect) {
     let theme = &state.theme;

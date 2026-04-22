@@ -1,41 +1,25 @@
-use super::commands::run_tmux;
+use super::commands::{display_message, run_tmux};
 
 pub fn get_sidebar_pane_info(tmux_pane: &str) -> (bool, bool, u16, u16) {
-    let output = run_tmux(&[
-        "display-message",
-        "-t",
+    let out = display_message(
         tmux_pane,
-        "-p",
         "#{pane_active} #{window_active} #{pane_width} #{pane_height}",
-    ]);
-    match output {
-        Some(s) => {
-            let parts: Vec<&str> = s.trim().splitn(4, ' ').collect();
-            if parts.len() >= 4 {
-                (
-                    parts[0] == "1",
-                    parts[1] == "1",
-                    parts[2].parse().unwrap_or(28),
-                    parts[3].parse().unwrap_or(24),
-                )
-            } else {
-                (false, false, 28, 24)
-            }
-        }
-        None => (false, false, 28, 24),
+    );
+    let parts: Vec<&str> = out.splitn(4, ' ').collect();
+    if parts.len() >= 4 {
+        (
+            parts[0] == "1",
+            parts[1] == "1",
+            parts[2].parse().unwrap_or(28),
+            parts[3].parse().unwrap_or(24),
+        )
+    } else {
+        (false, false, 28, 24)
     }
 }
 
 pub fn get_pane_path(pane_id: &str) -> Option<String> {
-    run_tmux(&[
-        "display-message",
-        "-t",
-        pane_id,
-        "-p",
-        "#{pane_current_path}",
-    ])
-    .map(|s| s.trim().to_string())
-    .filter(|s| !s.is_empty())
+    Some(display_message(pane_id, "#{pane_current_path}")).filter(|s| !s.is_empty())
 }
 
 /// Query tmux for all panes in the active window, returning (pane_id, pane_active, path).

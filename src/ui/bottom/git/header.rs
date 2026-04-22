@@ -120,21 +120,10 @@ pub(super) fn render_git_header(
 
     // Line 3: diff summary (+ins -del   N files)
     if has_changes {
-        let mut left_spans: Vec<Span> = Vec::new();
-        let mut diff_w = 0;
-
-        if let Some((ins, del)) = state.git.diff_stat {
-            let s_ins = format!("+{ins}");
-            diff_w += display_width(&s_ins);
-            left_spans.push(Span::styled(s_ins, Style::default().fg(theme.diff_added)));
-
-            left_spans.push(Span::styled("/", Style::default().fg(theme.text_muted)));
-            diff_w += 1;
-
-            let s_del = format!("-{del}");
-            diff_w += display_width(&s_del);
-            left_spans.push(Span::styled(s_del, Style::default().fg(theme.diff_deleted)));
-        }
+        let (mut left_spans, diff_w) = match state.git.diff_stat {
+            Some((ins, del)) => super::diff_stat_spans(ins, del, theme),
+            None => (Vec::new(), 0),
+        };
 
         let files_text = format!("{} files", state.git.changed_file_count());
         let files_w = display_width(&files_text);

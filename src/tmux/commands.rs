@@ -38,9 +38,7 @@ pub fn display_message(target: &str, format: &str) -> String {
 /// Resolve the session name containing `pane_id`. Returns `None` when tmux
 /// can't find the pane (e.g. it has just been closed).
 pub fn pane_session_name(pane_id: &str) -> Option<String> {
-    run_tmux(&["display-message", "-t", pane_id, "-p", "#{session_name}"])
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+    Some(display_message(pane_id, "#{session_name}")).filter(|s| !s.is_empty())
 }
 
 /// Create a new tmux window in `session` whose initial cwd is `cwd` and whose
@@ -98,18 +96,14 @@ pub fn kill_window(window_id: &str) -> Result<(), String> {
 
 pub fn select_pane(pane_id: &str) {
     // Find the session containing this pane and switch to it first
-    if let Some(session_id) = run_tmux(&["display-message", "-t", pane_id, "-p", "#{session_id}"]) {
-        let session_id = session_id.trim();
-        if !session_id.is_empty() {
-            let _ = run_tmux(&["switch-client", "-t", session_id]);
-        }
+    let session_id = display_message(pane_id, "#{session_id}");
+    if !session_id.is_empty() {
+        let _ = run_tmux(&["switch-client", "-t", &session_id]);
     }
     // Then switch to the correct window
-    if let Some(window_id) = run_tmux(&["display-message", "-t", pane_id, "-p", "#{window_id}"]) {
-        let window_id = window_id.trim();
-        if !window_id.is_empty() {
-            let _ = run_tmux(&["select-window", "-t", window_id]);
-        }
+    let window_id = display_message(pane_id, "#{window_id}");
+    if !window_id.is_empty() {
+        let _ = run_tmux(&["select-window", "-t", &window_id]);
     }
     let _ = run_tmux(&["select-pane", "-t", pane_id]);
 }

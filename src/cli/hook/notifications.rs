@@ -1,10 +1,11 @@
+use crate::time::now_epoch_millis;
 use crate::tmux;
 use crate::ui::text::wait_reason_label;
 use crate::{desktop_notification, desktop_notification::DesktopNotificationKind};
 
 use super::context::{
-    AgentContext, branch_label_from_ctx, branch_label_from_pane, now_epoch_millis,
-    repo_label_from_ctx, repo_label_from_pane,
+    AgentContext, branch_label_from_ctx, branch_label_from_pane, repo_label_from_ctx,
+    repo_label_from_pane,
 };
 
 /// How to resolve the repo/branch labels and agent name that appear in

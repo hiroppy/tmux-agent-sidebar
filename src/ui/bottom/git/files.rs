@@ -57,21 +57,11 @@ pub(super) fn render_file_section(
         let status_w = display_width(&status_text);
 
         // Build diff stat text for right side
-        let mut diff_spans: Vec<Span> = Vec::new();
-        let mut diff_w = 0;
-
-        if show_diff && (entry.additions > 0 || entry.deletions > 0) {
-            let s_ins = format!("+{}", entry.additions);
-            diff_w += display_width(&s_ins);
-            diff_spans.push(Span::styled(s_ins, Style::default().fg(theme.diff_added)));
-
-            diff_spans.push(Span::styled("/", Style::default().fg(theme.text_muted)));
-            diff_w += 1;
-
-            let s_del = format!("-{}", entry.deletions);
-            diff_w += display_width(&s_del);
-            diff_spans.push(Span::styled(s_del, Style::default().fg(theme.diff_deleted)));
-        }
+        let (diff_spans, diff_w) = if show_diff && (entry.additions > 0 || entry.deletions > 0) {
+            super::diff_stat_spans(entry.additions, entry.deletions, theme)
+        } else {
+            (Vec::new(), 0)
+        };
 
         // Filename (truncated to fit, with a single gap before change stats)
         let max_name_w = if diff_w > 0 {

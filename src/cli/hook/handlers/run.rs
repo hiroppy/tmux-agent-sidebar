@@ -3,9 +3,10 @@ use crate::desktop_notification;
 use crate::desktop_notification::DesktopNotificationKind;
 use crate::tmux;
 
+use crate::time::now_epoch_secs;
+
 use super::super::context::{
-    AgentContext, clear_run_state, is_system_message, mark_task_reset, now_epoch_secs,
-    set_agent_meta,
+    AgentContext, clear_run_state, is_system_message, mark_task_reset, set_agent_meta,
 };
 use super::super::notifications::{
     NotifyLabels, NotifyPayload, notification_run_id, notify_lifecycle, set_notification_run_id,
