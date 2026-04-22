@@ -5,7 +5,7 @@ use crate::tmux;
 
 use super::super::context::{
     AgentContext, PENDING_SESSION_END, PENDING_WORKTREE_REMOVE, branch_label_from_pane,
-    clear_run_state, mark_pending, repo_label_from_pane, run_session_end_teardown, set_agent_meta,
+    clear_run_state, repo_label_from_pane, run_session_end_teardown, set_agent_meta,
     should_update_cwd,
 };
 use super::super::notifications::{
@@ -53,6 +53,28 @@ pub(in crate::cli::hook) fn on_session_end(
     end_reason: &str,
     notifications: &desktop_notification::DesktopNotificationSettings,
 ) -> i32 {
+    // Subagents share the parent's `$TMUX_PANE`, so a SessionEnd fired
+    // while `@pane_subagents` is populated is almost certainly a child's
+    // (we have no way to distinguish parent vs. child events otherwise).
+    // Bail out early before:
+    //
+    //   1. the notification path consumes the run-scoped fingerprint,
+    //      which would silently deduplicate the parent's real SessionEnd
+    //      notification when it eventually arrives, and
+    //   2. we set PENDING_SESSION_END, which `drain_pending_teardowns`
+    //      would later turn into `run_session_end_teardown` — wiping a
+    //      still-running parent pane the moment the last subagent stops.
+    //
+    // The tradeoff is that a parent SessionEnd that genuinely races
+    // ahead of every SubagentStop will be ignored too, leaving stale
+    // metadata until the next SessionStart clears it. Compared to
+    // clobbering a live parent, the stale-metadata failure mode is
+    // far safer and the one the user can recover from.
+    let current_subagents = tmux::get_pane_option_value(pane, "@pane_subagents");
+    if !should_update_cwd(&current_subagents) {
+        return 0;
+    }
+
     // Noteworthy terminations (forced logout, bypass-permissions revoked) get
     // a desktop notification so the user isn't left wondering why the pane
     // cleared. Routine reasons (`clear`, `resume`, `prompt_input_exit`,
@@ -73,17 +95,6 @@ pub(in crate::cli::hook) fn on_session_end(
             &desktop_notification::format_title(repo.as_deref(), branch.as_deref(), agent_name),
             &session_end_body(end_reason),
         );
-    }
-    // Subagents share the parent's $TMUX_PANE, so a child emitting
-    // SessionEnd must NOT wipe the parent's metadata or activity log.
-    // While children are still listed, defer the teardown via a marker
-    // that `on_subagent_stop` drains once the list empties — otherwise a
-    // parent SessionEnd that races ahead of every SubagentStop would
-    // leave the pane stranded with stale metadata forever.
-    let current_subagents = tmux::get_pane_option_value(pane, "@pane_subagents");
-    if !should_update_cwd(&current_subagents) {
-        mark_pending(pane, PENDING_SESSION_END);
-        return 0;
     }
     run_session_end_teardown(pane);
     0
@@ -138,6 +149,11 @@ mod tests {
         assert!(
             log_path.exists(),
             "child SessionEnd must not delete parent activity log"
+        );
+        assert!(
+            !tmux::test_mock::contains(pane, PENDING_SESSION_END),
+            "child SessionEnd must not record a pending teardown that \
+             `on_subagent_stop` would later replay against the parent"
         );
 
         fs::remove_file(&log_path).ok();
