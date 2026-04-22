@@ -1,3 +1,5 @@
+use super::AppState;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StatusFilter {
     All,
@@ -94,6 +96,38 @@ impl RepoFilter {
             Self::All => true,
             Self::Repo(name) => name == group_name,
         }
+    }
+}
+
+impl AppState {
+    /// Count agents per status across all repo groups.
+    pub fn status_counts(&self) -> (usize, usize, usize, usize, usize) {
+        let (mut running, mut waiting, mut idle, mut error) = (0, 0, 0, 0);
+        for group in &self.repo_groups {
+            if !self.global.repo_filter.matches_group(&group.name) {
+                continue;
+            }
+            for (pane, _) in &group.panes {
+                match pane.status {
+                    crate::tmux::PaneStatus::Running => running += 1,
+                    crate::tmux::PaneStatus::Waiting => waiting += 1,
+                    crate::tmux::PaneStatus::Idle => idle += 1,
+                    crate::tmux::PaneStatus::Error => error += 1,
+                    crate::tmux::PaneStatus::Unknown => {}
+                }
+            }
+        }
+        let all = running + waiting + idle + error;
+        (all, running, waiting, idle, error)
+    }
+
+    /// Return list of repo names for the popup: ["All", repo1, repo2, ...]
+    pub fn repo_names(&self) -> Vec<String> {
+        let mut names = vec!["All".to_string()];
+        for group in &self.repo_groups {
+            names.push(group.name.clone());
+        }
+        names
     }
 }
 
@@ -197,5 +231,87 @@ mod tests {
         assert!(RepoFilter::All.matches_group("anything"));
         assert!(RepoFilter::Repo("app".into()).matches_group("app"));
         assert!(!RepoFilter::Repo("app".into()).matches_group("other"));
+    }
+
+    // ─── AppState status_counts / repo_names ─────────────────────────
+
+    use crate::group::{PaneGitInfo, RepoGroup};
+    use crate::tmux::{AgentType, PaneInfo, PermissionMode, WorktreeMetadata};
+
+    fn test_pane(id: &str, status: PaneStatus) -> PaneInfo {
+        PaneInfo {
+            pane_id: id.into(),
+            pane_active: false,
+            status,
+            attention: false,
+            agent: AgentType::Claude,
+            path: "/tmp".into(),
+            current_command: String::new(),
+            prompt: String::new(),
+            prompt_is_response: false,
+            started_at: None,
+            wait_reason: String::new(),
+            permission_mode: PermissionMode::Default,
+            subagents: vec![],
+            pane_pid: None,
+            worktree: WorktreeMetadata::default(),
+            session_id: None,
+            session_name: String::new(),
+            sidebar_spawned: false,
+        }
+    }
+
+    #[test]
+    fn status_counts_on_empty_state_is_all_zeroes() {
+        let state = AppState::new("%99".into());
+        assert_eq!(state.status_counts(), (0, 0, 0, 0, 0));
+    }
+
+    #[test]
+    fn status_counts_sums_across_repo_groups_and_filters() {
+        let mut state = AppState::new("%99".into());
+        state.repo_groups = vec![
+            RepoGroup {
+                name: "app".into(),
+                has_focus: true,
+                panes: vec![
+                    (test_pane("%1", PaneStatus::Running), PaneGitInfo::default()),
+                    (test_pane("%2", PaneStatus::Idle), PaneGitInfo::default()),
+                ],
+            },
+            RepoGroup {
+                name: "lib".into(),
+                has_focus: false,
+                panes: vec![(test_pane("%3", PaneStatus::Waiting), PaneGitInfo::default())],
+            },
+        ];
+
+        // All repos: 3 total
+        let (all, r, w, i, e) = state.status_counts();
+        assert_eq!((all, r, w, i, e), (3, 1, 1, 1, 0));
+
+        // Restrict to "app"
+        state.global.repo_filter = RepoFilter::Repo("app".into());
+        let (all, r, w, i, e) = state.status_counts();
+        assert_eq!((all, r, w, i, e), (2, 1, 0, 1, 0));
+    }
+
+    #[test]
+    fn repo_names_leads_with_all_sentinel() {
+        let mut state = AppState::new("%99".into());
+        assert_eq!(state.repo_names(), vec!["All"]);
+        state.repo_groups = vec![
+            RepoGroup {
+                name: "alpha".into(),
+                has_focus: true,
+                panes: vec![],
+            },
+            RepoGroup {
+                name: "beta".into(),
+                has_focus: false,
+                panes: vec![],
+            },
+        ];
+        assert_eq!(state.repo_names(), vec!["All", "alpha", "beta"]);
     }
 }

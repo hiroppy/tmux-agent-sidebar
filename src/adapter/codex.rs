@@ -2,7 +2,7 @@ use crate::event::{AgentEvent, AgentEventKind, EventAdapter};
 use crate::tmux::CODEX_AGENT;
 use serde_json::Value;
 
-use super::{HookRegistration, json_str, json_value_or_null};
+use super::{HookRegistration, json_str, json_value_or_null, optional_str};
 
 pub struct CodexAdapter;
 
@@ -52,7 +52,7 @@ impl EventAdapter for CodexAdapter {
                 source: json_str(input, "source").into(),
                 worktree: None,
                 agent_id: None,
-                session_id: None,
+                session_id: optional_str(input, "session_id"),
             }),
             "user-prompt-submit" => Some(AgentEvent::UserPromptSubmit {
                 agent: CODEX_AGENT.into(),
@@ -61,7 +61,7 @@ impl EventAdapter for CodexAdapter {
                 prompt: json_str(input, "prompt").into(),
                 worktree: None,
                 agent_id: None,
-                session_id: None,
+                session_id: optional_str(input, "session_id"),
             }),
             "stop" => Some(AgentEvent::Stop {
                 agent: CODEX_AGENT.into(),
@@ -71,7 +71,7 @@ impl EventAdapter for CodexAdapter {
                 response: Some("{\"continue\":true}".into()),
                 worktree: None,
                 agent_id: None,
-                session_id: None,
+                session_id: optional_str(input, "session_id"),
             }),
             // Codex's PostToolUse currently fires only for Bash (tool_input is
             // typed `{ command: String }`). Other tools do not emit the hook,
@@ -105,7 +105,7 @@ mod tests {
     #[test]
     fn session_start() {
         let adapter = CodexAdapter;
-        let input = json!({"cwd": "/home/user"});
+        let input = json!({"cwd": "/home/user", "session_id": "sess-codex-1"});
         let event = adapter.parse("session-start", &input).unwrap();
         assert_eq!(
             event,
@@ -116,7 +116,7 @@ mod tests {
                 source: "".into(),
                 worktree: None,
                 agent_id: None,
-                session_id: None,
+                session_id: Some("sess-codex-1".into()),
             }
         );
     }
@@ -131,7 +131,7 @@ mod tests {
     #[test]
     fn user_prompt_submit() {
         let adapter = CodexAdapter;
-        let input = json!({"cwd": "/tmp", "prompt": "hello"});
+        let input = json!({"cwd": "/tmp", "prompt": "hello", "session_id": "sess-codex-2"});
         let event = adapter.parse("user-prompt-submit", &input).unwrap();
         assert_eq!(
             event,
@@ -142,7 +142,7 @@ mod tests {
                 prompt: "hello".into(),
                 worktree: None,
                 agent_id: None,
-                session_id: None,
+                session_id: Some("sess-codex-2".into()),
             }
         );
     }
@@ -150,7 +150,11 @@ mod tests {
     #[test]
     fn stop_has_continue_response() {
         let adapter = CodexAdapter;
-        let input = json!({"cwd": "/tmp", "last_assistant_message": "done"});
+        let input = json!({
+            "cwd": "/tmp",
+            "last_assistant_message": "done",
+            "session_id": "sess-codex-3",
+        });
         let event = adapter.parse("stop", &input).unwrap();
         assert_eq!(
             event,
@@ -162,9 +166,42 @@ mod tests {
                 response: Some("{\"continue\":true}".into()),
                 worktree: None,
                 agent_id: None,
-                session_id: None,
+                session_id: Some("sess-codex-3".into()),
             }
         );
+    }
+
+    /// Realistic Stop payload matching the upstream Codex hook input schema
+    /// (`codex-rs/hooks/schema/generated/stop.command.input.schema.json`),
+    /// which declares `session_id` as a required top-level string.
+    #[test]
+    fn stop_extracts_session_id_from_upstream_schema_payload() {
+        let adapter = CodexAdapter;
+        let input = json!({
+            "hook_event_name": "Stop",
+            "cwd": "/home/user/project",
+            "session_id": "01HXYZABCDEF0123456789",
+            "model": "gpt-5-codex",
+            "permission_mode": "default",
+            "last_assistant_message": "all tests pass",
+            "stop_hook_active": false,
+            "transcript_path": null,
+            "turn_id": "turn-42",
+        });
+        let event = adapter.parse("stop", &input).unwrap();
+        match event {
+            AgentEvent::Stop {
+                session_id,
+                permission_mode,
+                last_message,
+                ..
+            } => {
+                assert_eq!(session_id.as_deref(), Some("01HXYZABCDEF0123456789"));
+                assert_eq!(permission_mode, "default");
+                assert_eq!(last_message, "all tests pass");
+            }
+            other => panic!("expected Stop, got {:?}", other),
+        }
     }
 
     #[test]
@@ -217,8 +254,11 @@ mod tests {
         assert!(CodexAdapter.parse("something-else", &json!({})).is_none());
     }
 
+    /// Defensive path: upstream schema requires `session_id`, but the adapter
+    /// must not panic if a malformed payload omits it. Parse returns the event
+    /// with `session_id: None` and downstream handlers treat it as missing.
     #[test]
-    fn stop_empty_fields() {
+    fn stop_without_session_id_falls_back_to_none() {
         let adapter = CodexAdapter;
         let event = adapter.parse("stop", &json!({})).unwrap();
         assert_eq!(

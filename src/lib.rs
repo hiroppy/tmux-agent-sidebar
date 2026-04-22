@@ -10,6 +10,7 @@ pub mod group;
 pub mod port;
 pub mod session;
 pub mod state;
+pub mod time;
 pub mod tmux;
 pub mod tool_name;
 pub mod ui;

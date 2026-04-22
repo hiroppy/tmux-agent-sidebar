@@ -124,6 +124,35 @@ impl AppState {
             .iter()
             .any(|g| g.panes.iter().any(|(p, _)| p.pane_id == *fid))
     }
+
+    pub fn next_bottom_tab(&mut self) {
+        self.bottom_tab = match self.bottom_tab {
+            BottomTab::Activity => BottomTab::GitStatus,
+            BottomTab::GitStatus => BottomTab::Activity,
+        };
+    }
+
+    /// Handle mouse click on the bottom panel tab header.
+    /// Tab title layout: "╭ Activity │ Git ╮" — col is relative to the terminal.
+    /// The block border starts at col 0, so the title text starts at col 1.
+    /// " Activity " spans cols 1..11, "│" at col 11, " Git " spans cols 12..17.
+    pub fn handle_bottom_tab_click(&mut self, col: u16) {
+        // Offset by 1 for the left border character
+        let x = col.saturating_sub(1) as usize;
+        // " Activity " = 10 chars (0..10), "│" = 1 char (10), " Git " = 5 chars (11..16)
+        if x < 10 {
+            self.bottom_tab = BottomTab::Activity;
+        } else if (11..16).contains(&x) {
+            self.bottom_tab = BottomTab::GitStatus;
+        }
+    }
+
+    pub fn scroll_bottom(&mut self, delta: isize) {
+        match self.bottom_tab {
+            BottomTab::Activity => self.activity.scroll.scroll(delta),
+            BottomTab::GitStatus => self.scrolls.git.scroll(delta),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

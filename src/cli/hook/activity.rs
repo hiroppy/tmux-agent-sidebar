@@ -1,8 +1,9 @@
+use crate::time::now_epoch_secs;
 use crate::tmux;
 
 use super::super::label::extract_tool_label;
 use super::super::{local_time_hhmm, sanitize_tmux_value, set_status};
-use super::context::{now_epoch_secs, pane_writes_allowed};
+use super::context::pane_writes_allowed;
 
 /// Write a single activity entry to the log file and trim if needed.
 pub(super) fn write_activity_entry(pane: &str, tool_name: &str, label: &str) {
@@ -44,16 +45,16 @@ pub(super) fn handle_activity_log(
     let label = extract_tool_label(tool_name, tool_input, tool_response);
 
     // If status is not running, tool use means agent is active again
-    let current_status = tmux::get_pane_option_value(pane, "@pane_status");
+    let current_status = tmux::get_pane_option_value(pane, tmux::PANE_STATUS);
     if current_status != "running" && !current_status.is_empty() {
         set_status(pane, "running");
         if current_status == "waiting" {
-            tmux::unset_pane_option(pane, "@pane_attention");
-            tmux::unset_pane_option(pane, "@pane_wait_reason");
+            tmux::unset_pane_option(pane, tmux::PANE_ATTENTION);
+            tmux::unset_pane_option(pane, tmux::PANE_WAIT_REASON);
         }
-        let existing_started = tmux::get_pane_option_value(pane, "@pane_started_at");
+        let existing_started = tmux::get_pane_option_value(pane, tmux::PANE_STARTED_AT);
         if existing_started.is_empty() {
-            tmux::set_pane_option(pane, "@pane_started_at", &now_epoch_secs().to_string());
+            tmux::set_pane_option(pane, tmux::PANE_STARTED_AT, &now_epoch_secs().to_string());
         }
     }
 
@@ -63,10 +64,10 @@ pub(super) fn handle_activity_log(
     if pane_writes_allowed(pane) {
         match tool_name {
             "EnterPlanMode" => {
-                tmux::set_pane_option(pane, "@pane_permission_mode", "plan");
+                tmux::set_pane_option(pane, tmux::PANE_PERMISSION_MODE, "plan");
             }
             "ExitPlanMode" => {
-                tmux::set_pane_option(pane, "@pane_permission_mode", "default");
+                tmux::set_pane_option(pane, tmux::PANE_PERMISSION_MODE, "default");
             }
             _ => {}
         }
@@ -282,15 +283,15 @@ mod tests {
     fn handle_activity_log_enter_plan_mode_blocked_by_subagents() {
         let _guard = tmux::test_mock::install();
         let pane = "%PARENT_PLAN";
-        tmux::test_mock::set(pane, "@pane_subagents", "Explore:sub-1");
-        tmux::test_mock::set(pane, "@pane_permission_mode", "default");
+        tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "Explore:sub-1");
+        tmux::test_mock::set(pane, tmux::PANE_PERMISSION_MODE, "default");
 
         // A subagent's EnterPlanMode tool use must not flip the parent
         // badge to "plan".
         handle_activity_log(pane, "EnterPlanMode", &Value::Null, &Value::Null);
 
         assert_eq!(
-            tmux::test_mock::get(pane, "@pane_permission_mode").as_deref(),
+            tmux::test_mock::get(pane, tmux::PANE_PERMISSION_MODE).as_deref(),
             Some("default"),
             "child EnterPlanMode must not overwrite parent's permission_mode"
         );

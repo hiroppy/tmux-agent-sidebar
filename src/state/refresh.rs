@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use crate::activity::{self, TaskProgress};
 use crate::tmux::{self, PaneStatus, SessionInfo};
@@ -46,10 +46,7 @@ pub(crate) fn classify_task_progress(
 
 impl AppState {
     pub(crate) fn refresh_now(&mut self) {
-        self.now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+        self.now = crate::time::now_epoch_secs();
     }
 
     pub(crate) fn apply_session_snapshot(
@@ -93,19 +90,19 @@ impl AppState {
 
     fn clear_dead_agent_metadata(pane_id: &str) {
         for key in &[
-            "@pane_agent",
-            "@pane_status",
-            "@pane_attention",
-            "@pane_prompt",
-            "@pane_prompt_source",
-            "@pane_subagents",
-            "@pane_cwd",
-            "@pane_permission_mode",
-            "@pane_worktree_name",
-            "@pane_worktree_branch",
-            "@pane_started_at",
-            "@pane_wait_reason",
-            "@pane_session_id",
+            tmux::PANE_AGENT,
+            tmux::PANE_STATUS,
+            tmux::PANE_ATTENTION,
+            tmux::PANE_PROMPT,
+            tmux::PANE_PROMPT_SOURCE,
+            tmux::PANE_SUBAGENTS,
+            tmux::PANE_CWD,
+            tmux::PANE_PERMISSION_MODE,
+            tmux::PANE_WORKTREE_NAME,
+            tmux::PANE_WORKTREE_BRANCH,
+            tmux::PANE_STARTED_AT,
+            tmux::PANE_WAIT_REASON,
+            tmux::PANE_SESSION_ID,
         ] {
             tmux::unset_pane_option(pane_id, key);
         }

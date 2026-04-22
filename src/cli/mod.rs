@@ -61,13 +61,13 @@ fn local_time_hhmm() -> String {
 
 fn set_status(pane: &str, status: &str) {
     if status == "clear" {
-        tmux::unset_pane_option(pane, "@pane_status");
-        tmux::unset_pane_option(pane, "@pane_attention");
+        tmux::unset_pane_option(pane, tmux::PANE_STATUS);
+        tmux::unset_pane_option(pane, tmux::PANE_ATTENTION);
     } else {
-        tmux::set_pane_option(pane, "@pane_status", status);
+        tmux::set_pane_option(pane, tmux::PANE_STATUS, status);
         match status {
             "running" | "idle" => {
-                tmux::unset_pane_option(pane, "@pane_attention");
+                tmux::unset_pane_option(pane, tmux::PANE_ATTENTION);
             }
             _ => {}
         }
@@ -76,9 +76,9 @@ fn set_status(pane: &str, status: &str) {
 
 fn set_attention(pane: &str, state: &str) {
     if state == "clear" {
-        tmux::unset_pane_option(pane, "@pane_attention");
+        tmux::unset_pane_option(pane, tmux::PANE_ATTENTION);
     } else {
-        tmux::set_pane_option(pane, "@pane_attention", state);
+        tmux::set_pane_option(pane, tmux::PANE_ATTENTION, state);
     }
 }
 
