@@ -27,9 +27,9 @@ pub(in crate::cli::hook) fn on_notification(
         // An explicit-but-empty wait_reason is the hook's way of saying
         // "no reason"; drop any prior value so the sidebar doesn't keep
         // rendering a stale cause from the previous notification.
-        tmux::unset_pane_option(pane, "@pane_wait_reason");
+        tmux::unset_pane_option(pane, tmux::PANE_WAIT_REASON);
     } else {
-        tmux::set_pane_option(pane, "@pane_wait_reason", wait_reason);
+        tmux::set_pane_option(pane, tmux::PANE_WAIT_REASON, wait_reason);
     }
     let repo = repo_label_from_ctx(ctx);
     let branch = branch_label_from_ctx(ctx);
@@ -57,7 +57,7 @@ pub(in crate::cli::hook) fn on_permission_denied(
     set_agent_meta(pane, ctx);
     set_status(pane, "waiting");
     set_attention(pane, "notification");
-    tmux::set_pane_option(pane, "@pane_wait_reason", "permission_denied");
+    tmux::set_pane_option(pane, tmux::PANE_WAIT_REASON, "permission_denied");
     let repo = repo_label_from_ctx(ctx);
     let branch = branch_label_from_ctx(ctx);
     let fingerprint = desktop_notification::run_scoped_fingerprint(
@@ -87,7 +87,7 @@ pub(in crate::cli::hook) fn on_teammate_idle(
     } else {
         format!("teammate_idle:{teammate_name}:{idle_reason}")
     };
-    tmux::set_pane_option(pane, "@pane_wait_reason", &reason);
+    tmux::set_pane_option(pane, tmux::PANE_WAIT_REASON, &reason);
     0
 }
 
@@ -102,11 +102,11 @@ mod tests {
         let exit = on_teammate_idle(pane, "alice", "");
         assert_eq!(exit, 0);
         assert_eq!(
-            tmux::test_mock::get(pane, "@pane_attention").as_deref(),
+            tmux::test_mock::get(pane, tmux::PANE_ATTENTION).as_deref(),
             Some("notification")
         );
         assert_eq!(
-            tmux::test_mock::get(pane, "@pane_wait_reason").as_deref(),
+            tmux::test_mock::get(pane, tmux::PANE_WAIT_REASON).as_deref(),
             Some("teammate_idle:alice")
         );
     }
@@ -117,7 +117,7 @@ mod tests {
         let pane = "%TEAM_REASON";
         on_teammate_idle(pane, "alice", "tokens_exhausted");
         assert_eq!(
-            tmux::test_mock::get(pane, "@pane_wait_reason").as_deref(),
+            tmux::test_mock::get(pane, tmux::PANE_WAIT_REASON).as_deref(),
             Some("teammate_idle:alice:tokens_exhausted")
         );
     }
@@ -145,12 +145,12 @@ mod tests {
             &notifications,
         );
         // meta_only=true must short-circuit before status/attention/wait_reason writes.
-        assert!(!tmux::test_mock::contains(pane, "@pane_status"));
-        assert!(!tmux::test_mock::contains(pane, "@pane_attention"));
-        assert!(!tmux::test_mock::contains(pane, "@pane_wait_reason"));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_STATUS));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_ATTENTION));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_WAIT_REASON));
         // Agent meta should still be applied so the sidebar can render the pane.
         assert_eq!(
-            tmux::test_mock::get(pane, "@pane_agent").as_deref(),
+            tmux::test_mock::get(pane, tmux::PANE_AGENT).as_deref(),
             Some("claude")
         );
     }
@@ -178,15 +178,15 @@ mod tests {
             &notifications,
         );
         assert_eq!(
-            tmux::test_mock::get(pane, "@pane_status").as_deref(),
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
             Some("waiting")
         );
         assert_eq!(
-            tmux::test_mock::get(pane, "@pane_attention").as_deref(),
+            tmux::test_mock::get(pane, tmux::PANE_ATTENTION).as_deref(),
             Some("notification")
         );
         assert_eq!(
-            tmux::test_mock::get(pane, "@pane_wait_reason").as_deref(),
+            tmux::test_mock::get(pane, tmux::PANE_WAIT_REASON).as_deref(),
             Some("permission")
         );
     }
@@ -200,7 +200,7 @@ mod tests {
         // cause.
         let _guard = tmux::test_mock::install();
         let pane = "%NOTIF_STALE";
-        tmux::test_mock::set(pane, "@pane_wait_reason", "permission");
+        tmux::test_mock::set(pane, tmux::PANE_WAIT_REASON, "permission");
 
         let ctx = AgentContext {
             agent: "claude",
@@ -216,7 +216,7 @@ mod tests {
         on_notification(pane, &ctx, "", /* meta_only */ false, &notifications);
 
         assert!(
-            !tmux::test_mock::contains(pane, "@pane_wait_reason"),
+            !tmux::test_mock::contains(pane, tmux::PANE_WAIT_REASON),
             "empty wait_reason must clear a prior value"
         );
     }
@@ -238,11 +238,11 @@ mod tests {
         };
         on_permission_denied(pane, &ctx, &notifications);
         assert_eq!(
-            tmux::test_mock::get(pane, "@pane_wait_reason").as_deref(),
+            tmux::test_mock::get(pane, tmux::PANE_WAIT_REASON).as_deref(),
             Some("permission_denied")
         );
         assert_eq!(
-            tmux::test_mock::get(pane, "@pane_status").as_deref(),
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
             Some("waiting")
         );
     }

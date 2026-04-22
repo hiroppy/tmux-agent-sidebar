@@ -8,11 +8,11 @@ pub(in crate::cli::hook) fn repo_label_from_ctx(ctx: &AgentContext<'_>) -> Optio
 }
 
 pub(in crate::cli::hook) fn repo_label_from_pane(pane: &str) -> Option<String> {
-    let cwd = tmux::get_pane_option_value(pane, "@pane_cwd");
+    let cwd = tmux::get_pane_option_value(pane, tmux::PANE_CWD);
     if !cwd.is_empty() {
         return repo_label_from_path(&cwd);
     }
-    let worktree = tmux::get_pane_option_value(pane, "@pane_worktree_name");
+    let worktree = tmux::get_pane_option_value(pane, tmux::PANE_WORKTREE_NAME);
     if !worktree.is_empty() {
         return Some(worktree);
     }
@@ -30,11 +30,11 @@ pub(in crate::cli::hook) fn branch_label_from_ctx(ctx: &AgentContext<'_>) -> Opt
 }
 
 pub(in crate::cli::hook) fn branch_label_from_pane(pane: &str) -> Option<String> {
-    let wt_branch = tmux::get_pane_option_value(pane, "@pane_worktree_branch");
+    let wt_branch = tmux::get_pane_option_value(pane, tmux::PANE_WORKTREE_BRANCH);
     if !wt_branch.is_empty() {
         return Some(wt_branch);
     }
-    let cwd = tmux::get_pane_option_value(pane, "@pane_cwd");
+    let cwd = tmux::get_pane_option_value(pane, tmux::PANE_CWD);
     if cwd.is_empty() {
         None
     } else {
@@ -104,12 +104,12 @@ mod tests {
     fn repo_label_from_pane_prefers_pane_cwd_then_worktree_name() {
         let _guard = tmux::test_mock::install();
         let pane = "%PANE_REPO";
-        tmux::test_mock::set(pane, "@pane_cwd", "/home/user/app");
-        tmux::test_mock::set(pane, "@pane_worktree_name", "wt-name");
+        tmux::test_mock::set(pane, tmux::PANE_CWD, "/home/user/app");
+        tmux::test_mock::set(pane, tmux::PANE_WORKTREE_NAME, "wt-name");
 
         assert_eq!(repo_label_from_pane(pane), Some("app".into()));
 
-        tmux::test_mock::set(pane, "@pane_cwd", "");
+        tmux::test_mock::set(pane, tmux::PANE_CWD, "");
         assert_eq!(repo_label_from_pane(pane), Some("wt-name".into()));
     }
 
@@ -143,8 +143,8 @@ mod tests {
     fn branch_label_from_pane_prefers_worktree_branch_option() {
         let _guard = tmux::test_mock::install();
         let pane = "%PANE_BRANCH";
-        tmux::test_mock::set(pane, "@pane_worktree_branch", "feat/abc");
-        tmux::test_mock::set(pane, "@pane_cwd", "/tmp/somewhere");
+        tmux::test_mock::set(pane, tmux::PANE_WORKTREE_BRANCH, "feat/abc");
+        tmux::test_mock::set(pane, tmux::PANE_CWD, "/tmp/somewhere");
         assert_eq!(branch_label_from_pane(pane), Some("feat/abc".into()));
     }
 }

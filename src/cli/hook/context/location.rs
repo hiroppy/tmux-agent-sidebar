@@ -32,18 +32,18 @@ pub(in crate::cli::hook) fn resolve_cwd<'a>(
 pub(in crate::cli::hook) fn sync_worktree_meta(pane: &str, worktree: &Option<WorktreeInfo>) {
     if let Some(wt) = worktree {
         if wt.name.is_empty() {
-            tmux::unset_pane_option(pane, "@pane_worktree_name");
+            tmux::unset_pane_option(pane, tmux::PANE_WORKTREE_NAME);
         } else {
-            tmux::set_pane_option(pane, "@pane_worktree_name", &wt.name);
+            tmux::set_pane_option(pane, tmux::PANE_WORKTREE_NAME, &wt.name);
         }
         if wt.branch.is_empty() {
-            tmux::unset_pane_option(pane, "@pane_worktree_branch");
+            tmux::unset_pane_option(pane, tmux::PANE_WORKTREE_BRANCH);
         } else {
-            tmux::set_pane_option(pane, "@pane_worktree_branch", &wt.branch);
+            tmux::set_pane_option(pane, tmux::PANE_WORKTREE_BRANCH, &wt.branch);
         }
     } else {
-        tmux::unset_pane_option(pane, "@pane_worktree_name");
-        tmux::unset_pane_option(pane, "@pane_worktree_branch");
+        tmux::unset_pane_option(pane, tmux::PANE_WORKTREE_NAME);
+        tmux::unset_pane_option(pane, tmux::PANE_WORKTREE_BRANCH);
     }
 }
 
@@ -58,17 +58,17 @@ pub(in crate::cli::hook) fn sync_pane_location(
     // are active, every pane-scoped write must be skipped so the parent's
     // identity is preserved — including `@pane_worktree_*`, which used to
     // leak through and misgroup the pane under the child's repo.
-    let current_subagents = tmux::get_pane_option_value(pane, "@pane_subagents");
+    let current_subagents = tmux::get_pane_option_value(pane, tmux::PANE_SUBAGENTS);
     if !should_update_cwd(&current_subagents) {
         return;
     }
     match session_id.as_deref() {
-        Some(sid) if !sid.is_empty() => tmux::set_pane_option(pane, "@pane_session_id", sid),
-        _ => tmux::unset_pane_option(pane, "@pane_session_id"),
+        Some(sid) if !sid.is_empty() => tmux::set_pane_option(pane, tmux::PANE_SESSION_ID, sid),
+        _ => tmux::unset_pane_option(pane, tmux::PANE_SESSION_ID),
     }
     if !cwd.is_empty() {
         let effective_cwd = resolve_cwd(cwd, worktree);
-        tmux::set_pane_option(pane, "@pane_cwd", effective_cwd);
+        tmux::set_pane_option(pane, tmux::PANE_CWD, effective_cwd);
     }
     sync_worktree_meta(pane, worktree);
 }
@@ -77,7 +77,7 @@ pub(in crate::cli::hook) fn sync_pane_location(
 /// apply to the pane's metadata. False while subagents are active so a
 /// child hook cannot clobber the parent pane's identity.
 pub(in crate::cli::hook) fn pane_writes_allowed(pane: &str) -> bool {
-    let current_subagents = tmux::get_pane_option_value(pane, "@pane_subagents");
+    let current_subagents = tmux::get_pane_option_value(pane, tmux::PANE_SUBAGENTS);
     should_update_cwd(&current_subagents)
 }
 
@@ -132,11 +132,11 @@ mod tests {
         let _guard = tmux::test_mock::install();
         let pane = "%PARENT";
         // Parent state: real worktree owned by the parent agent.
-        tmux::test_mock::set(pane, "@pane_subagents", "Explore:sub-1");
-        tmux::test_mock::set(pane, "@pane_worktree_name", "parent-feat");
-        tmux::test_mock::set(pane, "@pane_worktree_branch", "feat/parent");
-        tmux::test_mock::set(pane, "@pane_cwd", "/repo/parent");
-        tmux::test_mock::set(pane, "@pane_session_id", "parent-session");
+        tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "Explore:sub-1");
+        tmux::test_mock::set(pane, tmux::PANE_WORKTREE_NAME, "parent-feat");
+        tmux::test_mock::set(pane, tmux::PANE_WORKTREE_BRANCH, "feat/parent");
+        tmux::test_mock::set(pane, tmux::PANE_CWD, "/repo/parent");
+        tmux::test_mock::set(pane, tmux::PANE_SESSION_ID, "parent-session");
 
         // Subagent fires a hook with its own (different) worktree.
         let child_wt = Some(WorktreeInfo {
@@ -153,20 +153,20 @@ mod tests {
         );
 
         assert_eq!(
-            tmux::test_mock::get(pane, "@pane_worktree_name").as_deref(),
+            tmux::test_mock::get(pane, tmux::PANE_WORKTREE_NAME).as_deref(),
             Some("parent-feat"),
             "worktree name must not leak from subagent into parent"
         );
         assert_eq!(
-            tmux::test_mock::get(pane, "@pane_worktree_branch").as_deref(),
+            tmux::test_mock::get(pane, tmux::PANE_WORKTREE_BRANCH).as_deref(),
             Some("feat/parent")
         );
         assert_eq!(
-            tmux::test_mock::get(pane, "@pane_cwd").as_deref(),
+            tmux::test_mock::get(pane, tmux::PANE_CWD).as_deref(),
             Some("/repo/parent")
         );
         assert_eq!(
-            tmux::test_mock::get(pane, "@pane_session_id").as_deref(),
+            tmux::test_mock::get(pane, tmux::PANE_SESSION_ID).as_deref(),
             Some("parent-session")
         );
     }
@@ -185,20 +185,20 @@ mod tests {
         sync_pane_location(pane, "/wt/feat-x", &wt, &Some("sess-1".into()));
 
         assert_eq!(
-            tmux::test_mock::get(pane, "@pane_worktree_name").as_deref(),
+            tmux::test_mock::get(pane, tmux::PANE_WORKTREE_NAME).as_deref(),
             Some("feat-x")
         );
         assert_eq!(
-            tmux::test_mock::get(pane, "@pane_worktree_branch").as_deref(),
+            tmux::test_mock::get(pane, tmux::PANE_WORKTREE_BRANCH).as_deref(),
             Some("feat-x")
         );
         // resolve_cwd routes the original_repo_dir into @pane_cwd.
         assert_eq!(
-            tmux::test_mock::get(pane, "@pane_cwd").as_deref(),
+            tmux::test_mock::get(pane, tmux::PANE_CWD).as_deref(),
             Some("/repo")
         );
         assert_eq!(
-            tmux::test_mock::get(pane, "@pane_session_id").as_deref(),
+            tmux::test_mock::get(pane, tmux::PANE_SESSION_ID).as_deref(),
             Some("sess-1")
         );
     }
@@ -207,13 +207,13 @@ mod tests {
     fn sync_worktree_meta_clears_when_worktree_is_none() {
         let _guard = tmux::test_mock::install();
         let pane = "%CLEAR";
-        tmux::test_mock::set(pane, "@pane_worktree_name", "old");
-        tmux::test_mock::set(pane, "@pane_worktree_branch", "feat/old");
+        tmux::test_mock::set(pane, tmux::PANE_WORKTREE_NAME, "old");
+        tmux::test_mock::set(pane, tmux::PANE_WORKTREE_BRANCH, "feat/old");
 
         sync_worktree_meta(pane, &None);
 
-        assert!(!tmux::test_mock::contains(pane, "@pane_worktree_name"));
-        assert!(!tmux::test_mock::contains(pane, "@pane_worktree_branch"));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_WORKTREE_NAME));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_WORKTREE_BRANCH));
     }
 
     #[test]
@@ -224,8 +224,8 @@ mod tests {
         // rendering the old branch.
         let _guard = tmux::test_mock::install();
         let pane = "%PARTIAL";
-        tmux::test_mock::set(pane, "@pane_worktree_name", "old-name");
-        tmux::test_mock::set(pane, "@pane_worktree_branch", "feat/old");
+        tmux::test_mock::set(pane, tmux::PANE_WORKTREE_NAME, "old-name");
+        tmux::test_mock::set(pane, tmux::PANE_WORKTREE_BRANCH, "feat/old");
 
         sync_worktree_meta(
             pane,
@@ -238,12 +238,12 @@ mod tests {
         );
 
         assert_eq!(
-            tmux::test_mock::get(pane, "@pane_worktree_name").as_deref(),
+            tmux::test_mock::get(pane, tmux::PANE_WORKTREE_NAME).as_deref(),
             Some("new-name"),
             "non-empty name must overwrite"
         );
         assert!(
-            !tmux::test_mock::contains(pane, "@pane_worktree_branch"),
+            !tmux::test_mock::contains(pane, tmux::PANE_WORKTREE_BRANCH),
             "empty branch must clear the stale option"
         );
     }
@@ -253,7 +253,7 @@ mod tests {
         let _guard = tmux::test_mock::install();
         let pane = "%ALLOWED";
         assert!(pane_writes_allowed(pane));
-        tmux::test_mock::set(pane, "@pane_subagents", "Explore:sub-1");
+        tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "Explore:sub-1");
         assert!(!pane_writes_allowed(pane));
     }
 }

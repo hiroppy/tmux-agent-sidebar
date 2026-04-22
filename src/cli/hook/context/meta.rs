@@ -32,20 +32,20 @@ pub(in crate::cli::hook) fn make_ctx<'a>(
 }
 
 pub(in crate::cli::hook) fn set_agent_meta(pane: &str, ctx: &AgentContext<'_>) {
-    tmux::set_pane_option(pane, "@pane_agent", ctx.agent);
+    tmux::set_pane_option(pane, tmux::PANE_AGENT, ctx.agent);
     // `@pane_permission_mode` is parent-owned: a child agent can be in
     // a different mode (e.g. plan vs. default) and overwriting the
     // parent's value here would flip the badge mid-session. Gate the
     // write behind the same subagent guard as the cwd/worktree fields.
     if !ctx.permission_mode.is_empty() && pane_writes_allowed(pane) {
-        tmux::set_pane_option(pane, "@pane_permission_mode", ctx.permission_mode);
+        tmux::set_pane_option(pane, tmux::PANE_PERMISSION_MODE, ctx.permission_mode);
     }
     sync_pane_location(pane, ctx.cwd, ctx.worktree, ctx.session_id);
 }
 
 pub(in crate::cli::hook) fn clear_run_state(pane: &str) {
-    tmux::unset_pane_option(pane, "@pane_started_at");
-    tmux::unset_pane_option(pane, "@pane_wait_reason");
+    tmux::unset_pane_option(pane, tmux::PANE_STARTED_AT);
+    tmux::unset_pane_option(pane, tmux::PANE_WAIT_REASON);
 }
 
 /// Check if a prompt is a system-injected message (not a real user prompt).
@@ -55,15 +55,15 @@ pub(in crate::cli::hook) fn is_system_message(s: &str) -> bool {
 
 pub(in crate::cli::hook) fn clear_all_meta(pane: &str) {
     for key in &[
-        "@pane_agent",
-        "@pane_prompt",
-        "@pane_prompt_source",
-        "@pane_subagents",
-        "@pane_cwd",
-        "@pane_permission_mode",
-        "@pane_worktree_name",
-        "@pane_worktree_branch",
-        "@pane_session_id",
+        tmux::PANE_AGENT,
+        tmux::PANE_PROMPT,
+        tmux::PANE_PROMPT_SOURCE,
+        tmux::PANE_SUBAGENTS,
+        tmux::PANE_CWD,
+        tmux::PANE_PERMISSION_MODE,
+        tmux::PANE_WORKTREE_NAME,
+        tmux::PANE_WORKTREE_BRANCH,
+        tmux::PANE_SESSION_ID,
         PENDING_SESSION_END,
         PENDING_WORKTREE_REMOVE,
     ] {
@@ -160,7 +160,7 @@ mod tests {
     fn mark_task_reset_skips_while_subagents_active() {
         let _guard = tmux::test_mock::install();
         let pane_id = "%CLI_MARK_RESET_SUBAGENT";
-        tmux::test_mock::set(pane_id, "@pane_subagents", "Explore:abc");
+        tmux::test_mock::set(pane_id, tmux::PANE_SUBAGENTS, "Explore:abc");
         let path = crate::activity::log_file_path(pane_id);
         let _ = fs::remove_file(&path);
 
@@ -214,8 +214,8 @@ mod tests {
     fn set_agent_meta_does_not_clobber_parent_permission_mode_under_subagents() {
         let _guard = tmux::test_mock::install();
         let pane = "%PARENT_PERM";
-        tmux::test_mock::set(pane, "@pane_subagents", "Explore:sub-1");
-        tmux::test_mock::set(pane, "@pane_permission_mode", "plan");
+        tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "Explore:sub-1");
+        tmux::test_mock::set(pane, tmux::PANE_PERMISSION_MODE, "plan");
 
         // A subagent fires a hook with `permission_mode: "default"` —
         // this must NOT flip the parent badge from "plan" back to
@@ -230,7 +230,7 @@ mod tests {
         set_agent_meta(pane, &ctx);
 
         assert_eq!(
-            tmux::test_mock::get(pane, "@pane_permission_mode").as_deref(),
+            tmux::test_mock::get(pane, tmux::PANE_PERMISSION_MODE).as_deref(),
             Some("plan"),
             "child hook must not overwrite parent's permission_mode"
         );
@@ -251,7 +251,7 @@ mod tests {
         set_agent_meta(pane, &ctx);
 
         assert_eq!(
-            tmux::test_mock::get(pane, "@pane_permission_mode").as_deref(),
+            tmux::test_mock::get(pane, tmux::PANE_PERMISSION_MODE).as_deref(),
             Some("plan"),
             "regular SessionStart should still write permission_mode"
         );
@@ -261,13 +261,13 @@ mod tests {
     fn clear_run_state_removes_started_at_and_wait_reason() {
         let _guard = tmux::test_mock::install();
         let pane = "%CLEAR_RUN";
-        tmux::test_mock::set(pane, "@pane_started_at", "1700");
-        tmux::test_mock::set(pane, "@pane_wait_reason", "permission");
+        tmux::test_mock::set(pane, tmux::PANE_STARTED_AT, "1700");
+        tmux::test_mock::set(pane, tmux::PANE_WAIT_REASON, "permission");
 
         clear_run_state(pane);
 
-        assert!(!tmux::test_mock::contains(pane, "@pane_started_at"));
-        assert!(!tmux::test_mock::contains(pane, "@pane_wait_reason"));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_STARTED_AT));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_WAIT_REASON));
     }
 
     #[test]
@@ -275,17 +275,17 @@ mod tests {
         let _guard = tmux::test_mock::install();
         let pane = "%CLEAR_ALL";
         for key in [
-            "@pane_agent",
-            "@pane_prompt",
-            "@pane_prompt_source",
-            "@pane_subagents",
-            "@pane_cwd",
-            "@pane_permission_mode",
-            "@pane_worktree_name",
-            "@pane_worktree_branch",
-            "@pane_session_id",
-            "@pane_started_at",
-            "@pane_wait_reason",
+            tmux::PANE_AGENT,
+            tmux::PANE_PROMPT,
+            tmux::PANE_PROMPT_SOURCE,
+            tmux::PANE_SUBAGENTS,
+            tmux::PANE_CWD,
+            tmux::PANE_PERMISSION_MODE,
+            tmux::PANE_WORKTREE_NAME,
+            tmux::PANE_WORKTREE_BRANCH,
+            tmux::PANE_SESSION_ID,
+            tmux::PANE_STARTED_AT,
+            tmux::PANE_WAIT_REASON,
             PENDING_SESSION_END,
             PENDING_WORKTREE_REMOVE,
         ] {
@@ -295,17 +295,17 @@ mod tests {
         clear_all_meta(pane);
 
         for key in [
-            "@pane_agent",
-            "@pane_prompt",
-            "@pane_prompt_source",
-            "@pane_subagents",
-            "@pane_cwd",
-            "@pane_permission_mode",
-            "@pane_worktree_name",
-            "@pane_worktree_branch",
-            "@pane_session_id",
-            "@pane_started_at",
-            "@pane_wait_reason",
+            tmux::PANE_AGENT,
+            tmux::PANE_PROMPT,
+            tmux::PANE_PROMPT_SOURCE,
+            tmux::PANE_SUBAGENTS,
+            tmux::PANE_CWD,
+            tmux::PANE_PERMISSION_MODE,
+            tmux::PANE_WORKTREE_NAME,
+            tmux::PANE_WORKTREE_BRANCH,
+            tmux::PANE_SESSION_ID,
+            tmux::PANE_STARTED_AT,
+            tmux::PANE_WAIT_REASON,
             PENDING_SESSION_END,
             PENDING_WORKTREE_REMOVE,
         ] {

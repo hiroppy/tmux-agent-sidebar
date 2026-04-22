@@ -128,7 +128,7 @@ pub(crate) fn cmd_toggle(args: &[String]) -> i32 {
     .unwrap_or_default();
 
     if !sidebar_pane.is_empty() {
-        tmux::set_pane_option(&sidebar_pane, "@pane_role", "sidebar");
+        tmux::set_pane_option(&sidebar_pane, tmux::PANE_ROLE, "sidebar");
     }
 
     // Restore focus

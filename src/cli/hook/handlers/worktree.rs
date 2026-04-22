@@ -25,23 +25,23 @@ mod tests {
     fn on_worktree_remove_preserves_parent_state_when_subagents_active() {
         let _guard = tmux::test_mock::install();
         let pane = "%PARENT_WT";
-        tmux::test_mock::set(pane, "@pane_subagents", "Explore:sub-1");
-        tmux::test_mock::set(pane, "@pane_worktree_name", "parent-feat");
-        tmux::test_mock::set(pane, "@pane_worktree_branch", "feat/parent");
-        tmux::test_mock::set(pane, "@pane_cwd", "/repo/parent");
+        tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "Explore:sub-1");
+        tmux::test_mock::set(pane, tmux::PANE_WORKTREE_NAME, "parent-feat");
+        tmux::test_mock::set(pane, tmux::PANE_WORKTREE_BRANCH, "feat/parent");
+        tmux::test_mock::set(pane, tmux::PANE_CWD, "/repo/parent");
 
         on_worktree_remove(pane);
 
         assert_eq!(
-            tmux::test_mock::get(pane, "@pane_worktree_name").as_deref(),
+            tmux::test_mock::get(pane, tmux::PANE_WORKTREE_NAME).as_deref(),
             Some("parent-feat")
         );
         assert_eq!(
-            tmux::test_mock::get(pane, "@pane_worktree_branch").as_deref(),
+            tmux::test_mock::get(pane, tmux::PANE_WORKTREE_BRANCH).as_deref(),
             Some("feat/parent")
         );
         assert_eq!(
-            tmux::test_mock::get(pane, "@pane_cwd").as_deref(),
+            tmux::test_mock::get(pane, tmux::PANE_CWD).as_deref(),
             Some("/repo/parent")
         );
     }
@@ -50,22 +50,22 @@ mod tests {
     fn on_worktree_remove_clears_state_when_no_subagents() {
         let _guard = tmux::test_mock::install();
         let pane = "%LONE_WT";
-        tmux::test_mock::set(pane, "@pane_worktree_name", "old");
-        tmux::test_mock::set(pane, "@pane_worktree_branch", "old");
-        tmux::test_mock::set(pane, "@pane_cwd", "/wt/old");
+        tmux::test_mock::set(pane, tmux::PANE_WORKTREE_NAME, "old");
+        tmux::test_mock::set(pane, tmux::PANE_WORKTREE_BRANCH, "old");
+        tmux::test_mock::set(pane, tmux::PANE_CWD, "/wt/old");
 
         on_worktree_remove(pane);
 
-        assert!(!tmux::test_mock::contains(pane, "@pane_worktree_name"));
-        assert!(!tmux::test_mock::contains(pane, "@pane_worktree_branch"));
-        assert!(!tmux::test_mock::contains(pane, "@pane_cwd"));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_WORKTREE_NAME));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_WORKTREE_BRANCH));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_CWD));
     }
 
     #[test]
     fn on_worktree_remove_defers_via_pending_marker_under_subagents() {
         let _guard = tmux::test_mock::install();
         let pane = "%PENDING_WT";
-        tmux::test_mock::set(pane, "@pane_subagents", "Explore:sub-1");
+        tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "Explore:sub-1");
 
         on_worktree_remove(pane);
 
