@@ -3,11 +3,9 @@ use crate::desktop_notification;
 use crate::desktop_notification::DesktopNotificationKind;
 use crate::tmux;
 
-use super::super::context::{
-    AgentContext, branch_label_from_ctx, repo_label_from_ctx, set_agent_meta,
-};
+use super::super::context::{AgentContext, set_agent_meta};
 use super::super::notifications::{
-    notification_body, notification_fingerprint, notification_run_id, notify_desktop,
+    NotifyLabels, NotifyPayload, notification_body, notification_fingerprint, notify_lifecycle,
 };
 
 pub(in crate::cli::hook) fn on_notification(
@@ -31,20 +29,17 @@ pub(in crate::cli::hook) fn on_notification(
     } else {
         tmux::set_pane_option(pane, tmux::PANE_WAIT_REASON, wait_reason);
     }
-    let repo = repo_label_from_ctx(ctx);
-    let branch = branch_label_from_ctx(ctx);
-    let fingerprint = desktop_notification::run_scoped_fingerprint(
-        notification_run_id(pane),
-        notification_fingerprint(wait_reason),
-    );
-    let _ = notify_desktop(
+    let _ = notify_lifecycle(
         pane,
-        DesktopNotificationKind::PermissionRequired,
-        desktop_notification::DesktopNotificationEvent::Notification,
+        NotifyLabels::FromCtx(ctx),
         notifications,
-        &fingerprint,
-        &desktop_notification::format_title(repo.as_deref(), branch.as_deref(), ctx.agent),
-        &notification_body(wait_reason),
+        None,
+        NotifyPayload {
+            kind: DesktopNotificationKind::PermissionRequired,
+            event: desktop_notification::DesktopNotificationEvent::Notification,
+            fingerprint_suffix: notification_fingerprint(wait_reason),
+            body: &notification_body(wait_reason),
+        },
     );
     0
 }
@@ -58,20 +53,17 @@ pub(in crate::cli::hook) fn on_permission_denied(
     set_status(pane, "waiting");
     set_attention(pane, "notification");
     tmux::set_pane_option(pane, tmux::PANE_WAIT_REASON, "permission_denied");
-    let repo = repo_label_from_ctx(ctx);
-    let branch = branch_label_from_ctx(ctx);
-    let fingerprint = desktop_notification::run_scoped_fingerprint(
-        notification_run_id(pane),
-        "permission_denied",
-    );
-    let _ = notify_desktop(
+    let _ = notify_lifecycle(
         pane,
-        DesktopNotificationKind::PermissionRequired,
-        desktop_notification::DesktopNotificationEvent::PermissionDenied,
+        NotifyLabels::FromCtx(ctx),
         notifications,
-        &fingerprint,
-        &desktop_notification::format_title(repo.as_deref(), branch.as_deref(), ctx.agent),
-        "Permission required",
+        None,
+        NotifyPayload {
+            kind: DesktopNotificationKind::PermissionRequired,
+            event: desktop_notification::DesktopNotificationEvent::PermissionDenied,
+            fingerprint_suffix: "permission_denied",
+            body: "Permission required",
+        },
     );
     0
 }

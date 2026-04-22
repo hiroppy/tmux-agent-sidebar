@@ -4,13 +4,13 @@ use crate::desktop_notification::DesktopNotificationKind;
 use crate::tmux;
 
 use super::super::context::{
-    AgentContext, branch_label_from_ctx, branch_label_from_pane, clear_run_state,
-    is_system_message, mark_task_reset, now_epoch_secs, repo_label_from_ctx, repo_label_from_pane,
+    AgentContext, clear_run_state, is_system_message, mark_task_reset, now_epoch_secs,
     set_agent_meta,
 };
 use super::super::notifications::{
-    notification_run_id, notify_desktop, set_notification_run_id, stop_body, stop_failure_body,
-    stop_failure_fingerprint, task_completed_body, task_completed_fingerprint,
+    NotifyLabels, NotifyPayload, notification_run_id, notify_lifecycle, set_notification_run_id,
+    stop_body, stop_failure_body, stop_failure_fingerprint, task_completed_body,
+    task_completed_fingerprint,
 };
 
 pub(in crate::cli::hook) fn on_user_prompt_submit(
@@ -60,17 +60,17 @@ pub(in crate::cli::hook) fn on_stop(
         run_id,
     );
     if !already_notified {
-        let repo = repo_label_from_ctx(ctx);
-        let branch = branch_label_from_ctx(ctx);
-        let fingerprint = desktop_notification::run_scoped_fingerprint(run_id, "stop");
-        let _ = notify_desktop(
+        let _ = notify_lifecycle(
             pane,
-            DesktopNotificationKind::TaskCompleted,
-            desktop_notification::DesktopNotificationEvent::Stop,
+            NotifyLabels::FromCtx(ctx),
             notifications,
-            &fingerprint,
-            &desktop_notification::format_title(repo.as_deref(), branch.as_deref(), ctx.agent),
-            &stop_body(last_message),
+            run_id,
+            NotifyPayload {
+                kind: DesktopNotificationKind::TaskCompleted,
+                event: desktop_notification::DesktopNotificationEvent::Stop,
+                fingerprint_suffix: "stop",
+                body: &stop_body(last_message),
+            },
         );
     }
     if let Some(resp) = response {
@@ -93,21 +93,17 @@ pub(in crate::cli::hook) fn on_stop_failure(
         tmux::set_pane_option(pane, tmux::PANE_WAIT_REASON, error);
     }
     set_status(pane, "error");
-    let fingerprint = desktop_notification::run_scoped_fingerprint(
-        notification_run_id(pane),
-        stop_failure_fingerprint(error),
-    );
-    let repo = repo_label_from_ctx(ctx);
-    let branch = branch_label_from_ctx(ctx);
-    let body = stop_failure_body(error);
-    let _ = notify_desktop(
+    let _ = notify_lifecycle(
         pane,
-        DesktopNotificationKind::TaskFailed,
-        desktop_notification::DesktopNotificationEvent::StopFailure,
+        NotifyLabels::FromCtx(ctx),
         notifications,
-        &fingerprint,
-        &desktop_notification::format_title(repo.as_deref(), branch.as_deref(), ctx.agent),
-        &body,
+        None,
+        NotifyPayload {
+            kind: DesktopNotificationKind::TaskFailed,
+            event: desktop_notification::DesktopNotificationEvent::StopFailure,
+            fingerprint_suffix: stop_failure_fingerprint(error),
+            body: &stop_failure_body(error),
+        },
     );
     0
 }
@@ -119,21 +115,17 @@ pub(in crate::cli::hook) fn on_task_completed(
     task_subject: &str,
     notifications: &desktop_notification::DesktopNotificationSettings,
 ) -> i32 {
-    let fingerprint = desktop_notification::run_scoped_fingerprint(
-        notification_run_id(pane),
-        task_completed_fingerprint(task_id, task_subject),
-    );
-    let repo = repo_label_from_pane(pane);
-    let branch = branch_label_from_pane(pane);
-    let body = task_completed_body(task_subject);
-    let _ = notify_desktop(
+    let _ = notify_lifecycle(
         pane,
-        DesktopNotificationKind::TaskCompleted,
-        desktop_notification::DesktopNotificationEvent::TaskCompleted,
+        NotifyLabels::FromPane { agent: agent_name },
         notifications,
-        &fingerprint,
-        &desktop_notification::format_title(repo.as_deref(), branch.as_deref(), agent_name),
-        &body,
+        None,
+        NotifyPayload {
+            kind: DesktopNotificationKind::TaskCompleted,
+            event: desktop_notification::DesktopNotificationEvent::TaskCompleted,
+            fingerprint_suffix: task_completed_fingerprint(task_id, task_subject),
+            body: &task_completed_body(task_subject),
+        },
     );
     0
 }

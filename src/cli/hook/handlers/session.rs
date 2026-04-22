@@ -4,12 +4,11 @@ use crate::desktop_notification::DesktopNotificationKind;
 use crate::tmux;
 
 use super::super::context::{
-    AgentContext, PENDING_SESSION_END, PENDING_WORKTREE_REMOVE, branch_label_from_pane,
-    clear_run_state, pane_writes_allowed, repo_label_from_pane, run_session_end_teardown,
-    set_agent_meta,
+    AgentContext, PENDING_SESSION_END, PENDING_WORKTREE_REMOVE, clear_run_state,
+    pane_writes_allowed, run_session_end_teardown, set_agent_meta,
 };
 use super::super::notifications::{
-    notification_run_id, notify_desktop, session_end_body, session_end_fingerprint,
+    NotifyLabels, NotifyPayload, notify_lifecycle, session_end_body, session_end_fingerprint,
     set_notification_run_id,
 };
 
@@ -79,20 +78,17 @@ pub(in crate::cli::hook) fn on_session_end(
     // cleared. Routine reasons (`clear`, `resume`, `prompt_input_exit`,
     // `other`) stay silent.
     if matches!(end_reason, "logout" | "bypass_permissions_disabled") {
-        let repo = repo_label_from_pane(pane);
-        let branch = branch_label_from_pane(pane);
-        let fingerprint = desktop_notification::run_scoped_fingerprint(
-            notification_run_id(pane),
-            &session_end_fingerprint(end_reason),
-        );
-        let _ = notify_desktop(
+        let _ = notify_lifecycle(
             pane,
-            DesktopNotificationKind::TaskCompleted,
-            desktop_notification::DesktopNotificationEvent::Stop,
+            NotifyLabels::FromPane { agent: agent_name },
             notifications,
-            &fingerprint,
-            &desktop_notification::format_title(repo.as_deref(), branch.as_deref(), agent_name),
-            &session_end_body(end_reason),
+            None,
+            NotifyPayload {
+                kind: DesktopNotificationKind::TaskCompleted,
+                event: desktop_notification::DesktopNotificationEvent::Stop,
+                fingerprint_suffix: &session_end_fingerprint(end_reason),
+                body: &session_end_body(end_reason),
+            },
         );
     }
     run_session_end_teardown(pane);

@@ -2,7 +2,73 @@ use crate::tmux;
 use crate::ui::text::wait_reason_label;
 use crate::{desktop_notification, desktop_notification::DesktopNotificationKind};
 
-use super::context::now_epoch_millis;
+use super::context::{
+    AgentContext, branch_label_from_ctx, branch_label_from_pane, now_epoch_millis,
+    repo_label_from_ctx, repo_label_from_pane,
+};
+
+/// How to resolve the repo/branch labels and agent name that appear in
+/// the desktop-notification title. The handlers split cleanly in two:
+/// SessionStart-ish events have a full [`AgentContext`] from the
+/// payload; later-in-lifecycle events (TaskCompleted, SessionEnd) only
+/// have the pane id and an agent-name string, so they read the labels
+/// back out of the pane options that earlier events wrote.
+pub(super) enum NotifyLabels<'a> {
+    FromCtx(&'a AgentContext<'a>),
+    FromPane { agent: &'a str },
+}
+
+/// Content half of [`notify_lifecycle`]: what to say, not who to say it
+/// to. Bundled into a struct so the helper stays under clippy's
+/// `too_many_arguments` threshold.
+pub(super) struct NotifyPayload<'a> {
+    pub kind: DesktopNotificationKind,
+    pub event: desktop_notification::DesktopNotificationEvent,
+    pub fingerprint_suffix: &'a str,
+    pub body: &'a str,
+}
+
+/// Fire a lifecycle desktop notification (`Notification`,
+/// `PermissionDenied`, `Stop`, `StopFailure`, `TaskCompleted`,
+/// `SessionEnd`). Resolves labels, computes the run-scoped fingerprint,
+/// and delegates to [`notify_desktop`].
+///
+/// `run_id: None` triggers a fresh `notification_run_id(pane)` lookup;
+/// `Some(id)` reuses a caller-cached value (on_stop already fetches it
+/// to check `has_run_scoped_stamp`, so re-fetching here would be an
+/// extra tmux subprocess call per Stop event).
+pub(super) fn notify_lifecycle(
+    pane: &str,
+    labels: NotifyLabels<'_>,
+    settings: &desktop_notification::DesktopNotificationSettings,
+    run_id: Option<u64>,
+    payload: NotifyPayload<'_>,
+) -> bool {
+    let (repo, branch, agent) = match labels {
+        NotifyLabels::FromCtx(ctx) => (
+            repo_label_from_ctx(ctx),
+            branch_label_from_ctx(ctx),
+            ctx.agent,
+        ),
+        NotifyLabels::FromPane { agent } => (
+            repo_label_from_pane(pane),
+            branch_label_from_pane(pane),
+            agent,
+        ),
+    };
+    let run_id = run_id.or_else(|| notification_run_id(pane));
+    let fingerprint =
+        desktop_notification::run_scoped_fingerprint(run_id, payload.fingerprint_suffix);
+    notify_desktop(
+        pane,
+        payload.kind,
+        payload.event,
+        settings,
+        &fingerprint,
+        &desktop_notification::format_title(repo.as_deref(), branch.as_deref(), agent),
+        payload.body,
+    )
+}
 
 pub(super) fn notification_settings() -> desktop_notification::DesktopNotificationSettings {
     desktop_notification::DesktopNotificationSettings::from_tmux()
