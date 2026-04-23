@@ -398,20 +398,40 @@ pub(crate) fn clear_dead_bg_shells(sessions: &mut [SessionInfo], ps_lines: &[&st
     }
 }
 
-/// Substring match with ASCII-alphanumeric word boundaries on either
-/// side, so a stored `"sleep 3"` does not falsely match a live
-/// `sleep 30` process.
+/// Token-boundary substring match.
+///
+/// The stored `@pane_bg_cmd` is sanitized by `sanitize_tmux_value`, which
+/// replaces `|` and `\n` with spaces (keeping the tmux pane-option
+/// pipe-separated format safe). `ps -eo command=` emits the raw command
+/// line with pipes intact, so the match has to normalize the ps line the
+/// same way before the substring compare — otherwise a bg shell with a
+/// pipe in it (`tail -f log | grep X`) would never match and the sweep
+/// would clear the marker on the next tick.
+///
+/// Boundary rule treats `-`, `_`, `.` as part of the token (alongside
+/// alphanumerics) so that a stored `"cargo-watch"` does not falsely
+/// match `"cargo-watch-bin"` in ps. `/` is a boundary so a bare cmd
+/// still matches when ps emits the full path (`/usr/local/bin/cargo-watch`).
 fn ps_line_matches_cmd(line: &str, cmd: &str) -> bool {
     if cmd.is_empty() {
         return false;
     }
-    let bytes = line.as_bytes();
-    line.match_indices(cmd).any(|(idx, _)| {
+    let normalized = normalize_for_ps_match(line);
+    let bytes = normalized.as_bytes();
+    normalized.match_indices(cmd).any(|(idx, _)| {
         let end = idx + cmd.len();
-        let before_ok = idx == 0 || !bytes[idx - 1].is_ascii_alphanumeric();
-        let after_ok = end == bytes.len() || !bytes[end].is_ascii_alphanumeric();
+        let before_ok = idx == 0 || !is_cmd_token_byte(bytes[idx - 1]);
+        let after_ok = end == bytes.len() || !is_cmd_token_byte(bytes[end]);
         before_ok && after_ok
     })
+}
+
+fn normalize_for_ps_match(s: &str) -> String {
+    s.replace(['\n', '|'], " ")
+}
+
+fn is_cmd_token_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.')
 }
 
 #[cfg(test)]
@@ -667,6 +687,56 @@ mod tests {
         // must count as a boundary (the byte is not ASCII-alnum).
         assert!(ps_line_matches_cmd("🚀sleep 300", "sleep 300"));
         assert!(ps_line_matches_cmd("sleep 300🚀", "sleep 300"));
+    }
+
+    #[test]
+    fn ps_line_matches_cmd_piped_cmd_matches_ps_line_with_pipe() {
+        // Regression for Bug A: `sanitize_tmux_value` replaces `|` with
+        // a space before writing `@pane_bg_cmd`, so the stored value
+        // never contains a pipe. ps, however, emits the raw command line
+        // with `|` intact. The match has to normalize both sides or a
+        // piped bg command gets wiped on the first sweep.
+        let line = "/bin/zsh -c 'tail -f log.txt | grep ERROR'";
+        let stored = "tail -f log.txt   grep ERROR"; // post-sanitize
+        assert!(ps_line_matches_cmd(line, stored));
+    }
+
+    #[test]
+    fn ps_line_matches_cmd_newline_cmd_matches_ps_line() {
+        // Same story for `\n` in the original command.
+        let line = "/bin/zsh -c 'echo one\necho two'";
+        let stored = "echo one echo two";
+        assert!(ps_line_matches_cmd(line, stored));
+    }
+
+    #[test]
+    fn ps_line_matches_cmd_rejects_hyphenated_continuation() {
+        // Regression for Bug B: `cargo-watch` must not match
+        // `cargo-watch-bin` — `-` is part of the token, not a boundary.
+        assert!(!ps_line_matches_cmd(
+            "/usr/local/bin/cargo-watch-bin",
+            "cargo-watch"
+        ));
+        assert!(!ps_line_matches_cmd("npm-run-all-ng foo", "npm-run-all"));
+    }
+
+    #[test]
+    fn ps_line_matches_cmd_rejects_dot_continuation() {
+        assert!(!ps_line_matches_cmd("node app.js.bak watch", "node app.js"));
+    }
+
+    #[test]
+    fn ps_line_matches_cmd_accepts_path_prefixed_cmd() {
+        // `/` stays a boundary so a bare `cargo-watch` still matches
+        // the full-path form ps typically emits for installed binaries.
+        assert!(ps_line_matches_cmd(
+            "/usr/local/bin/cargo-watch",
+            "cargo-watch"
+        ));
+        assert!(ps_line_matches_cmd(
+            "./cargo-watch --watch src",
+            "cargo-watch"
+        ));
     }
 
     #[test]
