@@ -7,6 +7,7 @@ pub struct StatusIcons {
     /// Icon for the "All" filter in the top filter bar.
     all: String,
     running: String,
+    background: String,
     waiting: String,
     idle: String,
     error: String,
@@ -18,6 +19,7 @@ impl Default for StatusIcons {
         Self {
             all: "≡".into(),
             running: "●".into(),
+            background: "◎".into(),
             waiting: "◐".into(),
             idle: "○".into(),
             error: "✕".into(),
@@ -47,6 +49,7 @@ impl StatusIcons {
 
         icons.all = read("@sidebar_icon_all", &icons.all);
         icons.running = read("@sidebar_icon_running", &icons.running);
+        icons.background = read("@sidebar_icon_background", &icons.background);
         icons.waiting = read("@sidebar_icon_waiting", &icons.waiting);
         icons.idle = read("@sidebar_icon_idle", &icons.idle);
         icons.error = read("@sidebar_icon_error", &icons.error);
@@ -62,7 +65,7 @@ impl StatusIcons {
     pub fn status_icon(&self, status: &PaneStatus) -> &str {
         match status {
             PaneStatus::Running => self.running.as_str(),
-            PaneStatus::Background => "◎",
+            PaneStatus::Background => self.background.as_str(),
             PaneStatus::Waiting => self.waiting.as_str(),
             PaneStatus::Idle => self.idle.as_str(),
             PaneStatus::Error => self.error.as_str(),
@@ -92,11 +95,13 @@ mod tests {
         let mut opts = HashMap::new();
         opts.insert("@sidebar_icon_all".into(), "∀".into());
         opts.insert("@sidebar_icon_running".into(), "◉".into());
+        opts.insert("@sidebar_icon_background".into(), "⊙".into());
         opts.insert("@sidebar_icon_unknown".into(), "∎".into());
 
         let icons = StatusIcons::from_options(&opts);
         assert_eq!(icons.all_icon(), "∀");
         assert_eq!(icons.status_icon(&PaneStatus::Running), "◉");
+        assert_eq!(icons.status_icon(&PaneStatus::Background), "⊙");
         assert_eq!(icons.status_icon(&PaneStatus::Unknown), "∎");
         assert_eq!(icons.status_icon(&PaneStatus::Waiting), "◐");
     }

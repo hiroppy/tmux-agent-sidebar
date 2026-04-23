@@ -8,18 +8,9 @@
 //! running > permission > background > waiting > idle
 //! ```
 //!
-//! Who enforces each tier:
-//! - `running` is set unconditionally by `activity.rs::handle_activity_log`
-//!   on any tool use and does not flow through this module — tool activity
-//!   always wins because the agent is actively doing work.
-//! - `permission` class wait reasons survive as `waiting` even when a
-//!   background shell is alive (`resolve_notification_status`), because the
-//!   user still has to act on the prompt.
-//! - `background` is picked over `waiting` for softer notifications (auth
-//!   success, rate limit, teammate idle, session resumed, …) and over
-//!   `idle` at Stop time, whenever `@pane_bg_cmd` is non-empty.
-//! - `waiting` is the Notification fallback when no bg shell is live.
-//! - `idle` is the Stop fallback when no bg shell is live.
+//! Non-obvious rule: `permission`-class wait reasons must stay as `waiting`
+//! even when a background shell is alive — the user still has to act on
+//! the prompt, so a live bg shell does not lower the signal.
 
 /// Wait reasons that demand direct user action and must stay visible as
 /// `waiting` even with a live background shell.

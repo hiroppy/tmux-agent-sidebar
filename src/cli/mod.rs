@@ -82,7 +82,13 @@ fn set_attention(pane: &str, state: &str) {
     }
 }
 
-fn sanitize_tmux_value(s: &str) -> String {
+/// Canonicalize a string before storing it in a tmux pane option. Tmux's
+/// pane-option format uses `|` as a field separator and `\n` as a record
+/// terminator, so both must be replaced with spaces to keep the stored
+/// value a single safe field. Readers that compare against raw process
+/// data (e.g. the bg-shell ps sweep) must apply the same normalization
+/// so round-tripping through storage doesn't silently break equality.
+pub(crate) fn sanitize_tmux_value(s: &str) -> String {
     s.replace(['\n', '|'], " ")
 }
 

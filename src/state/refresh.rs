@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use crate::activity::{self, TaskProgress};
+use crate::cli::sanitize_tmux_value;
 use crate::tmux::{self, PaneStatus, SessionInfo};
 
 use super::AppState;
@@ -103,6 +104,7 @@ impl AppState {
             tmux::PANE_STARTED_AT,
             tmux::PANE_WAIT_REASON,
             tmux::PANE_SESSION_ID,
+            tmux::PANE_BG_CMD,
         ] {
             tmux::unset_pane_option(pane_id, key);
         }
@@ -145,7 +147,7 @@ impl AppState {
         self.refresh_now();
         let (focused, window_active, _, _) = tmux::get_sidebar_pane_info(&self.tmux_pane);
         let mut sessions = tmux::query_sessions();
-        sweep_dead_bg_shells(&mut sessions);
+        self.sweep_dead_bg_shells_if_due(&mut sessions);
         if let Some(process_snapshot) = self.refresh_port_data(&sessions) {
             let sessions = Self::filter_sessions_to_live_agent_panes(
                 sessions,
@@ -220,9 +222,6 @@ impl AppState {
                 Self::clear_dead_agent_metadata(&pane_id);
                 self.clear_pane_state(&pane_id);
             }
-            // pane_states.retain by current panes is handled by
-            // `apply_session_snapshot` -> `prune_pane_states_to_current_panes`
-            // which runs immediately after this function in `refresh()`.
             self.timers.port_scan_initialized = true;
             self.timers.last_port_refresh = std::time::Instant::now();
             return Some(scanned);
@@ -243,10 +242,7 @@ impl AppState {
                 // inactive-grace path while the agent is idle so that a
                 // long-stalled progress bar gets dismissed even if the
                 // log file itself stops changing.
-                let agent_active = matches!(
-                    pane.status,
-                    PaneStatus::Running | PaneStatus::Background | PaneStatus::Waiting
-                );
+                let agent_active = pane.status.is_active();
                 let log_unchanged =
                     current_mtime.is_some() && current_mtime == prior_state.task_progress_log_mtime;
                 if log_unchanged && agent_active {
@@ -324,8 +320,22 @@ impl AppState {
             pane_state.task_progress = update.progress;
             pane_state.task_progress_log_mtime = update.log_mtime;
         }
-        // pane_states.retain is handled by `apply_session_snapshot` ->
-        // `prune_pane_states_to_current_panes` earlier in `refresh()`.
+    }
+
+    /// Run the background-shell liveness sweep at most once per
+    /// `BG_SHELL_SWEEP_INTERVAL`. The first call always runs so the
+    /// initial pane state is accurate.
+    fn sweep_dead_bg_shells_if_due(&mut self, sessions: &mut [SessionInfo]) {
+        const BG_SHELL_SWEEP_INTERVAL: Duration = Duration::from_secs(5);
+        let should_run = self
+            .timers
+            .last_bg_shell_sweep
+            .is_none_or(|last| last.elapsed() >= BG_SHELL_SWEEP_INTERVAL);
+        if !should_run {
+            return;
+        }
+        sweep_dead_bg_shells(sessions);
+        self.timers.last_bg_shell_sweep = Some(std::time::Instant::now());
     }
 
     pub(crate) fn refresh_activity_log(&mut self) {
@@ -370,11 +380,11 @@ pub(crate) fn sweep_dead_bg_shells(sessions: &mut [SessionInfo]) {
         return;
     }
     let ps_stdout = String::from_utf8_lossy(&out.stdout).into_owned();
-    let ps_lines: Vec<&str> = ps_stdout.lines().collect();
-    clear_dead_bg_shells(sessions, &ps_lines);
+    let normalized_lines: Vec<String> = ps_stdout.lines().map(sanitize_tmux_value).collect();
+    clear_dead_bg_shells(sessions, &normalized_lines);
 }
 
-pub(crate) fn clear_dead_bg_shells(sessions: &mut [SessionInfo], ps_lines: &[&str]) {
+pub(crate) fn clear_dead_bg_shells(sessions: &mut [SessionInfo], normalized_ps_lines: &[String]) {
     for session in sessions.iter_mut() {
         for window in &mut session.windows {
             for pane in &mut window.panes {
@@ -384,7 +394,10 @@ pub(crate) fn clear_dead_bg_shells(sessions: &mut [SessionInfo], ps_lines: &[&st
                 if cmd == tmux::BG_CMD_PLACEHOLDER {
                     continue;
                 }
-                if ps_lines.iter().any(|line| ps_line_matches_cmd(line, cmd)) {
+                if normalized_ps_lines
+                    .iter()
+                    .any(|line| ps_line_matches_cmd(line, cmd))
+                {
                     continue;
                 }
                 tmux::unset_pane_option(&pane.pane_id, tmux::PANE_BG_CMD);
@@ -398,36 +411,27 @@ pub(crate) fn clear_dead_bg_shells(sessions: &mut [SessionInfo], ps_lines: &[&st
     }
 }
 
-/// Token-boundary substring match.
-///
-/// The stored `@pane_bg_cmd` is sanitized by `sanitize_tmux_value`, which
-/// replaces `|` and `\n` with spaces (keeping the tmux pane-option
-/// pipe-separated format safe). `ps -eo command=` emits the raw command
-/// line with pipes intact, so the match has to normalize the ps line the
-/// same way before the substring compare — otherwise a bg shell with a
-/// pipe in it (`tail -f log | grep X`) would never match and the sweep
-/// would clear the marker on the next tick.
+/// Token-boundary substring match against a ps `command=` line that has
+/// already been run through [`sanitize_tmux_value`]. Callers must pre-
+/// normalize so the match sees the same `|`/`\n` → space canonicalization
+/// applied when `@pane_bg_cmd` was stored; otherwise a piped bg command
+/// (`tail -f log | grep X`) would miss on its first sweep.
 ///
 /// Boundary rule treats `-`, `_`, `.` as part of the token (alongside
 /// alphanumerics) so that a stored `"cargo-watch"` does not falsely
 /// match `"cargo-watch-bin"` in ps. `/` is a boundary so a bare cmd
 /// still matches when ps emits the full path (`/usr/local/bin/cargo-watch`).
-fn ps_line_matches_cmd(line: &str, cmd: &str) -> bool {
+fn ps_line_matches_cmd(normalized_line: &str, cmd: &str) -> bool {
     if cmd.is_empty() {
         return false;
     }
-    let normalized = normalize_for_ps_match(line);
-    let bytes = normalized.as_bytes();
-    normalized.match_indices(cmd).any(|(idx, _)| {
+    let bytes = normalized_line.as_bytes();
+    normalized_line.match_indices(cmd).any(|(idx, _)| {
         let end = idx + cmd.len();
         let before_ok = idx == 0 || !is_cmd_token_byte(bytes[idx - 1]);
         let after_ok = end == bytes.len() || !is_cmd_token_byte(bytes[end]);
         before_ok && after_ok
     })
-}
-
-fn normalize_for_ps_match(s: &str) -> String {
-    s.replace(['\n', '|'], " ")
 }
 
 fn is_cmd_token_byte(b: u8) -> bool {
@@ -487,6 +491,10 @@ mod tests {
         p
     }
 
+    fn normalized_ps(lines: &[&str]) -> Vec<String> {
+        lines.iter().copied().map(sanitize_tmux_value).collect()
+    }
+
     #[test]
     fn clear_dead_bg_shells_retains_shell_present_in_ps_output() {
         let _guard = tmux::test_mock::install();
@@ -498,7 +506,7 @@ mod tests {
             "sleep 300",
             PaneStatus::Background,
         )]);
-        let ps = vec!["/bin/zsh -c eval 'sleep 300' < /dev/null"];
+        let ps = normalized_ps(&["/bin/zsh -c eval 'sleep 300' < /dev/null"]);
 
         clear_dead_bg_shells(&mut sessions, &ps);
 
@@ -523,7 +531,7 @@ mod tests {
             PaneStatus::Background,
         )]);
         // ps output contains nothing matching "sleep 300".
-        let ps = vec!["/bin/zsh", "/usr/bin/ssh"];
+        let ps = normalized_ps(&["/bin/zsh", "/usr/bin/ssh"]);
 
         clear_dead_bg_shells(&mut sessions, &ps);
 
@@ -556,7 +564,7 @@ mod tests {
             "npm run dev",
             PaneStatus::Running,
         )]);
-        let ps: Vec<&str> = vec![];
+        let ps: Vec<String> = Vec::new();
 
         clear_dead_bg_shells(&mut sessions, &ps);
 
@@ -584,7 +592,7 @@ mod tests {
             tmux::BG_CMD_PLACEHOLDER,
             PaneStatus::Background,
         )]);
-        let ps: Vec<&str> = vec![];
+        let ps: Vec<String> = Vec::new();
 
         clear_dead_bg_shells(&mut sessions, &ps);
 
@@ -609,7 +617,7 @@ mod tests {
             "sleep 3",
             PaneStatus::Background,
         )]);
-        let ps = vec!["/bin/zsh -c 'sleep 30' < /dev/null"];
+        let ps = normalized_ps(&["/bin/zsh -c 'sleep 30' < /dev/null"]);
 
         clear_dead_bg_shells(&mut sessions, &ps);
 
@@ -623,7 +631,7 @@ mod tests {
     fn clear_dead_bg_shells_no_op_when_no_pane_has_bg_marker() {
         let _guard = tmux::test_mock::install();
         let mut sessions = test_session(vec![test_pane("%1")]);
-        let ps: Vec<&str> = vec!["/bin/zsh"];
+        let ps = normalized_ps(&["/bin/zsh"]);
 
         clear_dead_bg_shells(&mut sessions, &ps);
 
@@ -694,19 +702,21 @@ mod tests {
         // Regression for Bug A: `sanitize_tmux_value` replaces `|` with
         // a space before writing `@pane_bg_cmd`, so the stored value
         // never contains a pipe. ps, however, emits the raw command line
-        // with `|` intact. The match has to normalize both sides or a
-        // piped bg command gets wiped on the first sweep.
-        let line = "/bin/zsh -c 'tail -f log.txt | grep ERROR'";
+        // with `|` intact — so callers must pre-normalize ps lines through
+        // the same filter before this match can see the two sides as equal.
+        let raw_line = "/bin/zsh -c 'tail -f log.txt | grep ERROR'";
+        let normalized = sanitize_tmux_value(raw_line);
         let stored = "tail -f log.txt   grep ERROR"; // post-sanitize
-        assert!(ps_line_matches_cmd(line, stored));
+        assert!(ps_line_matches_cmd(&normalized, stored));
     }
 
     #[test]
     fn ps_line_matches_cmd_newline_cmd_matches_ps_line() {
         // Same story for `\n` in the original command.
-        let line = "/bin/zsh -c 'echo one\necho two'";
+        let raw_line = "/bin/zsh -c 'echo one\necho two'";
+        let normalized = sanitize_tmux_value(raw_line);
         let stored = "echo one echo two";
-        assert!(ps_line_matches_cmd(line, stored));
+        assert!(ps_line_matches_cmd(&normalized, stored));
     }
 
     #[test]

@@ -17,6 +17,8 @@ pub struct RefreshTimers {
     /// Whether the first port scan has completed; the first scan must
     /// always run regardless of the elapsed-time gate.
     pub port_scan_initialized: bool,
+    /// Timestamp of the last background-shell liveness sweep.
+    pub last_bg_shell_sweep: Option<Instant>,
 }
 
 impl Default for RefreshTimers {
@@ -26,6 +28,7 @@ impl Default for RefreshTimers {
             last_filter_click: now,
             last_port_refresh: now,
             port_scan_initialized: false,
+            last_bg_shell_sweep: None,
         }
     }
 }

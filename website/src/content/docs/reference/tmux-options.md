@@ -95,9 +95,9 @@ Any Unicode glyph works. Make sure the glyphs render in your terminal font.
 | Option                  | Default | Meaning                      |
 | ----------------------- | ------- | ---------------------------- |
 | `@sidebar_icon_all`     | `≡`     | Status filter bar "all" icon |
-| `@sidebar_icon_running` | `●`     | Running status icon          |
-| not configurable        | `◎`     | Background shell status icon |
-| `@sidebar_icon_waiting` | `◐`     | Waiting status icon          |
+| `@sidebar_icon_running`    | `●`     | Running status icon          |
+| `@sidebar_icon_background` | `◎`     | Background shell status icon |
+| `@sidebar_icon_waiting`    | `◐`     | Waiting status icon          |
 | `@sidebar_icon_idle`    | `○`     | Idle status icon             |
 | `@sidebar_icon_error`   | `✕`     | Error status icon            |
 | `@sidebar_icon_unknown` | `·`     | Unknown status icon          |

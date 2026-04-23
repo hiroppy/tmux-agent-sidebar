@@ -14,42 +14,26 @@ pub(super) fn render_filter_bar<'a>(state: &AppState) -> Line<'a> {
     let icons = &state.icons;
     let (all, running, background, waiting, idle, error) = state.status_counts();
 
+    let icon_for = |s: PaneStatus| (icons.status_icon(&s), theme.status_color(&s, false));
     let items: Vec<(StatusFilter, (&str, ratatui::style::Color), usize)> = vec![
         (StatusFilter::All, (icons.all_icon(), theme.status_all), all),
         (
             StatusFilter::Running,
-            (
-                icons.status_icon(&PaneStatus::Running),
-                theme.status_running,
-            ),
+            icon_for(PaneStatus::Running),
             running,
         ),
         (
             StatusFilter::Background,
-            (
-                icons.status_icon(&PaneStatus::Background),
-                theme.status_running,
-            ),
+            icon_for(PaneStatus::Background),
             background,
         ),
         (
             StatusFilter::Waiting,
-            (
-                icons.status_icon(&PaneStatus::Waiting),
-                theme.status_waiting,
-            ),
+            icon_for(PaneStatus::Waiting),
             waiting,
         ),
-        (
-            StatusFilter::Idle,
-            (icons.status_icon(&PaneStatus::Idle), theme.status_idle),
-            idle,
-        ),
-        (
-            StatusFilter::Error,
-            (icons.status_icon(&PaneStatus::Error), theme.status_error),
-            error,
-        ),
+        (StatusFilter::Idle, icon_for(PaneStatus::Idle), idle),
+        (StatusFilter::Error, icon_for(PaneStatus::Error), error),
     ];
 
     let mut spans: Vec<Span<'a>> = Vec::new();

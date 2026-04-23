@@ -161,6 +161,12 @@ impl PaneStatus {
             Self::Unknown => "·",
         }
     }
+
+    /// `true` when the agent (or an owned background shell) is still
+    /// doing work the user would expect to be timed or updated live.
+    pub fn is_active(&self) -> bool {
+        matches!(self, Self::Running | Self::Background | Self::Waiting)
+    }
 }
 
 #[cfg(test)]
