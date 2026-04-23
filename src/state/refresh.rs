@@ -610,6 +610,75 @@ mod tests {
         assert!(sessions[0].windows[0].panes[0].bg_shell_cmd.is_none());
     }
 
+    // ─── ps_line_matches_cmd ────────────────────────────────────────
+
+    #[test]
+    fn ps_line_matches_cmd_empty_cmd_never_matches() {
+        assert!(!ps_line_matches_cmd("anything", ""));
+        assert!(!ps_line_matches_cmd("", ""));
+    }
+
+    #[test]
+    fn ps_line_matches_cmd_no_occurrence_is_false() {
+        assert!(!ps_line_matches_cmd("/bin/zsh", "sleep 300"));
+    }
+
+    #[test]
+    fn ps_line_matches_cmd_full_line_match() {
+        assert!(ps_line_matches_cmd("sleep 300", "sleep 300"));
+    }
+
+    #[test]
+    fn ps_line_matches_cmd_match_at_start() {
+        assert!(ps_line_matches_cmd("sleep 300 --flag", "sleep 300"));
+    }
+
+    #[test]
+    fn ps_line_matches_cmd_match_at_end() {
+        assert!(ps_line_matches_cmd("/bin/zsh -c sleep 300", "sleep 300"));
+    }
+
+    #[test]
+    fn ps_line_matches_cmd_rejects_trailing_alnum() {
+        // Stored "sleep 3" must not match a live "sleep 30" process.
+        assert!(!ps_line_matches_cmd("sleep 30", "sleep 3"));
+        assert!(!ps_line_matches_cmd("/bin/zsh sleep 300 end", "sleep 3"));
+    }
+
+    #[test]
+    fn ps_line_matches_cmd_rejects_leading_alnum() {
+        // `mysleep 300` must not match `sleep 300`.
+        assert!(!ps_line_matches_cmd("mysleep 300", "sleep 300"));
+    }
+
+    #[test]
+    fn ps_line_matches_cmd_accepts_non_alnum_boundary_chars() {
+        // Quotes, parens, semicolons — all count as word boundaries.
+        assert!(ps_line_matches_cmd(
+            "/bin/zsh -c 'sleep 300' end",
+            "sleep 300"
+        ));
+        assert!(ps_line_matches_cmd("(sleep 300);", "sleep 300"));
+    }
+
+    #[test]
+    fn ps_line_matches_cmd_multibyte_adjacent_treated_as_boundary() {
+        // A non-ASCII char adjacent to the match must not panic and
+        // must count as a boundary (the byte is not ASCII-alnum).
+        assert!(ps_line_matches_cmd("🚀sleep 300", "sleep 300"));
+        assert!(ps_line_matches_cmd("sleep 300🚀", "sleep 300"));
+    }
+
+    #[test]
+    fn ps_line_matches_cmd_multiple_occurrences_one_valid_matches() {
+        // If any occurrence satisfies the boundary check, return true.
+        // First occurrence is glued to `mysleep 3`, second is standalone.
+        assert!(ps_line_matches_cmd(
+            "mysleep 30 /bin/sh sleep 30",
+            "sleep 30"
+        ));
+    }
+
     #[test]
     fn filter_sessions_to_live_agent_panes_removes_dead_panes() {
         let sessions = test_session(vec![test_pane("%1"), test_pane("%2")]);
