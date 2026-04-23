@@ -47,6 +47,15 @@ pub(in crate::cli::hook) fn on_stop(
         tmux::set_pane_option(pane, tmux::PANE_PROMPT, &msg);
         tmux::set_pane_option(pane, tmux::PANE_PROMPT_SOURCE, "response");
     }
+    if !tmux::get_pane_option_value(pane, tmux::PANE_BG_CMD).is_empty() {
+        tmux::unset_pane_option(pane, tmux::PANE_WAIT_REASON);
+        mark_task_reset(pane);
+        set_status(pane, "background");
+        if let Some(resp) = response {
+            println!("{resp}");
+        }
+        return 0;
+    }
     clear_run_state(pane);
     mark_task_reset(pane);
     set_status(pane, "idle");
@@ -187,10 +196,11 @@ mod tests {
     }
 
     #[test]
-    fn on_user_prompt_submit_clears_stale_wait_reason() {
+    fn on_user_prompt_submit_clears_stale_wait_reason_but_preserves_bg_cmd() {
         let _guard = tmux::test_mock::install();
         let pane = "%PROMPT_CLEAR_WAIT";
         tmux::test_mock::set(pane, tmux::PANE_WAIT_REASON, "permission");
+        tmux::test_mock::set(pane, tmux::PANE_BG_CMD, "npm run dev");
         let ctx = AgentContext {
             agent: "claude",
             cwd: "/repo",
@@ -200,6 +210,78 @@ mod tests {
         };
         on_user_prompt_submit(pane, &ctx, "new prompt");
         assert!(!tmux::test_mock::contains(pane, tmux::PANE_WAIT_REASON));
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_BG_CMD).as_deref(),
+            Some("npm run dev"),
+            "bg command must survive a new user turn — the shell is still running",
+        );
+    }
+
+    #[test]
+    fn on_stop_with_background_shell_sets_background_status() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%STOP_BG";
+        tmux::test_mock::set(pane, tmux::PANE_BG_CMD, "npm run dev");
+        tmux::test_mock::set(pane, tmux::PANE_STARTED_AT, "123");
+        let ctx = AgentContext {
+            agent: "claude",
+            cwd: "/repo",
+            permission_mode: "default",
+            worktree: &None,
+            session_id: &None,
+        };
+
+        let exit = on_stop(
+            pane,
+            &ctx,
+            "",
+            None,
+            &desktop_notification::DesktopNotificationSettings {
+                enabled: false,
+                events: Default::default(),
+            },
+        );
+
+        assert_eq!(exit, 0);
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("background")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STARTED_AT).as_deref(),
+            Some("123")
+        );
+    }
+
+    #[test]
+    fn on_stop_without_background_shell_sets_idle_status() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%STOP_IDLE";
+        tmux::test_mock::set(pane, tmux::PANE_STARTED_AT, "123");
+        let ctx = AgentContext {
+            agent: "claude",
+            cwd: "/repo",
+            permission_mode: "default",
+            worktree: &None,
+            session_id: &None,
+        };
+
+        on_stop(
+            pane,
+            &ctx,
+            "",
+            None,
+            &desktop_notification::DesktopNotificationSettings {
+                enabled: false,
+                events: Default::default(),
+            },
+        );
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("idle")
+        );
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_STARTED_AT));
     }
 
     #[test]

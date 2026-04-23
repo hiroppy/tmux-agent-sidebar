@@ -187,6 +187,7 @@ mod tests {
             session_id: None,
             session_name: String::new(),
             sidebar_spawned: false,
+            bg_shell_cmd: None,
         }
     }
 

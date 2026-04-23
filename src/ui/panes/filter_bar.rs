@@ -12,7 +12,7 @@ use crate::ui::text::{display_width, truncate_to_width};
 pub(super) fn render_filter_bar<'a>(state: &AppState) -> Line<'a> {
     let theme = &state.theme;
     let icons = &state.icons;
-    let (all, running, waiting, idle, error) = state.status_counts();
+    let (all, running, background, waiting, idle, error) = state.status_counts();
 
     let items: Vec<(StatusFilter, (&str, ratatui::style::Color), usize)> = vec![
         (StatusFilter::All, (icons.all_icon(), theme.status_all), all),
@@ -23,6 +23,14 @@ pub(super) fn render_filter_bar<'a>(state: &AppState) -> Line<'a> {
                 theme.status_running,
             ),
             running,
+        ),
+        (
+            StatusFilter::Background,
+            (
+                icons.status_icon(&PaneStatus::Background),
+                theme.status_running,
+            ),
+            background,
         ),
         (
             StatusFilter::Waiting,
@@ -256,6 +264,7 @@ mod tests {
             session_id: None,
             session_name: String::new(),
             sidebar_spawned: false,
+            bg_shell_cmd: None,
         };
         let pane2 = crate::tmux::PaneInfo {
             pane_id: "%3".into(),
@@ -276,6 +285,7 @@ mod tests {
             session_id: None,
             session_name: String::new(),
             sidebar_spawned: false,
+            bg_shell_cmd: None,
         };
         let mut state = make_state_with_groups(vec![crate::group::RepoGroup {
             name: "project".into(),
@@ -295,7 +305,7 @@ mod tests {
             .filter(|span| !span.content.as_ref().trim().is_empty())
             .collect();
 
-        assert_eq!(cells.len(), 10);
+        assert_eq!(cells.len(), 12);
 
         assert_eq!(cells[0].content.as_ref(), "≡");
         assert_eq!(cells[0].style.fg, Some(theme.filter_inactive));
@@ -311,23 +321,29 @@ mod tests {
         assert_eq!(cells[3].content.as_ref(), "1");
         assert_eq!(cells[3].style.fg, Some(theme.text_active));
 
-        assert_eq!(cells[4].content.as_ref(), "◐");
+        assert_eq!(cells[4].content.as_ref(), "◎");
         assert_eq!(cells[4].style.fg, Some(theme.filter_inactive));
 
         assert_eq!(cells[5].content.as_ref(), "0");
         assert_eq!(cells[5].style.fg, Some(theme.filter_inactive));
 
-        assert_eq!(cells[6].content.as_ref(), "○");
+        assert_eq!(cells[6].content.as_ref(), "◐");
         assert_eq!(cells[6].style.fg, Some(theme.filter_inactive));
 
-        assert_eq!(cells[7].content.as_ref(), "1");
-        assert_eq!(cells[7].style.fg, Some(theme.text_active));
+        assert_eq!(cells[7].content.as_ref(), "0");
+        assert_eq!(cells[7].style.fg, Some(theme.filter_inactive));
 
-        assert_eq!(cells[8].content.as_ref(), "✕");
+        assert_eq!(cells[8].content.as_ref(), "○");
         assert_eq!(cells[8].style.fg, Some(theme.filter_inactive));
 
-        assert_eq!(cells[9].content.as_ref(), "0");
-        assert_eq!(cells[9].style.fg, Some(theme.filter_inactive));
+        assert_eq!(cells[9].content.as_ref(), "1");
+        assert_eq!(cells[9].style.fg, Some(theme.text_active));
+
+        assert_eq!(cells[10].content.as_ref(), "✕");
+        assert_eq!(cells[10].style.fg, Some(theme.filter_inactive));
+
+        assert_eq!(cells[11].content.as_ref(), "0");
+        assert_eq!(cells[11].style.fg, Some(theme.filter_inactive));
     }
 
     #[test]

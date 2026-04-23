@@ -1,6 +1,6 @@
 <h1 align="center">tmux-agent-sidebar</h1>
 
-<p align="center">One tmux sidebar that tracks every Claude Code, Codex, and OpenCode pane across every session and window. See status, prompts, Git state, activity, and worktrees without switching windows.</p>
+<p align="center">One tmux sidebar that tracks every Claude Code, Codex, and OpenCode pane across every session and window. See status, background shells, prompts, Git state, activity, and worktrees without switching windows.</p>
 
 <p align="center"><img src="website/src/assets/captures/hero.png" alt="tmux-agent-sidebar hero" /></p>
 
@@ -15,7 +15,7 @@
 - **Every pane, one view** 
   — tracks Claude Code, Codex, and OpenCode panes across all tmux sessions and windows
 - **Live metadata** 
-  — prompts, tool calls, response previews, wait reasons, task progress, and subagent trees refresh as the agents work
+  — prompts, tool calls, response previews, background shell state, wait reasons, task progress, and subagent trees refresh as the agents work
 - **Worktrees, included** 
   — spawn a fresh worktree + agent from the sidebar and tear it down — window, worktree, and branch — in one keystroke
 - **Desktop notifications** 

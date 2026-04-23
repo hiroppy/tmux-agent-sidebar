@@ -8,6 +8,16 @@ use super::super::notifications::{
     NotifyLabels, NotifyPayload, notification_body, notification_fingerprint, notify_lifecycle,
 };
 
+/// Wait reasons that demand direct user action. Softer reasons
+/// (auth_success, rate_limit, teammate_idle, …) can be downgraded to
+/// `background` when a live shell is present; these cannot.
+fn is_permission_wait_reason(wait_reason: &str) -> bool {
+    matches!(
+        wait_reason,
+        "permission_prompt" | "permission_denied" | "elicitation_dialog"
+    )
+}
+
 pub(in crate::cli::hook) fn on_notification(
     pane: &str,
     ctx: &AgentContext<'_>,
@@ -19,12 +29,15 @@ pub(in crate::cli::hook) fn on_notification(
     if meta_only {
         return 0;
     }
-    set_status(pane, "waiting");
+    let bg_shell_live = !tmux::get_pane_option_value(pane, tmux::PANE_BG_CMD).is_empty();
+    let new_status = if bg_shell_live && !is_permission_wait_reason(wait_reason) {
+        "background"
+    } else {
+        "waiting"
+    };
+    set_status(pane, new_status);
     set_attention(pane, "notification");
     if wait_reason.is_empty() {
-        // An explicit-but-empty wait_reason is the hook's way of saying
-        // "no reason"; drop any prior value so the sidebar doesn't keep
-        // rendering a stale cause from the previous notification.
         tmux::unset_pane_option(pane, tmux::PANE_WAIT_REASON);
     } else {
         tmux::set_pane_option(pane, tmux::PANE_WAIT_REASON, wait_reason);
@@ -180,6 +193,105 @@ mod tests {
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_WAIT_REASON).as_deref(),
             Some("permission")
+        );
+    }
+
+    #[test]
+    fn on_notification_keeps_background_when_softer_reason_and_bg_shell_live() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%NOTIF_BG_PREEMPT";
+        tmux::test_mock::set(pane, tmux::PANE_BG_CMD, "cargo test");
+        let ctx = AgentContext {
+            agent: "claude",
+            cwd: "/repo",
+            permission_mode: "default",
+            worktree: &None,
+            session_id: &None,
+        };
+        let notifications = desktop_notification::DesktopNotificationSettings {
+            enabled: false,
+            events: Default::default(),
+        };
+        on_notification(
+            pane,
+            &ctx,
+            "auth_success",
+            /* meta_only */ false,
+            &notifications,
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("background"),
+        );
+    }
+
+    #[test]
+    fn on_notification_permission_reason_preempts_background() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%NOTIF_PERM_OVER_BG";
+        tmux::test_mock::set(pane, tmux::PANE_BG_CMD, "cargo test");
+        let ctx = AgentContext {
+            agent: "claude",
+            cwd: "/repo",
+            permission_mode: "default",
+            worktree: &None,
+            session_id: &None,
+        };
+        let notifications = desktop_notification::DesktopNotificationSettings {
+            enabled: false,
+            events: Default::default(),
+        };
+        on_notification(
+            pane,
+            &ctx,
+            "permission_prompt",
+            /* meta_only */ false,
+            &notifications,
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("waiting"),
+        );
+    }
+
+    #[test]
+    fn is_permission_wait_reason_allowlist() {
+        assert!(is_permission_wait_reason("permission_prompt"));
+        assert!(is_permission_wait_reason("permission_denied"));
+        assert!(is_permission_wait_reason("elicitation_dialog"));
+        // Softer reasons must NOT be treated as permission.
+        assert!(!is_permission_wait_reason("auth_success"));
+        assert!(!is_permission_wait_reason("rate_limit"));
+        assert!(!is_permission_wait_reason("session_resumed"));
+        assert!(!is_permission_wait_reason("teammate_idle:alice"));
+        assert!(!is_permission_wait_reason(""));
+    }
+
+    #[test]
+    fn on_notification_soft_reason_without_bg_still_sets_waiting() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%NOTIF_SOFT_NO_BG";
+        let ctx = AgentContext {
+            agent: "claude",
+            cwd: "/repo",
+            permission_mode: "default",
+            worktree: &None,
+            session_id: &None,
+        };
+        let notifications = desktop_notification::DesktopNotificationSettings {
+            enabled: false,
+            events: Default::default(),
+        };
+        on_notification(
+            pane,
+            &ctx,
+            "auth_success",
+            /* meta_only */ false,
+            &notifications,
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("waiting"),
         );
     }
 

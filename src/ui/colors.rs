@@ -143,6 +143,7 @@ impl ColorTheme {
         }
         match status {
             PaneStatus::Running => self.status_running,
+            PaneStatus::Background => self.status_running,
             PaneStatus::Waiting => self.status_waiting,
             PaneStatus::Idle => self.status_idle,
             PaneStatus::Error => self.status_error,

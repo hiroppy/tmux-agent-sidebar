@@ -1,5 +1,6 @@
 use crate::time::now_epoch_secs;
 use crate::tmux;
+use crate::tool_name::CanonicalTool;
 
 use super::super::label::extract_tool_label;
 use super::super::{local_time_hhmm, sanitize_tmux_value, set_status};
@@ -43,8 +44,15 @@ pub(super) fn handle_activity_log(
     tool_response: &serde_json::Value,
 ) -> i32 {
     let label = extract_tool_label(tool_name, tool_input, tool_response);
+    if is_background_bash(tool_name, tool_input) {
+        let stored = if label.is_empty() {
+            tmux::BG_CMD_PLACEHOLDER
+        } else {
+            label.as_str()
+        };
+        tmux::set_pane_option(pane, tmux::PANE_BG_CMD, &sanitize_tmux_value(stored));
+    }
 
-    // If status is not running, tool use means agent is active again
     let current_status = tmux::get_pane_option_value(pane, tmux::PANE_STATUS);
     if current_status != "running" && !current_status.is_empty() {
         set_status(pane, "running");
@@ -75,6 +83,13 @@ pub(super) fn handle_activity_log(
 
     write_activity_entry(pane, tool_name, &label);
     0
+}
+
+fn is_background_bash(tool_name: &str, tool_input: &serde_json::Value) -> bool {
+    tool_name == CanonicalTool::Bash.as_str()
+        && ["run_in_background", "runInBackground"]
+            .iter()
+            .any(|key| tool_input.get(key).and_then(|v| v.as_bool()) == Some(true))
 }
 
 #[cfg(test)]
@@ -213,6 +228,124 @@ mod tests {
 
         let content = fs::read_to_string(&path).unwrap();
         assert!(content.contains("|Read|main.rs"));
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn handle_activity_log_marks_background_bash() {
+        let _guard = tmux::test_mock::install();
+        let pane_id = "%CLI_BG_BASH";
+        let path = crate::activity::log_file_path(pane_id);
+        let _ = fs::remove_file(&path);
+
+        handle_activity_log(
+            pane_id,
+            "Bash",
+            &json!({"command": "npm run dev", "run_in_background": true}),
+            &Value::Null,
+        );
+
+        assert_eq!(
+            tmux::test_mock::get(pane_id, tmux::PANE_BG_CMD).as_deref(),
+            Some("npm run dev"),
+            "command string must be stored so the row body can show what is running",
+        );
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn handle_activity_log_background_bash_without_command_falls_back_to_placeholder() {
+        let _guard = tmux::test_mock::install();
+        let pane_id = "%CLI_BG_BASH_NO_CMD";
+        let path = crate::activity::log_file_path(pane_id);
+        let _ = fs::remove_file(&path);
+
+        handle_activity_log(
+            pane_id,
+            "Bash",
+            &json!({"run_in_background": true}),
+            &Value::Null,
+        );
+
+        assert_eq!(
+            tmux::test_mock::get(pane_id, tmux::PANE_BG_CMD).as_deref(),
+            Some(tmux::BG_CMD_PLACEHOLDER)
+        );
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn handle_activity_log_sanitizes_command_before_writing() {
+        let _guard = tmux::test_mock::install();
+        let pane_id = "%CLI_BG_BASH_PIPE";
+        let path = crate::activity::log_file_path(pane_id);
+        let _ = fs::remove_file(&path);
+
+        handle_activity_log(
+            pane_id,
+            "Bash",
+            &json!({"command": "cat a.log | grep foo\nbar", "run_in_background": true}),
+            &Value::Null,
+        );
+
+        let stored = tmux::test_mock::get(pane_id, tmux::PANE_BG_CMD).unwrap_or_default();
+        assert!(!stored.contains('|'));
+        assert!(!stored.contains('\n'));
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn handle_activity_log_preserves_bg_cmd_when_background_resumes_running() {
+        // Regression: a tool-use burst must not clear @pane_bg_cmd, or
+        // the next Stop would land in `idle` instead of `background`.
+        let _guard = tmux::test_mock::install();
+        let pane_id = "%CLI_BG_PRESERVE";
+        let path = crate::activity::log_file_path(pane_id);
+        let _ = fs::remove_file(&path);
+        tmux::test_mock::set(pane_id, tmux::PANE_STATUS, "background");
+        tmux::test_mock::set(pane_id, tmux::PANE_BG_CMD, "npm run dev");
+
+        handle_activity_log(
+            pane_id,
+            "Read",
+            &json!({"file_path": "/home/user/src/main.rs"}),
+            &Value::Null,
+        );
+
+        assert_eq!(
+            tmux::test_mock::get(pane_id, tmux::PANE_STATUS).as_deref(),
+            Some("running")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane_id, tmux::PANE_BG_CMD).as_deref(),
+            Some("npm run dev")
+        );
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn handle_activity_log_waiting_transitions_to_running_on_tool_use() {
+        let _guard = tmux::test_mock::install();
+        let pane_id = "%CLI_WAIT_TO_RUN";
+        let path = crate::activity::log_file_path(pane_id);
+        let _ = fs::remove_file(&path);
+        tmux::test_mock::set(pane_id, tmux::PANE_STATUS, "waiting");
+        tmux::test_mock::set(pane_id, tmux::PANE_ATTENTION, "notification");
+        tmux::test_mock::set(pane_id, tmux::PANE_WAIT_REASON, "permission_prompt");
+
+        handle_activity_log(
+            pane_id,
+            "Read",
+            &json!({"file_path": "/home/user/src/main.rs"}),
+            &Value::Null,
+        );
+
+        assert_eq!(
+            tmux::test_mock::get(pane_id, tmux::PANE_STATUS).as_deref(),
+            Some("running")
+        );
+        assert!(!tmux::test_mock::contains(pane_id, tmux::PANE_ATTENTION));
+        assert!(!tmux::test_mock::contains(pane_id, tmux::PANE_WAIT_REASON));
         fs::remove_file(&path).ok();
     }
 

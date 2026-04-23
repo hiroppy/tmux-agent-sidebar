@@ -105,6 +105,21 @@ pub(super) fn wait_reason_row(
     ))
 }
 
+pub(super) fn background_hint_row(ctx: &RowCtx, cmd: &str) -> Line<'static> {
+    const INDENT: &str = "  ";
+    let room = ctx.inner_width.saturating_sub(display_width(INDENT));
+    let shown = truncate_to_width(cmd.trim(), room);
+    let text = format!("{INDENT}{shown}");
+    let text_dw = display_width(&text);
+    ctx.row_line(
+        vec![Span::styled(
+            text,
+            ctx.apply_bg(Style::default().fg(ctx.theme.status_running)),
+        )],
+        text_dw,
+    )
+}
+
 pub(super) fn prompt_rows(pane: &crate::tmux::PaneInfo, ctx: &RowCtx) -> Vec<Line<'static>> {
     let theme = ctx.theme;
     let is_response = pane.prompt_is_response;

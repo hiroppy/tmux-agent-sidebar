@@ -144,7 +144,8 @@ impl AppState {
     pub fn refresh(&mut self) -> bool {
         self.refresh_now();
         let (focused, window_active, _, _) = tmux::get_sidebar_pane_info(&self.tmux_pane);
-        let sessions = tmux::query_sessions();
+        let mut sessions = tmux::query_sessions();
+        sweep_dead_bg_shells(&mut sessions);
         if let Some(process_snapshot) = self.refresh_port_data(&sessions) {
             let sessions = Self::filter_sessions_to_live_agent_panes(
                 sessions,
@@ -242,7 +243,10 @@ impl AppState {
                 // inactive-grace path while the agent is idle so that a
                 // long-stalled progress bar gets dismissed even if the
                 // log file itself stops changing.
-                let agent_active = matches!(pane.status, PaneStatus::Running | PaneStatus::Waiting);
+                let agent_active = matches!(
+                    pane.status,
+                    PaneStatus::Running | PaneStatus::Background | PaneStatus::Waiting
+                );
                 let log_unchanged =
                     current_mtime.is_some() && current_mtime == prior_state.task_progress_log_mtime;
                 if log_unchanged && agent_active {
@@ -347,6 +351,69 @@ impl AppState {
     }
 }
 
+pub(crate) fn sweep_dead_bg_shells(sessions: &mut [SessionInfo]) {
+    let has_any = sessions
+        .iter()
+        .flat_map(|s| s.windows.iter())
+        .flat_map(|w| w.panes.iter())
+        .any(|p| p.bg_shell_cmd.is_some());
+    if !has_any {
+        return;
+    }
+    let Ok(out) = std::process::Command::new("ps")
+        .args(["-eo", "command="])
+        .output()
+    else {
+        return;
+    };
+    if !out.status.success() {
+        return;
+    }
+    let ps_stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    let ps_lines: Vec<&str> = ps_stdout.lines().collect();
+    clear_dead_bg_shells(sessions, &ps_lines);
+}
+
+pub(crate) fn clear_dead_bg_shells(sessions: &mut [SessionInfo], ps_lines: &[&str]) {
+    for session in sessions.iter_mut() {
+        for window in &mut session.windows {
+            for pane in &mut window.panes {
+                let Some(cmd) = pane.bg_shell_cmd.as_deref() else {
+                    continue;
+                };
+                if cmd == tmux::BG_CMD_PLACEHOLDER {
+                    continue;
+                }
+                if ps_lines.iter().any(|line| ps_line_matches_cmd(line, cmd)) {
+                    continue;
+                }
+                tmux::unset_pane_option(&pane.pane_id, tmux::PANE_BG_CMD);
+                if pane.status == PaneStatus::Background {
+                    tmux::set_pane_option(&pane.pane_id, tmux::PANE_STATUS, "idle");
+                    pane.status = PaneStatus::Idle;
+                }
+                pane.bg_shell_cmd = None;
+            }
+        }
+    }
+}
+
+/// Substring match with ASCII-alphanumeric word boundaries on either
+/// side, so a stored `"sleep 3"` does not falsely match a live
+/// `sleep 30` process.
+fn ps_line_matches_cmd(line: &str, cmd: &str) -> bool {
+    if cmd.is_empty() {
+        return false;
+    }
+    let bytes = line.as_bytes();
+    line.match_indices(cmd).any(|(idx, _)| {
+        let end = idx + cmd.len();
+        let before_ok = idx == 0 || !bytes[idx - 1].is_ascii_alphanumeric();
+        let after_ok = end == bytes.len() || !bytes[end].is_ascii_alphanumeric();
+        before_ok && after_ok
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -374,6 +441,7 @@ mod tests {
             session_id: None,
             session_name: String::new(),
             sidebar_spawned: false,
+            bg_shell_cmd: None,
         }
     }
 
@@ -388,6 +456,158 @@ mod tests {
                 panes,
             }],
         }]
+    }
+
+    // ─── clear_dead_bg_shells ───────────────────────────────────────
+
+    fn pane_with_bg(id: &str, cmd: &str, status: PaneStatus) -> PaneInfo {
+        let mut p = test_pane(id);
+        p.bg_shell_cmd = Some(cmd.into());
+        p.status = status;
+        p
+    }
+
+    #[test]
+    fn clear_dead_bg_shells_retains_shell_present_in_ps_output() {
+        let _guard = tmux::test_mock::install();
+        let pane_id = "%BG_ALIVE";
+        tmux::test_mock::set(pane_id, tmux::PANE_BG_CMD, "sleep 300");
+
+        let mut sessions = test_session(vec![pane_with_bg(
+            pane_id,
+            "sleep 300",
+            PaneStatus::Background,
+        )]);
+        let ps = vec!["/bin/zsh -c eval 'sleep 300' < /dev/null"];
+
+        clear_dead_bg_shells(&mut sessions, &ps);
+
+        assert_eq!(
+            sessions[0].windows[0].panes[0].bg_shell_cmd.as_deref(),
+            Some("sleep 300"),
+            "a matching ps line must leave the marker intact",
+        );
+        assert!(tmux::test_mock::contains(pane_id, tmux::PANE_BG_CMD));
+    }
+
+    #[test]
+    fn clear_dead_bg_shells_clears_when_shell_missing_and_downgrades_background() {
+        let _guard = tmux::test_mock::install();
+        let pane_id = "%BG_DEAD";
+        tmux::test_mock::set(pane_id, tmux::PANE_BG_CMD, "sleep 300");
+        tmux::test_mock::set(pane_id, tmux::PANE_STATUS, "background");
+
+        let mut sessions = test_session(vec![pane_with_bg(
+            pane_id,
+            "sleep 300",
+            PaneStatus::Background,
+        )]);
+        // ps output contains nothing matching "sleep 300".
+        let ps = vec!["/bin/zsh", "/usr/bin/ssh"];
+
+        clear_dead_bg_shells(&mut sessions, &ps);
+
+        let pane = &sessions[0].windows[0].panes[0];
+        assert!(
+            pane.bg_shell_cmd.is_none(),
+            "local pane copy must be cleared so this tick's render reflects it",
+        );
+        assert_eq!(
+            pane.status,
+            PaneStatus::Idle,
+            "background with a dead shell must downgrade to idle",
+        );
+        assert!(!tmux::test_mock::contains(pane_id, tmux::PANE_BG_CMD));
+        assert_eq!(
+            tmux::test_mock::get(pane_id, tmux::PANE_STATUS).as_deref(),
+            Some("idle"),
+        );
+    }
+
+    #[test]
+    fn clear_dead_bg_shells_does_not_touch_non_background_status() {
+        let _guard = tmux::test_mock::install();
+        let pane_id = "%BG_STALE_RUNNING";
+        tmux::test_mock::set(pane_id, tmux::PANE_STATUS, "running");
+        tmux::test_mock::set(pane_id, tmux::PANE_BG_CMD, "npm run dev");
+
+        let mut sessions = test_session(vec![pane_with_bg(
+            pane_id,
+            "npm run dev",
+            PaneStatus::Running,
+        )]);
+        let ps: Vec<&str> = vec![];
+
+        clear_dead_bg_shells(&mut sessions, &ps);
+
+        let pane = &sessions[0].windows[0].panes[0];
+        assert!(pane.bg_shell_cmd.is_none());
+        assert_eq!(
+            pane.status,
+            PaneStatus::Running,
+            "non-background status must be left alone",
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane_id, tmux::PANE_STATUS).as_deref(),
+            Some("running"),
+        );
+    }
+
+    #[test]
+    fn clear_dead_bg_shells_preserves_placeholder_cmd() {
+        let _guard = tmux::test_mock::install();
+        let pane_id = "%BG_PLACEHOLDER";
+        tmux::test_mock::set(pane_id, tmux::PANE_BG_CMD, tmux::BG_CMD_PLACEHOLDER);
+
+        let mut sessions = test_session(vec![pane_with_bg(
+            pane_id,
+            tmux::BG_CMD_PLACEHOLDER,
+            PaneStatus::Background,
+        )]);
+        let ps: Vec<&str> = vec![];
+
+        clear_dead_bg_shells(&mut sessions, &ps);
+
+        assert_eq!(
+            sessions[0].windows[0].panes[0].bg_shell_cmd.as_deref(),
+            Some(tmux::BG_CMD_PLACEHOLDER),
+            "placeholder must survive — we cannot prove the shell is dead",
+        );
+        assert!(tmux::test_mock::contains(pane_id, tmux::PANE_BG_CMD));
+    }
+
+    #[test]
+    fn clear_dead_bg_shells_treats_prefix_collision_as_dead() {
+        // Regression: a naive `str::contains` match kept the marker
+        // alive forever when a shorter stored cmd was a prefix of a
+        // live longer cmd.
+        let _guard = tmux::test_mock::install();
+        let pane_id = "%BG_PREFIX_COLLIDE";
+        tmux::test_mock::set(pane_id, tmux::PANE_BG_CMD, "sleep 3");
+        let mut sessions = test_session(vec![pane_with_bg(
+            pane_id,
+            "sleep 3",
+            PaneStatus::Background,
+        )]);
+        let ps = vec!["/bin/zsh -c 'sleep 30' < /dev/null"];
+
+        clear_dead_bg_shells(&mut sessions, &ps);
+
+        assert!(
+            sessions[0].windows[0].panes[0].bg_shell_cmd.is_none(),
+            "the marker for `sleep 3` must clear when only `sleep 30` is running",
+        );
+    }
+
+    #[test]
+    fn clear_dead_bg_shells_no_op_when_no_pane_has_bg_marker() {
+        let _guard = tmux::test_mock::install();
+        let mut sessions = test_session(vec![test_pane("%1")]);
+        let ps: Vec<&str> = vec!["/bin/zsh"];
+
+        clear_dead_bg_shells(&mut sessions, &ps);
+
+        assert!(sessions[0].windows[0].panes[0].bg_shell_cmd.is_none());
     }
 
     #[test]

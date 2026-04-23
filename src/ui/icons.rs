@@ -62,6 +62,7 @@ impl StatusIcons {
     pub fn status_icon(&self, status: &PaneStatus) -> &str {
         match status {
             PaneStatus::Running => self.running.as_str(),
+            PaneStatus::Background => "◎",
             PaneStatus::Waiting => self.waiting.as_str(),
             PaneStatus::Idle => self.idle.as_str(),
             PaneStatus::Error => self.error.as_str(),
@@ -79,6 +80,7 @@ mod tests {
         let icons = StatusIcons::default();
         assert_eq!(icons.all_icon(), "≡");
         assert_eq!(icons.status_icon(&PaneStatus::Running), "●");
+        assert_eq!(icons.status_icon(&PaneStatus::Background), "◎");
         assert_eq!(icons.status_icon(&PaneStatus::Waiting), "◐");
         assert_eq!(icons.status_icon(&PaneStatus::Idle), "○");
         assert_eq!(icons.status_icon(&PaneStatus::Error), "✕");

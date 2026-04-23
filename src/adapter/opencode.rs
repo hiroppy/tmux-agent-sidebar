@@ -206,6 +206,35 @@ mod tests {
     }
 
     #[test]
+    fn activity_log_preserves_bash_background_flag() {
+        let adapter = OpenCodeAdapter;
+        let event = adapter
+            .parse(
+                "activity-log",
+                &json!({
+                    "tool_name": "bash",
+                    "tool_input": {
+                        "command": "npm run dev",
+                        "runInBackground": true
+                    }
+                }),
+            )
+            .unwrap();
+        match event {
+            AgentEvent::ActivityLog {
+                tool_name,
+                tool_input,
+                ..
+            } => {
+                assert_eq!(tool_name, "Bash");
+                assert_eq!(tool_input["command"], "npm run dev");
+                assert_eq!(tool_input["runInBackground"], true);
+            }
+            other => panic!("expected ActivityLog, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn activity_log_normalizes_read_filepath_key() {
         let adapter = OpenCodeAdapter;
         let event = adapter

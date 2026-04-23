@@ -37,6 +37,7 @@ Codex exposes a smaller hook set than Claude Code, so some sidebar features are 
 | Feature                                   | Why                                                                 |
 | ----------------------------------------- | ------------------------------------------------------------------- |
 | Waiting status + wait reason              | Needs `Notification`, `PermissionDenied`, `TeammateIdle` (Claude-only) |
+| Background shell state                    | Codex's Bash hook payload is schema-typed as `{ command: string }` and does not include a background flag |
 | API failure reason                        | Needs `StopFailure` (Claude-only)                                    |
 | Task progress counter                     | Needs non-Bash `PostToolUse` coverage                                |
 | Sub-agent tree                            | Needs `SubagentStart` / `SubagentStop`                               |

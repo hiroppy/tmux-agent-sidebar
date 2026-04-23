@@ -18,6 +18,14 @@ pub const PANE_ATTENTION: &str = "@pane_attention";
 /// Hook-reported working directory, preferred over tmux's
 /// `pane_current_path` for repo grouping.
 pub const PANE_CWD: &str = "@pane_cwd";
+/// Latest backgrounded Bash command (sanitized). Presence is the
+/// authoritative "live shell" signal: Stop routes to `background`
+/// while this is set, and the sidebar surfaces the command text.
+pub const PANE_BG_CMD: &str = "@pane_bg_cmd";
+/// Value written to [`PANE_BG_CMD`] when the hook payload omits the real
+/// command. The ps liveness sweep matches on this to skip its own entries
+/// (placeholder has no process to verify against).
+pub const BG_CMD_PLACEHOLDER: &str = "(background shell)";
 /// Epoch-ms identifier regenerated on every SessionStart so
 /// notification fingerprints stay scoped to the current run and
 /// don't dedupe across restarts.

@@ -12,7 +12,7 @@ reloaded on SIGUSR1.
 
 | Field | Tmux Variable | Update Trigger | Description |
 |-------|--------------|----------------|-------------|
-| `status_filter` | `@sidebar_filter` | User input (left/right key) | Active status filter (All/Running/Waiting/Idle/Error) |
+| `status_filter` | `@sidebar_filter` | User input (left/right key) | Active status filter (All/Running/Background/Waiting/Idle/Error) |
 | `selected_pane_row` | `@sidebar_cursor` | User input (j/k key); tmux write flushed after a short debounce | Cursor position in agent list |
 | `repo_filter` | `@sidebar_repo_filter` | User input (repo popup) | Repository filter (All or specific repo) |
 
@@ -34,7 +34,7 @@ Pane options written to tmux:
 | Tmux Option | Update Trigger | Description |
 |-------------|----------------|-------------|
 | `@pane_agent` | SessionStart | Agent type ("claude" / "codex" / "opencode") |
-| `@pane_status` | Every event | Status ("running" / "waiting" / "idle" / "error") |
+| `@pane_status` | Every event | Status ("running" / "background" / "waiting" / "idle" / "error") |
 | `@pane_cwd` | SessionStart, CwdChanged | Working directory |
 | `@pane_permission_mode` | SessionStart, hook event | Permission mode |
 | `@pane_prompt` | UserPromptSubmit, Stop | Latest prompt or response text |
@@ -42,6 +42,7 @@ Pane options written to tmux:
 | `@pane_started_at` | UserPromptSubmit | Unix epoch when agent started |
 | `@pane_attention` | SessionStart, Stop, StopFailure (clear); Notification, PermissionDenied, TeammateIdle (set) | "notification" or "clear" |
 | `@pane_wait_reason` | StopFailure, PermissionDenied, TeammateIdle | Reason for waiting/error (`permission_denied`, `teammate_idle:<name>`, or error text) |
+| `@pane_bg_cmd` | ActivityLog (bg Bash), Refresh sweep (clear), SessionEnd (clear) | Latest sanitized command of a Bash tool started with `run_in_background`. Its presence is the single source of truth for "live bg shell" — Stop routes to `background` while it is set, and the row body renders the command. Persists across UserPromptSubmit so shells spanning turns stay visible; overwritten by the next bg Bash. The refresh loop runs a `ps`-based liveness sweep each tick and clears the marker (plus downgrades `background → idle`) when no process matches the stored command. Only the most recent bg Bash is tracked; older ones are not retained. |
 | `@pane_subagents` | SubagentStart/Stop | Comma-separated active subagent list |
 | `@pane_worktree_name` | SessionStart | Worktree name (if applicable) |
 | `@pane_worktree_branch` | SessionStart | Worktree branch (if applicable) |
@@ -182,10 +183,10 @@ TUI main loop (app::run in app.rs; submodules app/{setup,workers,input,render})
 
 ```rust
 enum Focus { Filter, Panes, ActivityLog }
-enum StatusFilter { All, Running, Waiting, Idle, Error }
+enum StatusFilter { All, Running, Background, Waiting, Idle, Error }
 enum RepoFilter { All, Repo(String) }
 enum BottomTab { Activity, GitStatus }
-enum PaneStatus { Running, Waiting, Idle, Error, Unknown }
+enum PaneStatus { Running, Background, Waiting, Idle, Error, Unknown }
 enum AgentType { Claude, Codex, OpenCode, Unknown }
 enum PermissionMode { Default, Plan, AcceptEdits, Auto, DontAsk, BypassPermissions, Defer }
 

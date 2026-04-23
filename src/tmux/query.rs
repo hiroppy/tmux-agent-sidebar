@@ -3,10 +3,10 @@ use std::process::Command;
 
 use super::commands::run_tmux;
 use super::options::{
-    PANE_AGENT, PANE_ATTENTION, PANE_CWD, PANE_PENDING_SESSION_END, PANE_PENDING_WORKTREE_REMOVE,
-    PANE_PERMISSION_MODE, PANE_PROMPT, PANE_PROMPT_SOURCE, PANE_SESSION_ID, PANE_STARTED_AT,
-    PANE_STATUS, PANE_SUBAGENTS, PANE_WAIT_REASON, PANE_WORKTREE_BRANCH, PANE_WORKTREE_NAME,
-    unset_pane_option,
+    PANE_AGENT, PANE_ATTENTION, PANE_BG_CMD, PANE_CWD, PANE_PENDING_SESSION_END,
+    PANE_PENDING_WORKTREE_REMOVE, PANE_PERMISSION_MODE, PANE_PROMPT, PANE_PROMPT_SOURCE,
+    PANE_SESSION_ID, PANE_STARTED_AT, PANE_STATUS, PANE_SUBAGENTS, PANE_WAIT_REASON,
+    PANE_WORKTREE_BRANCH, PANE_WORKTREE_NAME, unset_pane_option,
 };
 use super::types::{
     AgentType, CODEX_AGENT, PaneInfo, PaneStatus, PermissionMode, SessionInfo, WindowInfo,
@@ -25,7 +25,7 @@ mod session_line_field {
     /// Index where the per-pane field suffix consumed by `parse_pane_line` begins.
     pub const PANE_LINE_OFFSET: usize = 6;
     /// Minimum number of fields a valid `PANE_FORMAT` line must contain.
-    pub const MIN_FIELDS: usize = 27;
+    pub const MIN_FIELDS: usize = 28;
 }
 
 // Indices into the pane-line suffix that `parse_pane_line` operates on.
@@ -53,14 +53,15 @@ pub(super) mod pane_line_field {
     pub const WORKTREE_BRANCH: usize = 18; // absolute 24 (@pane_worktree_branch)
     pub const SESSION_ID: usize = 19; // absolute 25 (@pane_session_id)
     pub const SIDEBAR_SPAWNED: usize = 20; // absolute 26 (@agent-sidebar-spawned)
+    pub const BG_CMD: usize = 21; // absolute 27 (@pane_bg_cmd)
     /// Minimum number of fields the pane-line suffix must contain.
     /// Equals `session_line_field::MIN_FIELDS - PANE_LINE_OFFSET`.
-    pub const MIN_FIELDS: usize = 21;
+    pub const MIN_FIELDS: usize = 22;
 }
 
 /// tmux `list-panes -F` format used by [`query_sessions`]. Every field is
 /// quoted with `#{q:...}` so embedded pipes in user content survive the split.
-const PANE_FORMAT: &str = "#{q:session_name}|#{q:window_id}|#{q:window_index}|#{q:window_name}|#{q:window_active}|#{q:automatic-rename}|#{q:pane_active}|#{q:@pane_status}|#{q:@pane_attention}|#{q:@pane_agent}|#{q:@pane_name}|#{q:pane_current_path}|#{q:pane_current_command}|#{q:@pane_role}|#{q:pane_id}|#{q:@pane_prompt}|#{q:@pane_prompt_source}|#{q:@pane_started_at}|#{q:@pane_wait_reason}|#{q:pane_pid}|#{q:@pane_subagents}|#{q:@pane_cwd}|#{q:@pane_permission_mode}|#{q:@pane_worktree_name}|#{q:@pane_worktree_branch}|#{q:@pane_session_id}|#{q:@agent-sidebar-spawned}";
+const PANE_FORMAT: &str = "#{q:session_name}|#{q:window_id}|#{q:window_index}|#{q:window_name}|#{q:window_active}|#{q:automatic-rename}|#{q:pane_active}|#{q:@pane_status}|#{q:@pane_attention}|#{q:@pane_agent}|#{q:@pane_name}|#{q:pane_current_path}|#{q:pane_current_command}|#{q:@pane_role}|#{q:pane_id}|#{q:@pane_prompt}|#{q:@pane_prompt_source}|#{q:@pane_started_at}|#{q:@pane_wait_reason}|#{q:pane_pid}|#{q:@pane_subagents}|#{q:@pane_cwd}|#{q:@pane_permission_mode}|#{q:@pane_worktree_name}|#{q:@pane_worktree_branch}|#{q:@pane_session_id}|#{q:@agent-sidebar-spawned}|#{q:@pane_bg_cmd}";
 
 type SessionMap = indexmap::IndexMap<String, indexmap::IndexMap<String, WindowInfo>>;
 
@@ -276,6 +277,14 @@ pub(crate) fn parse_pane_fields(parts: &[String]) -> Option<PaneInfo> {
         session_id,
         session_name: String::new(),
         sidebar_spawned: parts[pane_line_field::SIDEBAR_SPAWNED] == "1",
+        bg_shell_cmd: {
+            let raw = &parts[pane_line_field::BG_CMD];
+            if raw.is_empty() {
+                None
+            } else {
+                Some(raw.to_string())
+            }
+        },
     })
 }
 
@@ -292,6 +301,7 @@ fn clear_agent_pane_state(pane_id: &str) {
         PANE_AGENT,
         PANE_PROMPT,
         PANE_PROMPT_SOURCE,
+        PANE_BG_CMD,
         PANE_SUBAGENTS,
         PANE_CWD,
         PANE_PERMISSION_MODE,
@@ -583,6 +593,7 @@ mod tests {
             session_id: None,
             session_name: String::new(),
             sidebar_spawned: false,
+            bg_shell_cmd: None,
         }
     }
 
@@ -751,13 +762,14 @@ mod tests {
             "",                   // 18: @pane_worktree_branch
             "",                   // 19: @pane_session_id
             "",                   // 20: @agent-sidebar-spawned
+            "",                   // 21: @pane_bg_cmd
         ]
     }
 
     #[test]
     fn parse_pane_line_full_fields() {
         let line = make_pane_line(&full_fields());
-        let pane = parse_pane_line(&line).expect("should parse 17 fields");
+        let pane = parse_pane_line(&line).expect("should parse 22 fields");
         assert!(pane.pane_active);
         assert_eq!(pane.status, PaneStatus::Running);
         assert_eq!(pane.agent, AgentType::Claude);
@@ -801,7 +813,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_pane_line_rejects_fewer_than_21_fields() {
+    fn parse_pane_line_rejects_fewer_than_min_fields() {
         // Only 15 fields — should be rejected
         let fields_15 =
             "1|running||claude|name|/path|fish||%1|prompt|1700000000||12345|Explore|/cwd";
@@ -810,11 +822,30 @@ mod tests {
             "15 fields should be rejected"
         );
 
-        // 20 fields — still rejected (need 21)
-        let fields_20 = "1|running||claude|name|/path|fish||%1|prompt|user|1700000000||12345|Explore|/cwd|auto|||";
+        // 21 fields — still rejected (need 22 including @pane_bg_cmd).
+        let fields_21 = "1|running||claude|name|/path|fish||%1|prompt|user|1700000000||12345|Explore|/cwd|auto||||";
         assert!(
-            parse_pane_line(fields_20).is_none(),
-            "20 fields should be rejected"
+            parse_pane_line(fields_21).is_none(),
+            "21 fields should be rejected"
+        );
+    }
+
+    #[test]
+    fn parse_pane_line_reads_bg_cmd_field() {
+        let mut fields = full_fields();
+        fields[pane_line_field::BG_CMD] = "cargo build --release";
+        let pane = parse_pane_line(&make_pane_line(&fields)).unwrap();
+        assert_eq!(
+            pane.bg_shell_cmd.as_deref(),
+            Some("cargo build --release"),
+            "bg_shell_cmd should surface the @pane_bg_cmd value"
+        );
+
+        fields[pane_line_field::BG_CMD] = "";
+        let pane = parse_pane_line(&make_pane_line(&fields)).unwrap();
+        assert!(
+            pane.bg_shell_cmd.is_none(),
+            "empty @pane_bg_cmd should parse as None"
         );
     }
 
@@ -1063,6 +1094,7 @@ mod tests {
                     session_id: None,
                     session_name: String::new(),
                     sidebar_spawned: false,
+                    bg_shell_cmd: None,
                 }],
             },
         );

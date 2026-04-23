@@ -29,7 +29,7 @@ Most options must be set **before** loading the plugin in your `tmux.conf`. Colo
 | Option                            | Default         | What it paints                                                    |
 | --------------------------------- | --------------- | ----------------------------------------------------------------- |
 | `@sidebar_color_all`              | `111`&nbsp;(sky blue)| Selected "all" filter icon                                        |
-| `@sidebar_color_running`          | `114`&nbsp;(green)   | Selected running filter icon and running pane status              |
+| `@sidebar_color_running`          | `114`&nbsp;(green)   | Selected running/background filter icon and running/background pane status |
 | `@sidebar_color_waiting`          | `221`&nbsp;(yellow)  | Selected waiting filter icon, waiting pane status, version banner |
 | `@sidebar_color_idle`             | `110`&nbsp;(soft blue) | Selected idle filter icon and idle pane status                  |
 | `@sidebar_color_error`            | `167`&nbsp;(soft red) | Selected error filter icon and error pane status                 |
@@ -96,6 +96,7 @@ Any Unicode glyph works. Make sure the glyphs render in your terminal font.
 | ----------------------- | ------- | ---------------------------- |
 | `@sidebar_icon_all`     | `≡`     | Status filter bar "all" icon |
 | `@sidebar_icon_running` | `●`     | Running status icon          |
+| not configurable        | `◎`     | Background shell status icon |
 | `@sidebar_icon_waiting` | `◐`     | Waiting status icon          |
 | `@sidebar_icon_idle`    | `○`     | Idle status icon             |
 | `@sidebar_icon_error`   | `✕`     | Error status icon            |
