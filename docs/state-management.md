@@ -120,7 +120,8 @@ Per-pane file-based state:
 │  sessions.names map populated by session_poll_loop          │
 ├─────────────────────────────────────────────────────────────┤
 │  Once at startup                                             │
-│  theme, bottom_panel_height, notices.claude_plugin_*,       │
+│  theme, bottom_panel_height from @sidebar_bottom_height,     │
+│  notices.claude_plugin_*,                                   │
 │  notices.claude_settings_has_residual_hooks,                │
 │  notices.claude_plugin_notice, notices.missing_hook_groups  │
 ├─────────────────────────────────────────────────────────────┤
@@ -135,6 +136,7 @@ Per-pane file-based state:
 ├─────────────────────────────────────────────────────────────┤
 │  On user input                                              │
 │  focus_state.focus, scrolls.*, activity.scroll, bottom_tab, │
+│  bottom_panel_height via mouse resize, resize flags,         │
 │  GlobalState fields, popup (PopupState enum),               │
 │  timers.last_filter_click,                                  │
 │  immediate selection / active-pane redraw                   │

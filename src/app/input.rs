@@ -173,6 +173,7 @@ pub(super) fn handle_event(
                     if mouse.row < bottom_start {
                         state.handle_mouse_click(mouse.row, mouse.column);
                     } else if mouse.row == bottom_start {
+                        state.start_bottom_panel_resize(mouse.row, term_height);
                         state.handle_bottom_tab_click(mouse.column);
                         // Keep the background git poller in sync immediately — the
                         // keyboard `BackTab` path does the same update. Without this,
@@ -180,6 +181,14 @@ pub(super) fn handle_event(
                         // next refresh tick and the tab renders stale data.
                         git_tab_active
                             .store(state.bottom_tab == BottomTab::GitStatus, Ordering::Relaxed);
+                    }
+                }
+                MouseEventKind::Drag(MouseButton::Left) => {
+                    state.resize_bottom_panel_to_row(mouse.row, term_height);
+                }
+                MouseEventKind::Up(MouseButton::Left) => {
+                    if let Some(height) = state.finish_bottom_panel_resize() {
+                        crate::tmux::set_sidebar_bottom_height(height);
                     }
                 }
                 MouseEventKind::ScrollDown => {

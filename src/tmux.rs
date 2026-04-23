@@ -13,8 +13,9 @@ pub use options::{
     PANE_OS_NOTIFY_PERMISSION_REQUIRED, PANE_OS_NOTIFY_TASK_COMPLETED, PANE_OS_NOTIFY_TASK_FAILED,
     PANE_PENDING_SESSION_END, PANE_PENDING_WORKTREE_REMOVE, PANE_PERMISSION_MODE, PANE_PROMPT,
     PANE_PROMPT_SOURCE, PANE_ROLE, PANE_SESSION_ID, PANE_STARTED_AT, PANE_STATUS, PANE_SUBAGENTS,
-    PANE_WAIT_REASON, PANE_WORKTREE_BRANCH, PANE_WORKTREE_NAME, get_all_global_options, get_option,
-    get_pane_option_value, set_pane_option, unset_pane_option,
+    PANE_WAIT_REASON, PANE_WORKTREE_BRANCH, PANE_WORKTREE_NAME, SIDEBAR_BOTTOM_HEIGHT,
+    get_all_global_options, get_option, get_pane_option_value, set_global_option, set_pane_option,
+    set_sidebar_bottom_height, unset_pane_option,
 };
 pub use panes::{
     find_active_pane, focused_pane_path, get_pane_path, get_sidebar_pane_info,

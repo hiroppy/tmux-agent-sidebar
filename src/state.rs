@@ -82,9 +82,15 @@ pub struct AppState {
     pub version_notice: Option<crate::version::UpdateNotice>,
     /// Shared state across sidebar instances, persisted to tmux global variables.
     pub global: GlobalState,
-    /// Height of the bottom panel in lines. Loaded once at startup from
-    /// the `@sidebar_bottom_height` tmux option. A value of 0 hides the panel.
+    /// Height of the bottom panel in lines. Loaded at startup from the
+    /// `@sidebar_bottom_height` tmux option and updated live by mouse resize.
+    /// A value of 0 hides the panel.
     pub bottom_panel_height: u16,
+    /// True while the user is dragging the top border of the bottom panel.
+    pub bottom_panel_resizing: bool,
+    /// Tracks whether a resize drag changed the panel height, so mouse-up
+    /// can persist only meaningful updates.
+    pub bottom_panel_resize_changed: bool,
     /// Maps session_id → session name, refreshed periodically from
     /// `~/.claude/sessions/*.json` files. The `dirty` flag is `true` when
     /// the map has changed since the last `refresh_session_names`
@@ -120,6 +126,8 @@ impl AppState {
             version_notice: None,
             global: GlobalState::new(),
             bottom_panel_height: crate::ui::BOTTOM_PANEL_HEIGHT,
+            bottom_panel_resizing: false,
+            bottom_panel_resize_changed: false,
             sessions: SessionNamesState::new(),
         }
     }
@@ -1002,6 +1010,57 @@ mod tests {
         state.handle_mouse_scroll(29, 50, 20, 3);
         assert_eq!(state.scrolls.panes.offset, 3);
         assert_eq!(state.activity.scroll.offset, 0);
+    }
+
+    #[test]
+    fn bottom_panel_resize_starts_only_on_boundary_row() {
+        let mut state = AppState::new("%99".into());
+        state.bottom_panel_height = 20;
+
+        assert!(!state.start_bottom_panel_resize(29, 50));
+        assert!(!state.bottom_panel_resizing);
+
+        assert!(state.start_bottom_panel_resize(30, 50));
+        assert!(state.bottom_panel_resizing);
+        assert!(!state.bottom_panel_resize_changed);
+    }
+
+    #[test]
+    fn bottom_panel_resize_updates_height_from_mouse_row() {
+        let mut state = AppState::new("%99".into());
+        state.bottom_panel_height = 20;
+
+        assert!(state.start_bottom_panel_resize(30, 50));
+        assert!(state.resize_bottom_panel_to_row(25, 50));
+
+        assert_eq!(state.bottom_panel_height, 25);
+        assert_eq!(state.finish_bottom_panel_resize(), Some(25));
+        assert!(!state.bottom_panel_resizing);
+        assert!(!state.bottom_panel_resize_changed);
+    }
+
+    #[test]
+    fn bottom_panel_resize_clamps_to_leave_agents_panel_visible() {
+        let mut state = AppState::new("%99".into());
+        state.bottom_panel_height = 20;
+
+        assert!(state.start_bottom_panel_resize(30, 50));
+        assert!(state.resize_bottom_panel_to_row(0, 50));
+
+        assert_eq!(state.bottom_panel_height, 48);
+        assert_eq!(state.finish_bottom_panel_resize(), Some(48));
+    }
+
+    #[test]
+    fn bottom_panel_resize_finish_ignores_unchanged_click() {
+        let mut state = AppState::new("%99".into());
+        state.bottom_panel_height = 20;
+
+        assert!(state.start_bottom_panel_resize(30, 50));
+
+        assert_eq!(state.finish_bottom_panel_resize(), None);
+        assert!(!state.bottom_panel_resizing);
+        assert!(!state.bottom_panel_resize_changed);
     }
 
     // ─── move_pane_selection edge cases ─────────────────────────────

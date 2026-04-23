@@ -1,5 +1,7 @@
 use super::{AppState, RepoFilter, StatusFilter};
 
+const MIN_BOTTOM_PANEL_HEIGHT: u16 = 1;
+
 #[derive(Debug, Clone)]
 pub struct RowTarget {
     pub pane_id: String,
@@ -67,7 +69,59 @@ pub(super) fn point_in_rect(row: u16, col: u16, rect: ratatui::layout::Rect) -> 
     rect.contains(ratatui::layout::Position { x: col, y: row })
 }
 
+fn bottom_panel_height_from_resize_row(row: u16, term_height: u16) -> u16 {
+    if term_height == 0 {
+        return 0;
+    }
+    let max_height = term_height.saturating_sub(2).max(MIN_BOTTOM_PANEL_HEIGHT);
+    term_height
+        .saturating_sub(row)
+        .clamp(MIN_BOTTOM_PANEL_HEIGHT, max_height)
+}
+
 impl AppState {
+    pub fn bottom_panel_resize_row(&self, term_height: u16) -> Option<u16> {
+        if term_height == 0 || self.bottom_panel_height == 0 {
+            return None;
+        }
+        Some(term_height.saturating_sub(self.bottom_panel_height))
+    }
+
+    pub fn is_bottom_panel_resize_handle(&self, row: u16, term_height: u16) -> bool {
+        self.bottom_panel_resize_row(term_height) == Some(row)
+    }
+
+    pub fn start_bottom_panel_resize(&mut self, row: u16, term_height: u16) -> bool {
+        if !self.is_bottom_panel_resize_handle(row, term_height) {
+            return false;
+        }
+        self.bottom_panel_resizing = true;
+        self.bottom_panel_resize_changed = false;
+        true
+    }
+
+    pub fn resize_bottom_panel_to_row(&mut self, row: u16, term_height: u16) -> bool {
+        if !self.bottom_panel_resizing {
+            return false;
+        }
+        let next_height = bottom_panel_height_from_resize_row(row, term_height);
+        if next_height != self.bottom_panel_height {
+            self.bottom_panel_height = next_height;
+            self.bottom_panel_resize_changed = true;
+        }
+        true
+    }
+
+    pub fn finish_bottom_panel_resize(&mut self) -> Option<u16> {
+        if !self.bottom_panel_resizing {
+            return None;
+        }
+        self.bottom_panel_resizing = false;
+        let changed = self.bottom_panel_resize_changed;
+        self.bottom_panel_resize_changed = false;
+        changed.then_some(self.bottom_panel_height)
+    }
+
     pub fn rebuild_row_targets(&mut self) {
         // Reset stale repo filter if the repo no longer exists, and
         // persist the reset back to tmux so fresh sidebar instances do

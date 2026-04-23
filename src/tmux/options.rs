@@ -1,5 +1,18 @@
 use super::commands::run_tmux;
 
+// ─── Global option keys ─────────────────────────────────────────────
+
+/// User-configured bottom panel height for the sidebar TUI.
+pub const SIDEBAR_BOTTOM_HEIGHT: &str = "@sidebar_bottom_height";
+
+pub fn set_global_option(key: &str, value: &str) -> bool {
+    run_tmux(&["set", "-g", key, value]).is_some()
+}
+
+pub fn set_sidebar_bottom_height(height: u16) -> bool {
+    set_global_option(SIDEBAR_BOTTOM_HEIGHT, &height.to_string())
+}
+
 // ─── Pane-scoped option keys ─────────────────────────────────────────
 //
 // Single source of truth for every `@pane_*` tmux option the sidebar

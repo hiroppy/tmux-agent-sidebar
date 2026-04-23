@@ -184,14 +184,21 @@ mod tests {
     }
 
     #[test]
-    fn worktree_and_main_share_same_repo_root() {
-        // Both main and worktree should resolve to the same repo_root
-        // We can only test the main worktree here, but verify the logic is consistent
+    fn worktree_detection_matches_git_dir_layout() {
         let info = resolve_pane_git_info(env!("CARGO_MANIFEST_DIR"));
-        assert!(
-            !info.is_worktree,
-            "main checkout should not be detected as worktree"
-        );
+
+        let combined = run_git(
+            env!("CARGO_MANIFEST_DIR"),
+            &["rev-parse", "--git-common-dir", "--git-dir"],
+        )
+        .expect("repo should provide git dirs");
+        let mut lines = combined.lines();
+        let common = lines.next().expect("missing git common dir");
+        let dir = lines.next().expect("missing git dir");
+        let expected_is_worktree = resolve_git_path(env!("CARGO_MANIFEST_DIR"), common)
+            != resolve_git_path(env!("CARGO_MANIFEST_DIR"), dir);
+
+        assert_eq!(info.is_worktree, expected_is_worktree);
         assert!(info.repo_root.is_some());
     }
 
