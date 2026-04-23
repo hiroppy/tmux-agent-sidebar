@@ -22,6 +22,7 @@ pub use panes::{
     query_active_window_panes,
 };
 pub use query::query_sessions;
+pub(crate) use query::query_sessions_with_process_snapshot;
 pub use types::{
     AgentType, CLAUDE_AGENT, CODEX_AGENT, OPENCODE_AGENT, PaneInfo, PaneStatus, PermissionMode,
     SessionInfo, WindowInfo, WorktreeMetadata,
