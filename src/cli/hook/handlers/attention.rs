@@ -14,7 +14,7 @@ use super::super::notifications::{
 fn is_permission_wait_reason(wait_reason: &str) -> bool {
     matches!(
         wait_reason,
-        "permission_prompt" | "permission_denied" | "elicitation_dialog"
+        "permission" | "permission_prompt" | "permission_denied" | "elicitation_dialog"
     )
 }
 
@@ -255,7 +255,40 @@ mod tests {
     }
 
     #[test]
+    fn on_notification_plain_permission_preempts_background() {
+        // Claude's real `notification_type: "permission"` payload must
+        // stay in `waiting` even with a live bg shell — the user has to
+        // act on the prompt regardless.
+        let _guard = tmux::test_mock::install();
+        let pane = "%NOTIF_PERM_PLAIN_OVER_BG";
+        tmux::test_mock::set(pane, tmux::PANE_BG_CMD, "cargo test");
+        let ctx = AgentContext {
+            agent: "claude",
+            cwd: "/repo",
+            permission_mode: "default",
+            worktree: &None,
+            session_id: &None,
+        };
+        let notifications = desktop_notification::DesktopNotificationSettings {
+            enabled: false,
+            events: Default::default(),
+        };
+        on_notification(
+            pane,
+            &ctx,
+            "permission",
+            /* meta_only */ false,
+            &notifications,
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("waiting"),
+        );
+    }
+
+    #[test]
     fn is_permission_wait_reason_allowlist() {
+        assert!(is_permission_wait_reason("permission"));
         assert!(is_permission_wait_reason("permission_prompt"));
         assert!(is_permission_wait_reason("permission_denied"));
         assert!(is_permission_wait_reason("elicitation_dialog"));

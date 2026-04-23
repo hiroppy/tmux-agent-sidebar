@@ -30,7 +30,7 @@ tmux show -t "$pane_id" -pv @pane_agent
 | `@pane_prompt_source`      | `user` when the prompt field holds the user's prompt, `response` when it holds the agent's last reply |
 | `@pane_started_at`         | Epoch seconds of the last `UserPromptSubmit`                        |
 | `@pane_wait_reason`        | Wait-reason text (populated only when waiting)                      |
-| `@pane_bg_shells`          | Internal marker set to `1` after a background Bash tool event until the pane resumes foreground activity |
+| `@pane_bg_cmd`             | Latest sanitized background Bash command (Claude `run_in_background`); empty when no bg shell is tracked. Cleared automatically by a `ps` liveness sweep when the process exits. |
 | `@pane_subagents`          | Comma-separated subagent labels (Claude only)                       |
 | `@pane_cwd`                | Working directory reported by the agent (preferred over `pane_current_path`) |
 | `@pane_permission_mode`    | Permission-mode string for the badge (`plan` / `edit` / `auto` / `!` / …) |
