@@ -7,16 +7,7 @@ use super::super::context::{AgentContext, set_agent_meta};
 use super::super::notifications::{
     NotifyLabels, NotifyPayload, notification_body, notification_fingerprint, notify_lifecycle,
 };
-
-/// Wait reasons that demand direct user action. Softer reasons
-/// (auth_success, rate_limit, teammate_idle, …) can be downgraded to
-/// `background` when a live shell is present; these cannot.
-fn is_permission_wait_reason(wait_reason: &str) -> bool {
-    matches!(
-        wait_reason,
-        "permission" | "permission_prompt" | "permission_denied" | "elicitation_dialog"
-    )
-}
+use super::status_priority::resolve_notification_status;
 
 pub(in crate::cli::hook) fn on_notification(
     pane: &str,
@@ -30,12 +21,10 @@ pub(in crate::cli::hook) fn on_notification(
         return 0;
     }
     let bg_shell_live = !tmux::get_pane_option_value(pane, tmux::PANE_BG_CMD).is_empty();
-    let new_status = if bg_shell_live && !is_permission_wait_reason(wait_reason) {
-        "background"
-    } else {
-        "waiting"
-    };
-    set_status(pane, new_status);
+    set_status(
+        pane,
+        resolve_notification_status(wait_reason, bg_shell_live),
+    );
     set_attention(pane, "notification");
     if wait_reason.is_empty() {
         tmux::unset_pane_option(pane, tmux::PANE_WAIT_REASON);
@@ -284,20 +273,6 @@ mod tests {
             tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
             Some("waiting"),
         );
-    }
-
-    #[test]
-    fn is_permission_wait_reason_allowlist() {
-        assert!(is_permission_wait_reason("permission"));
-        assert!(is_permission_wait_reason("permission_prompt"));
-        assert!(is_permission_wait_reason("permission_denied"));
-        assert!(is_permission_wait_reason("elicitation_dialog"));
-        // Softer reasons must NOT be treated as permission.
-        assert!(!is_permission_wait_reason("auth_success"));
-        assert!(!is_permission_wait_reason("rate_limit"));
-        assert!(!is_permission_wait_reason("session_resumed"));
-        assert!(!is_permission_wait_reason("teammate_idle:alice"));
-        assert!(!is_permission_wait_reason(""));
     }
 
     #[test]
