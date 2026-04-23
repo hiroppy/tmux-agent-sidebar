@@ -147,9 +147,11 @@ impl PrCache {
     }
 
     /// Return the cached PR number for `(path, branch)` when fresh, otherwise
-    /// call `fetcher`, store its result, and return it. Empty `branch` (e.g.
-    /// detached HEAD) short-circuits to `None` without invoking the fetcher or
-    /// touching the cache.
+    /// call `fetcher`, store its result, and return it. Short-circuits to
+    /// `None` without invoking the fetcher or touching the cache when the
+    /// branch is unset (empty string) or detached (`git rev-parse
+    /// --abbrev-ref HEAD` prints the literal `HEAD` in that state) — a PR is
+    /// inherently branch-scoped, so there is no meaningful cache key.
     pub fn get_or_fetch<F>(
         &mut self,
         path: &str,
@@ -160,7 +162,7 @@ impl PrCache {
     where
         F: FnOnce(&str) -> Option<String>,
     {
-        if branch.is_empty() {
+        if branch.is_empty() || branch == "HEAD" {
             return None;
         }
         let fresh = self.entry.as_ref().is_some_and(|e| {
@@ -689,6 +691,28 @@ mod tests {
         assert!(pr.is_none());
         assert_eq!(calls.get(), 0);
         // Cache must still be empty: a real branch must invoke the fetcher.
+        let pr = cache.get_or_fetch("/a", "main", now, counting_fetcher(&calls, Some("42")));
+        assert_eq!(pr.as_deref(), Some("42"));
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn pr_cache_detached_head_skips_and_does_not_pollute_cache() {
+        // `git rev-parse --abbrev-ref HEAD` prints the literal "HEAD" when the
+        // working tree is detached. A PR is always branch-scoped so that case
+        // must short-circuit just like an empty branch.
+        let mut cache = PrCache::new();
+        let calls = Cell::new(0);
+        let now = Instant::now();
+        let pr = cache.get_or_fetch(
+            "/a",
+            "HEAD",
+            now,
+            counting_fetcher(&calls, Some("should-not-run")),
+        );
+        assert!(pr.is_none());
+        assert_eq!(calls.get(), 0);
+        // Cache must be untouched: the next real branch still triggers a fetch.
         let pr = cache.get_or_fetch("/a", "main", now, counting_fetcher(&calls, Some("42")));
         assert_eq!(pr.as_deref(), Some("42"));
         assert_eq!(calls.get(), 1);
