@@ -18,6 +18,7 @@ The top row of the sidebar filters the agent list by status. Each entry is an ic
 
 - `≡N` — all panes
 - `●N` — running
+- `◎N` — background shell running
 - `◐N` — waiting
 - `○N` — idle
 - `✕N` — error
@@ -33,9 +34,20 @@ Below the status row, a repo selector (`▾`) narrows the list to a single repos
 ### Status icon
 
 - `●` running
+- `◎` background shell running
 - `◐` waiting
 - `○` idle
 - `✕` error
+
+When multiple signals compete on the same pane, the sidebar resolves them in this order:
+
+**`running` > `permission` > `background` > `waiting` > `idle`**
+
+- **running** always wins while the agent is actively using tools — it overrides any background shell or waiting notification for the duration of the tool call.
+- **permission** (a `permission_prompt`, `permission_denied`, or `elicitation_dialog` wait reason) overrides a live background shell. You still have to act on the prompt, so the row stays in `waiting` instead of being hidden behind `◎`.
+- **background** wins over softer waits. When a background shell is live and the agent pauses for something informational — `auth_success`, `rate_limit`, `session_resumed`, `teammate_idle`, etc. — the row stays on `◎` instead of flipping to `◐`.
+- **waiting** covers everything else the agent has chosen to surface.
+- **idle** is the fallback when nothing else applies.
 
 ### Permission badge
 
@@ -73,6 +85,20 @@ Synchronized from the agent's task list. Each task gets a glyph for its state; t
 ```text
   ✔✔◼◻ 2/4
 ```
+
+### Background shell
+
+Shown when an agent explicitly starts a Bash tool in the background, such as a long-running `npm run dev` or watch command. The sidebar moves that pane from `running` to `background` only when the hook payload includes a background flag (`run_in_background` / `runInBackground`); command text alone is not guessed.
+
+The row body surfaces the actual command so you can tell at a glance what is running, and keeps it visible even when the agent briefly flips back to `running` for another tool call. Only the most recent background Bash is tracked; if the agent launches a second one, it overwrites the first in the row. The marker clears automatically when the process exits (via a `ps` liveness sweep each refresh tick).
+
+```text
+  npm run dev
+```
+
+If the hook payload omitted the command string for some reason, the row shows a `(background shell)` placeholder so the status transition is still visible.
+
+Once the underlying process exits, the sidebar's next refresh tick (about once a second) scans `ps` for the stored command, clears the row, and downgrades the pane from `background` to `idle`. The `(background shell)` placeholder is exempt from the sweep — without a real command we cannot verify liveness, so it persists until SessionEnd.
 
 ### Subagent tree
 

@@ -26,6 +26,10 @@ pub struct PaneInfo {
     /// option). Used by the row renderer to show a clickable red `×`
     /// in place of the usual `+` worktree marker.
     pub sidebar_spawned: bool,
+    /// Most recent backgrounded Bash command, if any. Populated while the
+    /// pane status is `Background` (or `Running` with a backgrounded shell
+    /// still alive) so the row body can surface the actual command.
+    pub bg_shell_cmd: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -37,6 +41,7 @@ pub struct WorktreeMetadata {
 #[derive(Debug, Clone, PartialEq)]
 pub enum PaneStatus {
     Running,
+    Background,
     Waiting,
     Idle,
     Error,
@@ -138,6 +143,7 @@ impl PaneStatus {
     pub fn from_label(s: &str) -> Self {
         match s {
             "running" => Self::Running,
+            "background" => Self::Background,
             "waiting" | "notification" => Self::Waiting,
             "idle" => Self::Idle,
             "error" => Self::Error,
@@ -148,11 +154,18 @@ impl PaneStatus {
     pub fn icon(&self) -> &'static str {
         match self {
             Self::Running => "●",
+            Self::Background => "◎",
             Self::Waiting => "◐",
             Self::Idle => "○",
             Self::Error => "✕",
             Self::Unknown => "·",
         }
+    }
+
+    /// `true` when the agent (or an owned background shell) is still
+    /// doing work the user would expect to be timed or updated live.
+    pub fn is_active(&self) -> bool {
+        matches!(self, Self::Running | Self::Background | Self::Waiting)
     }
 }
 
@@ -163,6 +176,7 @@ mod tests {
     #[test]
     fn pane_status_from_str_all_variants() {
         assert_eq!(PaneStatus::from_label("running"), PaneStatus::Running);
+        assert_eq!(PaneStatus::from_label("background"), PaneStatus::Background);
         assert_eq!(PaneStatus::from_label("waiting"), PaneStatus::Waiting);
         assert_eq!(PaneStatus::from_label("notification"), PaneStatus::Waiting);
         assert_eq!(PaneStatus::from_label("idle"), PaneStatus::Idle);
@@ -174,6 +188,7 @@ mod tests {
     #[test]
     fn pane_status_icon_all_variants() {
         assert_eq!(PaneStatus::Running.icon(), "●");
+        assert_eq!(PaneStatus::Background.icon(), "◎");
         assert_eq!(PaneStatus::Waiting.icon(), "◐");
         assert_eq!(PaneStatus::Idle.icon(), "○");
         assert_eq!(PaneStatus::Error.icon(), "✕");

@@ -1,9 +1,9 @@
 ---
 title: tmux-agent-sidebar
-description: tmux-agent-sidebar — one tmux sidebar that tracks every Claude Code, Codex, and OpenCode pane across every session and window. See status, prompts, Git state, activity, and worktrees without switching windows.
+description: tmux-agent-sidebar — one tmux sidebar that tracks every Claude Code, Codex, and OpenCode pane across every session and window. See status, background shells, prompts, Git state, activity, and worktrees without switching windows.
 template: splash
 hero:
-  tagline: 'Every <span class="hero-agent"><img src="/tmux-agent-sidebar/brands/claude.ico" alt="" aria-hidden="true" width="16" height="16" />Claude Code</span>, <span class="hero-agent"><img src="/tmux-agent-sidebar/brands/codex.png" alt="" aria-hidden="true" width="16" height="16" />Codex</span>, and <span class="hero-agent"><img src="/tmux-agent-sidebar/brands/opencode.svg" alt="" aria-hidden="true" width="16" height="20" />OpenCode</span> pane across every tmux session and window — status, prompts, Git, and activity in one sidebar.'
+  tagline: 'Every <span class="hero-agent"><img src="/tmux-agent-sidebar/brands/claude.ico" alt="" aria-hidden="true" width="16" height="16" />Claude Code</span>, <span class="hero-agent"><img src="/tmux-agent-sidebar/brands/codex.png" alt="" aria-hidden="true" width="16" height="16" />Codex</span>, and <span class="hero-agent"><img src="/tmux-agent-sidebar/brands/opencode.svg" alt="" aria-hidden="true" width="16" height="20" />OpenCode</span> pane across every tmux session and window — status, background shells, prompts, Git, and activity in one sidebar.'
   image:
     alt: tmux-agent-sidebar screenshot
     file: ../../assets/captures/hero.png
@@ -28,8 +28,8 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
     once, so context switching stops meaning window switching.
   </Card>
   <Card title="Live status, prompts, responses" icon="comment-alt">
-    Prompts, tool calls, response previews, wait reasons, task progress, and
-    subagent trees — all refreshing as the agents work.
+    Prompts, tool calls, response previews, background shell state, wait reasons,
+    task progress, and subagent trees — all refreshing as the agents work.
   </Card>
   <Card title="Worktree-aware" icon="seti:folder">
     Spawn a fresh worktree + agent from the sidebar, and tear it down —

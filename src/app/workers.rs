@@ -62,9 +62,13 @@ pub(super) fn session_poll_loop(tx: &mpsc::Sender<HashMap<String, String>>) {
 }
 
 /// Git data polling thread. Fetches git status every 2 seconds while the Git
-/// tab is active. Skips fetching when the tab is not visible.
+/// tab is active. Skips fetching when the tab is not visible. PR numbers go
+/// through an in-memory `(path, branch)`-keyed cache so `gh pr view` (the only
+/// hop that costs GitHub API quota) runs at most once per `PR_CACHE_TTL`
+/// instead of every tick.
 pub(super) fn git_poll_loop(tmux_pane: &str, git_tx: &mpsc::Sender<GitData>, active: &AtomicBool) {
     let mut last_path: Option<String> = None;
+    let mut pr_cache = git::PrCache::new();
     loop {
         std::thread::sleep(Duration::from_secs(2));
 
@@ -78,7 +82,13 @@ pub(super) fn git_poll_loop(tmux_pane: &str, git_tx: &mpsc::Sender<GitData>, act
             last_path = Some(p);
         }
         if let Some(ref path) = last_path {
-            let data = git::fetch_git_data(path);
+            let mut data = git::fetch_git_data(path);
+            data.pr_number = pr_cache.get_or_fetch(
+                path,
+                &data.branch,
+                std::time::Instant::now(),
+                git::fetch_pr_number,
+            );
             if git_tx.send(data).is_err() {
                 return;
             }

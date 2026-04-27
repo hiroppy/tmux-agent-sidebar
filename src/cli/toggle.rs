@@ -22,7 +22,7 @@ pub(crate) fn cmd_toggle(args: &[String]) -> i32 {
 
     // Check sidebar width setting
     let sidebar_width_setting = {
-        let s = tmux::display_message(window_id, "#{@sidebar_width}");
+        let s = tmux::display_message(window_id, &format!("#{{{}}}", tmux::SIDEBAR_WIDTH));
         if s.is_empty() { "30".to_string() } else { s }
     };
 
@@ -49,14 +49,9 @@ pub(crate) fn cmd_toggle(args: &[String]) -> i32 {
     };
 
     // Check for existing sidebar
-    let panes_output = tmux::run_tmux(&[
-        "list-panes",
-        "-t",
-        window_id,
-        "-F",
-        "#{pane_id}|#{@pane_role}",
-    ])
-    .unwrap_or_default();
+    let pane_id_role_format = pane_id_role_format();
+    let panes_output = tmux::run_tmux(&["list-panes", "-t", window_id, "-F", &pane_id_role_format])
+        .unwrap_or_default();
 
     let existing_sidebar = panes_output.lines().find_map(|line| {
         let parts: Vec<&str> = line.splitn(2, '|').collect();
@@ -142,13 +137,14 @@ pub(crate) fn cmd_toggle(args: &[String]) -> i32 {
 }
 
 pub(crate) fn cmd_toggle_all(_args: &[String]) -> i32 {
-    let has_sidebar = tmux::run_tmux(&["list-panes", "-a", "-F", "#{pane_id}|#{@pane_role}"])
+    let pane_id_role_format = pane_id_role_format();
+    let has_sidebar = tmux::run_tmux(&["list-panes", "-a", "-F", &pane_id_role_format])
         .map(|output| any_sidebar_pane(&output))
         .unwrap_or(false);
 
     if has_sidebar {
-        let all_panes = tmux::run_tmux(&["list-panes", "-a", "-F", "#{pane_id}|#{@pane_role}"])
-            .unwrap_or_default();
+        let all_panes =
+            tmux::run_tmux(&["list-panes", "-a", "-F", &pane_id_role_format]).unwrap_or_default();
         for line in all_panes.lines() {
             let parts: Vec<&str> = line.splitn(2, '|').collect();
             if parts.len() >= 2 && parts[1] == "sidebar" {
@@ -200,7 +196,7 @@ fn unique_window_paths(output: &str) -> Vec<(String, String)> {
 /// so the guard logic is directly unit-testable without a running tmux
 /// server.
 ///
-/// - `list_panes_output`: `Some(stdout)` from `list-panes -F #{@pane_role}`,
+/// - `list_panes_output`: `Some(stdout)` from `list-panes -F <pane role format>`,
 ///   or `None` if the tmux call failed.
 /// - `session_windows`: parsed value of `#{session_windows}`, or `None`
 ///   if the tmux call failed or the value was unparseable.
@@ -251,7 +247,9 @@ pub(crate) fn cmd_auto_close(args: &[String]) -> i32 {
         None => return 0,
     };
 
-    let list_panes_output = tmux::run_tmux(&["list-panes", "-t", window_id, "-F", "#{@pane_role}"]);
+    let pane_role_format = format!("#{{{}}}", tmux::PANE_ROLE);
+    let list_panes_output =
+        tmux::run_tmux(&["list-panes", "-t", window_id, "-F", &pane_role_format]);
 
     let session_windows = tmux::run_tmux(&[
         "display-message",
@@ -280,6 +278,10 @@ pub(crate) fn cmd_auto_close(args: &[String]) -> i32 {
     }
 
     0
+}
+
+fn pane_id_role_format() -> String {
+    format!("#{{pane_id}}|#{{{}}}", tmux::PANE_ROLE)
 }
 
 #[cfg(test)]

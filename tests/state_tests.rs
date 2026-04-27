@@ -8,7 +8,7 @@ use tmux_agent_sidebar::state::{
     AppState, BottomTab, Focus, GlobalState, PopupState, RepoFilter, RowTarget, StatusFilter,
 };
 use tmux_agent_sidebar::tmux::{
-    AgentType, PaneInfo, PaneStatus, SessionInfo, WindowInfo, WorktreeMetadata,
+    self, AgentType, PaneInfo, PaneStatus, SessionInfo, WindowInfo, WorktreeMetadata,
 };
 use tmux_agent_sidebar::worktree;
 
@@ -119,6 +119,7 @@ fn test_line_to_row_two_agents() {
         session_id: None,
         session_name: String::new(),
         sidebar_spawned: false,
+        bg_shell_cmd: None,
     };
     let pane2 = PaneInfo {
         pane_id: "%2".into(),
@@ -139,6 +140,7 @@ fn test_line_to_row_two_agents() {
         session_id: None,
         session_name: String::new(),
         sidebar_spawned: false,
+        bg_shell_cmd: None,
     };
 
     let mut state = make_state(vec![SessionInfo {
@@ -571,7 +573,7 @@ fn full_sync_ignores_tmux_filter_matching_last_saved() {
     let mut g = make_global();
     g.status_filter = StatusFilter::Running;
 
-    let opts = make_opts(&[("@sidebar_filter", "all")]);
+    let opts = make_opts(&[(tmux::SIDEBAR_FILTER, "all")]);
     g.apply_all(&opts);
 
     assert_eq!(
@@ -585,7 +587,7 @@ fn full_sync_ignores_tmux_filter_matching_last_saved() {
 fn full_sync_applies_filter_from_tmux() {
     let mut g = make_global();
 
-    let opts = make_opts(&[("@sidebar_filter", "waiting")]);
+    let opts = make_opts(&[(tmux::SIDEBAR_FILTER, "waiting")]);
     g.apply_all(&opts);
 
     assert_eq!(g.status_filter, StatusFilter::Waiting);
@@ -595,7 +597,7 @@ fn full_sync_applies_filter_from_tmux() {
 fn full_sync_applies_cursor_from_tmux() {
     let mut g = make_global();
 
-    let opts = make_opts(&[("@sidebar_cursor", "3")]);
+    let opts = make_opts(&[(tmux::SIDEBAR_CURSOR, "3")]);
     g.apply_all(&opts);
 
     assert_eq!(g.selected_pane_row, 3);
@@ -606,7 +608,7 @@ fn full_sync_ignores_cursor_matching_last_saved() {
     let mut g = make_global();
     g.selected_pane_row = 5;
 
-    let opts = make_opts(&[("@sidebar_cursor", "0")]);
+    let opts = make_opts(&[(tmux::SIDEBAR_CURSOR, "0")]);
     g.apply_all(&opts);
 
     assert_eq!(
@@ -619,7 +621,7 @@ fn full_sync_ignores_cursor_matching_last_saved() {
 fn full_sync_applies_repo_filter_from_tmux() {
     let mut g = make_global();
 
-    let opts = make_opts(&[("@sidebar_repo_filter", "my-app")]);
+    let opts = make_opts(&[(tmux::SIDEBAR_REPO_FILTER, "my-app")]);
     g.apply_all(&opts);
 
     assert_eq!(g.repo_filter, RepoFilter::Repo("my-app".into()));
@@ -643,7 +645,7 @@ fn full_sync_empty_opts_changes_nothing() {
 fn full_sync_applies_error_filter_from_tmux() {
     let mut g = make_global();
 
-    let opts = make_opts(&[("@sidebar_filter", "error")]);
+    let opts = make_opts(&[(tmux::SIDEBAR_FILTER, "error")]);
     g.apply_all(&opts);
 
     assert_eq!(g.status_filter, StatusFilter::Error);
@@ -655,7 +657,7 @@ fn full_sync_invalid_filter_defaults_to_all() {
     g.status_filter = StatusFilter::Running;
 
     // "garbage" parses as All, All == last_saved → no change
-    let opts = make_opts(&[("@sidebar_filter", "garbage")]);
+    let opts = make_opts(&[(tmux::SIDEBAR_FILTER, "garbage")]);
     g.apply_all(&opts);
 
     assert_eq!(
@@ -670,9 +672,9 @@ fn full_sync_applies_all_three_from_tmux() {
     let mut g = make_global();
 
     let opts = make_opts(&[
-        ("@sidebar_filter", "error"),
-        ("@sidebar_cursor", "7"),
-        ("@sidebar_repo_filter", "my-app"),
+        (tmux::SIDEBAR_FILTER, "error"),
+        (tmux::SIDEBAR_CURSOR, "7"),
+        (tmux::SIDEBAR_REPO_FILTER, "my-app"),
     ]);
     g.apply_all(&opts);
 
@@ -693,7 +695,7 @@ fn sync_does_not_revert_filter_after_save_failure() {
     let mut g = make_global();
 
     // Step 1: startup sync adopts "error" from tmux
-    g.apply_all(&make_opts(&[("@sidebar_filter", "error")]));
+    g.apply_all(&make_opts(&[(tmux::SIDEBAR_FILTER, "error")]));
     assert_eq!(g.status_filter, StatusFilter::Error);
 
     // Step 2: user changes filter locally, save_filter fails
@@ -701,7 +703,7 @@ fn sync_does_not_revert_filter_after_save_failure() {
     g.status_filter = StatusFilter::Running;
 
     // Step 3: next sync reads tmux "error", but last_saved is also Error → equal → no change
-    g.apply_all(&make_opts(&[("@sidebar_filter", "error")]));
+    g.apply_all(&make_opts(&[(tmux::SIDEBAR_FILTER, "error")]));
 
     assert_eq!(
         g.status_filter,
@@ -717,7 +719,7 @@ fn full_sync_does_not_revert_filter_after_save_failure() {
     let mut g = make_global();
 
     // Startup: adopt "error"
-    g.apply_all(&make_opts(&[("@sidebar_filter", "error")]));
+    g.apply_all(&make_opts(&[(tmux::SIDEBAR_FILTER, "error")]));
     assert_eq!(g.status_filter, StatusFilter::Error);
 
     // User changes filter locally, save_filter fails
@@ -726,7 +728,7 @@ fn full_sync_does_not_revert_filter_after_save_failure() {
 
     // SIGUSR1 triggers apply_all: tmux still has "error",
     // but last_saved is also Error → equal → no overwrite
-    g.apply_all(&make_opts(&[("@sidebar_filter", "error")]));
+    g.apply_all(&make_opts(&[(tmux::SIDEBAR_FILTER, "error")]));
 
     assert_eq!(
         g.status_filter,
@@ -742,13 +744,13 @@ fn full_sync_picks_up_change_from_another_instance() {
     let mut g = make_global();
 
     // Startup: this instance starts with default (All)
-    g.apply_all(&make_opts(&[("@sidebar_filter", "running")]));
+    g.apply_all(&make_opts(&[(tmux::SIDEBAR_FILTER, "running")]));
     assert_eq!(g.status_filter, StatusFilter::Running);
     // last_saved_filter is now Running
 
     // Another instance changes filter to Waiting (writes to tmux)
     // This instance's SIGUSR1 fires:
-    g.apply_all(&make_opts(&[("@sidebar_filter", "waiting")]));
+    g.apply_all(&make_opts(&[(tmux::SIDEBAR_FILTER, "waiting")]));
 
     assert_eq!(
         g.status_filter,
@@ -761,12 +763,12 @@ fn full_sync_picks_up_change_from_another_instance() {
 fn full_sync_picks_up_cursor_from_another_instance() {
     let mut g = make_global();
 
-    g.apply_all(&make_opts(&[("@sidebar_cursor", "3")]));
+    g.apply_all(&make_opts(&[(tmux::SIDEBAR_CURSOR, "3")]));
     assert_eq!(g.selected_pane_row, 3);
     // last_saved_cursor is now 3
 
     // Another instance moves cursor to 7
-    g.apply_all(&make_opts(&[("@sidebar_cursor", "7")]));
+    g.apply_all(&make_opts(&[(tmux::SIDEBAR_CURSOR, "7")]));
 
     assert_eq!(
         g.selected_pane_row, 7,
@@ -786,7 +788,7 @@ fn global_state_stable_during_task_completion() {
     // so load_from_tmux is never called. Filter stays as user set it.
     let mut g = make_global();
 
-    g.apply_all(&make_opts(&[("@sidebar_filter", "running")]));
+    g.apply_all(&make_opts(&[(tmux::SIDEBAR_FILTER, "running")]));
     g.status_filter = StatusFilter::Idle;
 
     // No apply_all called during task completion (window still active).
@@ -803,12 +805,12 @@ fn window_switch_syncs_after_debounce() {
     // another instance changes filter, user returns → sync fires.
     let mut g = make_global();
 
-    g.apply_all(&make_opts(&[("@sidebar_filter", "running")]));
+    g.apply_all(&make_opts(&[(tmux::SIDEBAR_FILTER, "running")]));
     assert_eq!(g.status_filter, StatusFilter::Running);
 
     // User returns to this window after being away.
     // Debounce passed (inactive_count >= 2) → apply_all called.
-    g.apply_all(&make_opts(&[("@sidebar_filter", "waiting")]));
+    g.apply_all(&make_opts(&[(tmux::SIDEBAR_FILTER, "waiting")]));
 
     assert_eq!(
         g.status_filter,
@@ -826,7 +828,7 @@ fn window_active_flicker_does_not_trigger_sync() {
     // main loop determines debounce threshold was met.
     let mut g = make_global();
 
-    g.apply_all(&make_opts(&[("@sidebar_filter", "running")]));
+    g.apply_all(&make_opts(&[(tmux::SIDEBAR_FILTER, "running")]));
     g.status_filter = StatusFilter::Idle;
 
     // Flicker: only 1 cycle of inactive (count=1 < threshold=2).
@@ -844,9 +846,9 @@ fn window_activation_syncs_all_fields() {
     let mut g = make_global();
 
     g.apply_all(&make_opts(&[
-        ("@sidebar_filter", "idle"),
-        ("@sidebar_cursor", "4"),
-        ("@sidebar_repo_filter", "my-app"),
+        (tmux::SIDEBAR_FILTER, "idle"),
+        (tmux::SIDEBAR_CURSOR, "4"),
+        (tmux::SIDEBAR_REPO_FILTER, "my-app"),
     ]));
 
     assert_eq!(g.status_filter, StatusFilter::Idle);

@@ -9,9 +9,10 @@ Claude Code, Codex, and OpenCode work with the sidebar, but they expose differen
 
 | Feature                                  | Claude Code | Codex        | OpenCode     | Notes                                                                                                                           |
 | ---------------------------------------- | ----------- | ------------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| Status tracking (running / idle / error) | ✓           | ✓            | ✓            | Driven by `SessionStart` / `UserPromptSubmit` / `Stop`                                                                          |
+| Base status tracking                    | ✓           | ✓            | ✓            | Covers `running`, `idle`, and `error`; `waiting` and `background` depend on agent-specific hooks                                |
 | Prompt text display                      | ✓           | ✓            | ✓            | Saved from `UserPromptSubmit`                                                                                                   |
 | Response text display (`▷ ...`)          | ✓           | ✓            | ✓            | Populated from the `Stop` payload                                                                                                |
+| Background shell state                   | ✓           | —            | —            | Claude Bash tools can report `run_in_background`; Codex and OpenCode do not currently document a background Bash flag             |
 | Waiting status + wait reason             | ✓           | —            | ✓            | OpenCode maps permission prompts to waiting notifications; Claude also has `Notification`, `PermissionDenied`, and `TeammateIdle` |
 | API failure reason display               | ✓           | —            | ✓            | `StopFailure` is wired only for Claude and OpenCode                                                                             |
 | Permission badge                         | ✓ (`plan` / `edit` / `auto` / `!`) | ✓ (`auto` / `!` only) | — | Codex badges are inferred from process arguments; OpenCode does not expose permission modes                                     |

@@ -27,10 +27,10 @@ Opened with `n` or by clicking the `+` button next to a repo header.
 The modal's `NAME` field is slugified (lowercase, non-alphanumeric → `-`) and reused as:
 
 - **Branch** — `<prefix><slug>`, where `<prefix>` defaults to `agent/` (e.g. `add login form` → `agent/add-login-form`). Colliding slugs get an incrementing suffix (`-2`, `-3`, …).
-- **Worktree path** — `<parent>/<repo-name>-worktrees/<slug>`, a sibling directory of the repo.
+- **Worktree path** — `<repo>/.worktrees/<slug>` by default. Change the repo-relative directory with `@agent-sidebar-worktree-dir`; absolute paths and `..` are rejected.
 - **tmux window** — the slug is used as the window name; the agent you picked in the modal (`claude` / `codex` / `opencode`) launches inside it with the selected permission `MODE`.
 
-Defaults for the agent and branch prefix live in tmux options — see [tmux options](/tmux-agent-sidebar/reference/tmux-options/) for the full list.
+Defaults for the agent, branch prefix, and worktree directory live in tmux options — see [tmux options](/tmux-agent-sidebar/reference/tmux-options/) for the full list.
 
 ## Close pane modal
 

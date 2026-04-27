@@ -1,4 +1,6 @@
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
+
+use super::config::DEFAULT_WORKTREE_DIR;
 
 pub(super) const MAX_COLLISION_ATTEMPTS: usize = 99;
 
@@ -31,11 +33,20 @@ pub fn pick_unique_slug(slug: &str, is_free: impl Fn(&str) -> bool) -> Option<St
         .find(|candidate| is_free(candidate))
 }
 
-/// `<parent>/<repo_name>-worktrees/<slug>` — sibling to the repo.
-pub fn worktree_path_for(repo_root: &Path, slug: &str) -> Option<PathBuf> {
-    let parent = repo_root.parent()?;
-    let name = repo_root.file_name()?.to_str()?;
-    Some(parent.join(format!("{name}-worktrees")).join(slug))
+/// `<repo>/<worktree_dir>/<slug>` — repo-local worktree directory.
+pub fn worktree_path_for(
+    repo_root: &Path,
+    slug: &str,
+    worktree_dir: Option<&str>,
+) -> Option<PathBuf> {
+    let dir = worktree_dir
+        .filter(|s| !s.is_empty())
+        .unwrap_or(DEFAULT_WORKTREE_DIR);
+    let dir = Path::new(dir);
+    if dir.is_absolute() || dir.components().any(|c| c == Component::ParentDir) {
+        return None;
+    }
+    Some(repo_root.join(dir).join(slug))
 }
 
 #[cfg(test)]
@@ -63,7 +74,12 @@ mod tests {
     }
 
     #[test]
-    fn worktree_path_for_returns_none_without_parent() {
-        assert!(worktree_path_for(Path::new("/"), "foo").is_none());
+    fn worktree_path_for_rejects_absolute_worktree_dir() {
+        assert!(worktree_path_for(Path::new("/repo"), "foo", Some("/tmp/wt")).is_none());
+    }
+
+    #[test]
+    fn worktree_path_for_rejects_parent_relative_worktree_dir() {
+        assert!(worktree_path_for(Path::new("/repo"), "foo", Some("../wt")).is_none());
     }
 }

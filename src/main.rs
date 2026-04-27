@@ -7,7 +7,7 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
-use tmux_agent_sidebar::app;
+use tmux_agent_sidebar::{app, tmux};
 
 static NEEDS_REFRESH: AtomicBool = AtomicBool::new(false);
 
@@ -64,7 +64,7 @@ fn main() -> io::Result<()> {
             "-t",
             &tmux_pane,
             "-p",
-            "@sidebar_pid",
+            tmux::SIDEBAR_PID,
             &pid.to_string(),
         ])
         .output();

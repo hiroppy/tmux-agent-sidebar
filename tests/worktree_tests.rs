@@ -69,27 +69,52 @@ fn pick_unique_slug_returns_none_when_exhausted() {
 }
 
 #[test]
-fn worktree_path_uses_sibling_directory() {
+fn worktree_path_uses_default_repo_local_directory() {
     let repo = PathBuf::from("/home/jess/code/myproj");
-    let path = worktree_path_for(&repo, "feature").unwrap();
+    let path = worktree_path_for(&repo, "feature", None).unwrap();
     assert_eq!(
         path,
-        PathBuf::from("/home/jess/code/myproj-worktrees/feature")
+        PathBuf::from("/home/jess/code/myproj/.worktrees/feature")
     );
 }
 
 #[test]
-fn worktree_path_handles_trailing_components() {
-    let repo = PathBuf::from("/tmp/repo");
-    let path = worktree_path_for(&repo, "task-2").unwrap();
-    assert_eq!(path, PathBuf::from("/tmp/repo-worktrees/task-2"));
+fn worktree_path_uses_custom_repo_relative_directory() {
+    let repo = PathBuf::from("/home/jess/code/myproj");
+    let path = worktree_path_for(&repo, "feature", Some(".worktrees")).unwrap();
+    assert_eq!(
+        path,
+        PathBuf::from("/home/jess/code/myproj/.worktrees/feature")
+    );
 }
 
 #[test]
-fn worktree_path_returns_none_for_root_path() {
-    // `/` has no parent we can build a sibling directory under.
-    let repo = PathBuf::from("/");
-    assert!(worktree_path_for(&repo, "anything").is_none());
+fn worktree_path_handles_nested_custom_directory() {
+    let repo = PathBuf::from("/home/jess/code/myproj");
+    let path = worktree_path_for(&repo, "task-2", Some("tmp/worktrees")).unwrap();
+    assert_eq!(
+        path,
+        PathBuf::from("/home/jess/code/myproj/tmp/worktrees/task-2")
+    );
+}
+
+#[test]
+fn worktree_path_empty_custom_directory_falls_back_to_default() {
+    let repo = PathBuf::from("/tmp/repo");
+    let path = worktree_path_for(&repo, "task-2", Some("")).unwrap();
+    assert_eq!(path, PathBuf::from("/tmp/repo/.worktrees/task-2"));
+}
+
+#[test]
+fn worktree_path_rejects_absolute_custom_directory() {
+    let repo = PathBuf::from("/tmp/repo");
+    assert!(worktree_path_for(&repo, "task-2", Some("/tmp/worktrees")).is_none());
+}
+
+#[test]
+fn worktree_path_rejects_parent_relative_custom_directory() {
+    let repo = PathBuf::from("/tmp/repo");
+    assert!(worktree_path_for(&repo, "task-2", Some("../worktrees")).is_none());
 }
 
 // ─── agent_command / modes_for ───────────────────────────────────────────

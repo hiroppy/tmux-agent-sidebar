@@ -17,7 +17,7 @@
 #   capture_single        — call `capture --frame-out $OUT/<name>.html`
 #
 # Per-scenario env vars (optional, set before build_layout):
-#   FOCUS=PANE_WAITING|PANE_RUNNING_2|PANE_ERROR|MAIN_PANE
+#   FOCUS=PANE_WAITING|PANE_BACKGROUND|PANE_ERROR|MAIN_PANE
 #         which agent pane is the "focused" one. Default MAIN_PANE.
 #   BOTTOM_HEIGHT=N — override @sidebar_bottom_height (0 hides the panel).
 #   CROP_ROWS=N:M  — vertical crop applied to capture_single output.
@@ -100,7 +100,7 @@ cleanup() {
 #
 # Exports:
 #   WINDOW, SIDEBAR_PANE, MAIN_PANE, MAIN_LOG,
-#   PANE_WAITING, PANE_RUNNING_2, PANE_ERROR,
+#   PANE_WAITING, PANE_BACKGROUND, PANE_ERROR,
 #   FOCUSED_PANE, FOCUSED_LOG
 build_layout() {
     # Canvas 140×46 — width ≈ 1220 px, height ≈ 815 px. Fits a 1280×900
@@ -167,27 +167,30 @@ build_layout() {
         started_s=45
     run_fake_agent "$PANE_WAITING" codex
 
-    # Second running — OpenCode on a long-lived refactor (12 m 45 s).
-    export PANE_RUNNING_2="${extras[1]}"
-    _seed_pane "$PANE_RUNNING_2" \
-        agent=opencode status=running \
+    # Background — OpenCode has a long-running dev server (12 m 45 s)
+    # listening on :3456. Shows the `◎` icon, the port label next to
+    # the branch, and the surfaced bg command in the row body.
+    export PANE_BACKGROUND="${extras[1]}"
+    _seed_pane "$PANE_BACKGROUND" \
+        agent=opencode status=background \
         branch=refactor/api-layer \
-        prompt="split the monolithic handler into typed routers" \
+        prompt="boot the dev server while I review the router split" \
+        bg_cmd="npm run dev" \
         started_s=765
-    run_fake_agent "$PANE_RUNNING_2" opencode
+    run_fake_agent "$PANE_BACKGROUND" opencode 3456 "npm run dev"
 
     # Error pane — cause surfaced via @pane_wait_reason (matches the hook
-    # convention in src/cli/hook/handlers.rs). Listens on :3456 — the
-    # local preview that was already up when the agent hit the rate limit.
-    # _seed_pane skips @pane_started_at on error so the elapsed counter
-    # stays empty; the failure reason matters, not how old the error is.
+    # convention in src/cli/hook/handlers.rs). No port: the API call was
+    # rejected before the agent could bind anything. _seed_pane skips
+    # @pane_started_at on error so the elapsed counter stays empty; the
+    # failure reason matters, not how old the error is.
     export PANE_ERROR="${extras[2]}"
     _seed_pane "$PANE_ERROR" \
         agent=claude status=error \
         branch=feat/dashboard-charts \
         prompt="add Recharts integration to the metrics panel" \
         wait_reason="anthropic api: rate limit reached"
-    run_fake_agent "$PANE_ERROR" claude 3456
+    run_fake_agent "$PANE_ERROR" claude
 
     # Default focus = MAIN_PANE. Scenarios override via FOCUS.
     # `${!var}` indirection under `set -u` fails hard if FOCUS points at
@@ -198,7 +201,7 @@ build_layout() {
         SIDEBAR_PANE)    focus_pane="$SIDEBAR_PANE" ;;
         MAIN_PANE)       focus_pane="$MAIN_PANE" ;;
         PANE_WAITING)    focus_pane="$PANE_WAITING" ;;
-        PANE_RUNNING_2) focus_pane="$PANE_RUNNING_2" ;;
+        PANE_BACKGROUND) focus_pane="$PANE_BACKGROUND" ;;
         PANE_ERROR)      focus_pane="$PANE_ERROR" ;;
         *) echo "build_layout: unknown FOCUS=${FOCUS}" >&2; return 1 ;;
     esac
@@ -223,12 +226,13 @@ build_layout() {
 
 # _seed_pane <pane_id> key=value ...
 # Supported keys: agent, status, attention, branch,
-#                 prompt, wait_reason, started_s (seconds ago; default 420)
+#                 prompt, wait_reason, bg_cmd,
+#                 started_s (seconds ago; default 420)
 _seed_pane() {
     local p="$1"
     shift
 
-    local agent="" status="" attention="" branch="" prompt="" wait_reason="" started_s=420
+    local agent="" status="" attention="" branch="" prompt="" wait_reason="" bg_cmd="" started_s=420
     local kv
     for kv in "$@"; do
         case "$kv" in
@@ -238,6 +242,7 @@ _seed_pane() {
             branch=*)      branch="${kv#branch=}" ;;
             prompt=*)      prompt="${kv#prompt=}" ;;
             wait_reason=*) wait_reason="${kv#wait_reason=}" ;;
+            bg_cmd=*)      bg_cmd="${kv#bg_cmd=}" ;;
             started_s=*)   started_s="${kv#started_s=}" ;;
             *) echo "_seed_pane: unknown kv: $kv" >&2; return 1 ;;
         esac
@@ -259,6 +264,9 @@ _seed_pane() {
     fi
     if [[ -n "$wait_reason" ]]; then
         tmux set-option -t "$p" -p @pane_wait_reason "$wait_reason"
+    fi
+    if [[ -n "$bg_cmd" ]]; then
+        tmux set-option -t "$p" -p @pane_bg_cmd "$bg_cmd"
     fi
 }
 
@@ -283,17 +291,32 @@ paint_stream() {
 # a TCP port; when set, the pane runs both the fake agent and a minimal
 # Python http.server in the background under a shared sh parent, so
 # the port-scan pass reports the listening port next to this pane's
-# branch label.
+# branch label. Optional 4th arg `bg_cmd` spawns a sidecar `sleep` with
+# `argv[0]` set to `bg_cmd` so the sidebar's ps-based bg-shell sweep
+# sees a live process matching the seeded `@pane_bg_cmd`.
 run_fake_agent() {
-    local pane="$1" agent="$2" port="${3:-}"
+    local pane="$1" agent="$2" port="${3:-}" bg_cmd="${4:-}"
+    local prelude=""
     if [[ -n "$port" ]]; then
-        # Background the listener, then `exec` replaces the wrapping sh with
-        # the agent binary so tmux reports pane_current_command=$agent. The
-        # Codex/OpenCode stale-shell filter in parse_pane_fields drops panes
-        # whose current command is a shell, so a lingering `sh -c … & wait`
-        # wrapper would hide the pane from the sidebar entirely.
+        prelude+="python3 -m http.server $port >/dev/null 2>&1 & "
+    fi
+    if [[ -n "$bg_cmd" ]]; then
+        # `exec -a NAME prog args` (bash builtin; macOS /bin/sh IS bash)
+        # lets us launch /bin/sleep with an argv that ps reports as the
+        # desired command string. The subshell `( … ) &` backgrounds it
+        # without disturbing the trailing `exec` that replaces the
+        # wrapper with the fake agent.
+        prelude+="( exec -a \"$bg_cmd\" /bin/sleep 999999 ) & "
+    fi
+    if [[ -n "$prelude" ]]; then
+        # Background the listener / sidecar, then `exec` replaces the
+        # wrapping shell with the agent binary so tmux reports
+        # pane_current_command=$agent. The Codex/OpenCode stale-shell
+        # filter in parse_pane_fields drops panes whose current command
+        # is a shell, so a lingering `sh -c … & wait` wrapper would hide
+        # the pane from the sidebar entirely.
         tmux respawn-pane -k -t "$pane" \
-            "sh -c 'python3 -m http.server $port >/dev/null 2>&1 & exec $FAKE_BIN_DIR/$agent 999999'"
+            "bash -c '$prelude exec $FAKE_BIN_DIR/$agent 999999'"
     else
         tmux respawn-pane -k -t "$pane" "$FAKE_BIN_DIR/$agent 999999"
     fi

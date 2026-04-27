@@ -5,4 +5,4 @@
 .claude/*.lock
 dist
 .astro
-/node_modules
+node_modules

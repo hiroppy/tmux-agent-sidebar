@@ -5,12 +5,21 @@ pub const SPAWNED_FROM_OPTION: &str = "@agent-sidebar-spawned-from";
 pub const SPAWNED_WORKTREE_OPTION: &str = "@agent-sidebar-spawned-worktree";
 pub const SPAWNED_BRANCH_OPTION: &str = "@agent-sidebar-spawned-branch";
 
-/// tmux `display-message` template used by [`read_spawn_markers`]. One
+/// Build the tmux `display-message` template used by [`read_spawn_markers`]. One
 /// call, five fields: the truthy flag, the owning repo, the worktree
 /// path, the branch name, and the window id. Callers share this
 /// template so the remove confirmation popup and the remove flow
 /// itself always read the same set of fields in the same order.
-pub const SPAWN_MARKERS_TEMPLATE: &str = "#{@agent-sidebar-spawned}\n#{@agent-sidebar-spawned-from}\n#{@agent-sidebar-spawned-worktree}\n#{@agent-sidebar-spawned-branch}\n#{window_id}";
+pub fn spawn_markers_template() -> String {
+    [
+        format!("#{{{SPAWNED_OPTION}}}"),
+        format!("#{{{SPAWNED_FROM_OPTION}}}"),
+        format!("#{{{SPAWNED_WORKTREE_OPTION}}}"),
+        format!("#{{{SPAWNED_BRANCH_OPTION}}}"),
+        "#{window_id}".to_string(),
+    ]
+    .join("\n")
+}
 
 /// Parsed view of the window-scope markers the spawn/remove flow
 /// depends on. All fields are always present because
@@ -35,7 +44,7 @@ impl SpawnMarkers {
         self.spawned && !self.from_repo.is_empty()
     }
 
-    /// Parse the output of `tmux display-message -p -F SPAWN_MARKERS_TEMPLATE`.
+    /// Parse the output of `tmux display-message -p -F spawn_markers_template()`.
     /// Missing / empty fields become `""` / `false` rather than errors.
     pub fn parse(raw: &str) -> Self {
         let mut lines = raw.lines();
@@ -59,7 +68,7 @@ impl SpawnMarkers {
 /// window scope so sub panes (e.g. Claude Code subagents split from the
 /// original) still resolve them; a pane-scope lookup would miss them.
 pub fn read_spawn_markers(pane_id: &str) -> SpawnMarkers {
-    SpawnMarkers::parse(&tmux::display_message(pane_id, SPAWN_MARKERS_TEMPLATE))
+    SpawnMarkers::parse(&tmux::display_message(pane_id, &spawn_markers_template()))
 }
 
 #[cfg(test)]
@@ -68,11 +77,11 @@ mod tests {
 
     #[test]
     fn parse_all_fields_populated() {
-        let raw = "1\n/repo\n/repo-worktrees/foo\nagent/foo\n@42\n";
+        let raw = "1\n/repo\n/repo/.worktrees/foo\nagent/foo\n@42\n";
         let m = SpawnMarkers::parse(raw);
         assert!(m.spawned);
         assert_eq!(m.from_repo, "/repo");
-        assert_eq!(m.worktree_path, "/repo-worktrees/foo");
+        assert_eq!(m.worktree_path, "/repo/.worktrees/foo");
         assert_eq!(m.branch, "agent/foo");
         assert_eq!(m.window_id, "@42");
         assert!(m.is_spawned());

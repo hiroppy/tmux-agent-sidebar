@@ -1,10 +1,10 @@
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 
 use super::config::{DEFAULT_BRANCH_PREFIX, RemoveMode};
 use super::env::{RealEnv, SpawnEnv};
 use super::markers::{
-    SPAWN_MARKERS_TEMPLATE, SPAWNED_BRANCH_OPTION, SPAWNED_FROM_OPTION, SPAWNED_OPTION,
-    SPAWNED_WORKTREE_OPTION, SpawnMarkers,
+    SPAWNED_BRANCH_OPTION, SPAWNED_FROM_OPTION, SPAWNED_OPTION, SPAWNED_WORKTREE_OPTION,
+    SpawnMarkers, spawn_markers_template,
 };
 use super::slug::{MAX_COLLISION_ATTEMPTS, pick_unique_slug, slugify, worktree_path_for};
 
@@ -39,17 +39,26 @@ pub(crate) fn spawn_with<E: SpawnEnv>(env: &E, req: &SpawnRequest) -> Result<Str
         .branch_prefix()
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| DEFAULT_BRANCH_PREFIX.to_string());
+    let worktree_dir = env.worktree_dir();
+    if worktree_dir.as_deref().is_some_and(|dir| {
+        let dir = Path::new(dir);
+        !dir.as_os_str().is_empty()
+            && (dir.is_absolute() || dir.components().any(|c| c == Component::ParentDir))
+    }) {
+        return Err("worktree directory must be repo-relative".into());
+    }
 
     let unique = pick_unique_slug(&slug, |s| {
         let branch = format!("{prefix}{s}");
         env.branch_is_free(repo, &branch)
-            && worktree_path_for(&req.repo_root, s).is_some_and(|p| env.worktree_path_is_free(&p))
+            && worktree_path_for(&req.repo_root, s, worktree_dir.as_deref())
+                .is_some_and(|p| env.worktree_path_is_free(&p))
     })
     .ok_or_else(|| format!("no free branch name found after {MAX_COLLISION_ATTEMPTS} attempts"))?;
 
     let branch = format!("{prefix}{unique}");
-    let worktree_path =
-        worktree_path_for(&req.repo_root, &unique).ok_or("repo root has no parent directory")?;
+    let worktree_path = worktree_path_for(&req.repo_root, &unique, worktree_dir.as_deref())
+        .ok_or("worktree directory must be repo-relative")?;
     let worktree = worktree_path.to_str().ok_or("worktree path is not UTF-8")?;
 
     env.worktree_add(repo, worktree, &branch)
@@ -151,7 +160,7 @@ pub(crate) fn remove_with<E: SpawnEnv>(
     pane_id: &str,
     mode: RemoveMode,
 ) -> Result<(), String> {
-    let markers = SpawnMarkers::parse(&env.display_message(pane_id, SPAWN_MARKERS_TEMPLATE));
+    let markers = SpawnMarkers::parse(&env.display_message(pane_id, &spawn_markers_template()));
     if !markers.is_spawned() {
         return Err("pane was not created by sidebar spawn".into());
     }
@@ -193,6 +202,7 @@ mod env_tests {
     struct FakeEnv {
         calls: RefCell<Vec<String>>,
         set_option_calls: RefCell<usize>,
+        worktree_dir: Option<String>,
         fail_set_option_at: Option<usize>,
         fail_kill_window: bool,
         fail_worktree_remove: bool,
@@ -223,6 +233,9 @@ mod env_tests {
     impl SpawnEnv for FakeEnv {
         fn branch_prefix(&self) -> Option<String> {
             None
+        }
+        fn worktree_dir(&self) -> Option<String> {
+            self.worktree_dir.clone()
         }
         fn branch_is_free(&self, _repo: &str, _branch: &str) -> bool {
             true
@@ -294,7 +307,7 @@ mod env_tests {
         fn display_message(&self, _pane_id: &str, _template: &str) -> String {
             self.display_output
                 .clone()
-                .unwrap_or_else(|| "1\n/r\n/r-worktrees/task\nagent/task\n@1\n".into())
+                .unwrap_or_else(|| "1\n/r\n/r/.worktrees/task\nagent/task\n@1\n".into())
         }
     }
 
@@ -318,13 +331,65 @@ mod env_tests {
         let branch = spawn_with(&env, &sample_req()).expect("spawn should succeed");
         assert_eq!(branch, "agent/task");
         let calls = env.calls();
-        assert!(has_call(&calls, "worktree_add("));
-        assert!(has_call(&calls, "new_window("));
+        assert!(has_call(
+            &calls,
+            "worktree_add(/r,/r/.worktrees/task,agent/task)"
+        ));
+        assert!(has_call(&calls, "new_window(sess,/r/.worktrees/task,task)"));
         assert_eq!(*env.set_option_calls.borrow(), 4);
         assert!(has_call(&calls, "send_command(%1,claude"));
         assert!(
             !has_call(&calls, "kill_window("),
             "no rollback on happy path"
+        );
+    }
+
+    #[test]
+    fn spawn_uses_custom_repo_relative_worktree_dir() {
+        let env = FakeEnv {
+            worktree_dir: Some(".worktrees".into()),
+            ..FakeEnv::default()
+        };
+        spawn_with(&env, &sample_req()).expect("spawn should succeed");
+        let calls = env.calls();
+        assert!(has_call(
+            &calls,
+            "worktree_add(/r,/r/.worktrees/task,agent/task)"
+        ));
+        assert!(has_call(&calls, "new_window(sess,/r/.worktrees/task,task)"));
+    }
+
+    #[test]
+    fn spawn_rejects_absolute_worktree_dir() {
+        let env = FakeEnv {
+            worktree_dir: Some("/tmp/worktrees".into()),
+            ..FakeEnv::default()
+        };
+        let err = spawn_with(&env, &sample_req()).expect_err("spawn must fail");
+        assert!(
+            err.contains("worktree directory must be repo-relative"),
+            "absolute worktree dir should be rejected before path allocation: {err}"
+        );
+        assert!(
+            !has_call(&env.calls(), "worktree_add("),
+            "spawn must not create a worktree with an absolute configured dir"
+        );
+    }
+
+    #[test]
+    fn spawn_rejects_parent_relative_worktree_dir() {
+        let env = FakeEnv {
+            worktree_dir: Some("../worktrees".into()),
+            ..FakeEnv::default()
+        };
+        let err = spawn_with(&env, &sample_req()).expect_err("spawn must fail");
+        assert!(
+            err.contains("worktree directory must be repo-relative"),
+            "parent-relative worktree dir should be rejected before path allocation: {err}"
+        );
+        assert!(
+            !has_call(&env.calls(), "worktree_add("),
+            "spawn must not create a worktree outside the repo"
         );
     }
 
@@ -485,6 +550,9 @@ mod env_tests {
             fn branch_prefix(&self) -> Option<String> {
                 self.0.branch_prefix()
             }
+            fn worktree_dir(&self) -> Option<String> {
+                self.0.worktree_dir()
+            }
             fn branch_is_free(&self, r: &str, b: &str) -> bool {
                 self.0.branch_is_free(r, b)
             }
@@ -585,7 +653,7 @@ mod env_tests {
     #[test]
     fn remove_rejects_pane_missing_spawned_marker() {
         let env = FakeEnv {
-            display_output: Some("\n/r\n/r-worktrees/task\nagent/task\n@1\n".into()),
+            display_output: Some("\n/r\n/r/.worktrees/task\nagent/task\n@1\n".into()),
             ..FakeEnv::default()
         };
         let err =
@@ -632,7 +700,7 @@ mod env_tests {
     #[test]
     fn remove_rejects_pane_with_empty_branch_marker() {
         let env = FakeEnv {
-            display_output: Some("1\n/r\n/r-worktrees/task\n\n@1\n".into()),
+            display_output: Some("1\n/r\n/r/.worktrees/task\n\n@1\n".into()),
             ..FakeEnv::default()
         };
         let err =

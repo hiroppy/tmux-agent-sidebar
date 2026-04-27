@@ -9,7 +9,7 @@ Claude Code is the reference agent for the sidebar — every feature is wired th
 
 ### Status and prompts
 
-- Live status (`running` / `waiting` / `idle` / `error`) from `SessionStart` / `UserPromptSubmit` / `Stop`
+- Live status (`running` / `background` / `waiting` / `idle` / `error`) from `SessionStart` / `UserPromptSubmit` / `Stop`
 - Prompt text from `UserPromptSubmit`
 - Response preview (`▷ …`) from `Stop`
 - Elapsed time since the last prompt
@@ -23,6 +23,7 @@ Claude Code is the reference agent for the sidebar — every feature is wired th
 ### Work-in-progress view
 
 - Task progress counter (e.g. `3/7`) — requires `PostToolUse`
+- Background shell state for Bash tools started with `run_in_background`
 - Sub-agent tree — requires `SubagentStart` / `SubagentStop`
 - Activity log — every tool call recorded via `PostToolUse`
 
@@ -39,6 +40,8 @@ Every desktop notification event is available — `stop`, `notification`, `task_
 ## Known limitation
 
 **Waiting status** — after you approve a permission prompt, the status stays `waiting` until the next hook event fires. This is a limitation of the Claude Code hook system.
+
+**Background shell state** — the sidebar marks a pane as `background` when Claude reports a Bash tool with `run_in_background`. It returns to `running` on the next non-background tool activity or on the next user prompt; the sidebar does not infer background state from command text alone.
 
 ## Setup
 

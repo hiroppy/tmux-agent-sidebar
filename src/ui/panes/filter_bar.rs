@@ -12,36 +12,28 @@ use crate::ui::text::{display_width, truncate_to_width};
 pub(super) fn render_filter_bar<'a>(state: &AppState) -> Line<'a> {
     let theme = &state.theme;
     let icons = &state.icons;
-    let (all, running, waiting, idle, error) = state.status_counts();
+    let (all, running, background, waiting, idle, error) = state.status_counts();
 
+    let icon_for = |s: PaneStatus| (icons.status_icon(&s), theme.status_color(&s, false));
     let items: Vec<(StatusFilter, (&str, ratatui::style::Color), usize)> = vec![
         (StatusFilter::All, (icons.all_icon(), theme.status_all), all),
         (
             StatusFilter::Running,
-            (
-                icons.status_icon(&PaneStatus::Running),
-                theme.status_running,
-            ),
+            icon_for(PaneStatus::Running),
             running,
         ),
         (
+            StatusFilter::Background,
+            icon_for(PaneStatus::Background),
+            background,
+        ),
+        (
             StatusFilter::Waiting,
-            (
-                icons.status_icon(&PaneStatus::Waiting),
-                theme.status_waiting,
-            ),
+            icon_for(PaneStatus::Waiting),
             waiting,
         ),
-        (
-            StatusFilter::Idle,
-            (icons.status_icon(&PaneStatus::Idle), theme.status_idle),
-            idle,
-        ),
-        (
-            StatusFilter::Error,
-            (icons.status_icon(&PaneStatus::Error), theme.status_error),
-            error,
-        ),
+        (StatusFilter::Idle, icon_for(PaneStatus::Idle), idle),
+        (StatusFilter::Error, icon_for(PaneStatus::Error), error),
     ];
 
     let mut spans: Vec<Span<'a>> = Vec::new();
@@ -256,6 +248,7 @@ mod tests {
             session_id: None,
             session_name: String::new(),
             sidebar_spawned: false,
+            bg_shell_cmd: None,
         };
         let pane2 = crate::tmux::PaneInfo {
             pane_id: "%3".into(),
@@ -276,6 +269,7 @@ mod tests {
             session_id: None,
             session_name: String::new(),
             sidebar_spawned: false,
+            bg_shell_cmd: None,
         };
         let mut state = make_state_with_groups(vec![crate::group::RepoGroup {
             name: "project".into(),
@@ -295,7 +289,7 @@ mod tests {
             .filter(|span| !span.content.as_ref().trim().is_empty())
             .collect();
 
-        assert_eq!(cells.len(), 10);
+        assert_eq!(cells.len(), 12);
 
         assert_eq!(cells[0].content.as_ref(), "≡");
         assert_eq!(cells[0].style.fg, Some(theme.filter_inactive));
@@ -311,23 +305,29 @@ mod tests {
         assert_eq!(cells[3].content.as_ref(), "1");
         assert_eq!(cells[3].style.fg, Some(theme.text_active));
 
-        assert_eq!(cells[4].content.as_ref(), "◐");
+        assert_eq!(cells[4].content.as_ref(), "◎");
         assert_eq!(cells[4].style.fg, Some(theme.filter_inactive));
 
         assert_eq!(cells[5].content.as_ref(), "0");
         assert_eq!(cells[5].style.fg, Some(theme.filter_inactive));
 
-        assert_eq!(cells[6].content.as_ref(), "○");
+        assert_eq!(cells[6].content.as_ref(), "◐");
         assert_eq!(cells[6].style.fg, Some(theme.filter_inactive));
 
-        assert_eq!(cells[7].content.as_ref(), "1");
-        assert_eq!(cells[7].style.fg, Some(theme.text_active));
+        assert_eq!(cells[7].content.as_ref(), "0");
+        assert_eq!(cells[7].style.fg, Some(theme.filter_inactive));
 
-        assert_eq!(cells[8].content.as_ref(), "✕");
+        assert_eq!(cells[8].content.as_ref(), "○");
         assert_eq!(cells[8].style.fg, Some(theme.filter_inactive));
 
-        assert_eq!(cells[9].content.as_ref(), "0");
-        assert_eq!(cells[9].style.fg, Some(theme.filter_inactive));
+        assert_eq!(cells[9].content.as_ref(), "1");
+        assert_eq!(cells[9].style.fg, Some(theme.text_active));
+
+        assert_eq!(cells[10].content.as_ref(), "✕");
+        assert_eq!(cells[10].style.fg, Some(theme.filter_inactive));
+
+        assert_eq!(cells[11].content.as_ref(), "0");
+        assert_eq!(cells[11].style.fg, Some(theme.filter_inactive));
     }
 
     #[test]

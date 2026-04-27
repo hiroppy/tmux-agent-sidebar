@@ -34,6 +34,7 @@ surface is similar to Codex but with a different event source.
 | Feature                    | Why |
 | -------------------------- | --- |
 | Permission badge           | OpenCode does not expose the Claude-style permission modes |
+| Background shell state     | OpenCode does not currently document a background Bash flag |
 | Task progress counter      | The bridge does not map a task-progress event |
 | Sub-agent tree             | OpenCode does not emit Claude-style sub-agent hooks |
 | Worktree lifecycle tracking | OpenCode does not emit `WorktreeCreate` / `WorktreeRemove` |

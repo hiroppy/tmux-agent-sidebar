@@ -1,4 +1,10 @@
 use std::process::Command;
+use std::time::{Duration, Instant};
+
+/// How long a PR lookup stays fresh before `PrCache` refetches it. PR numbers
+/// change only on branch switches (already keyed) or when a new PR is created
+/// for the current branch — the TTL bounds the latency of that second case.
+pub const PR_CACHE_TTL: Duration = Duration::from_secs(300);
 
 /// A file entry with its status indicator, name, and per-file diff stats.
 #[derive(Debug, Clone, PartialEq)]
@@ -70,9 +76,15 @@ pub fn fetch_git_data(path: &str) -> GitData {
         data.remote_url = normalize_git_url(&text);
     }
 
-    // Spawn `gh` with a timeout to avoid blocking the git thread indefinitely
-    // (e.g. network issues, auth prompts).
-    if let Ok(mut child) = Command::new("gh")
+    data
+}
+
+/// Fetch the PR number for the current branch at `path` via `gh pr view`.
+/// Returns `None` when there is no PR, `gh` is missing, or the call fails or
+/// times out. Bounded by a 5s deadline so a hung `gh` cannot stall the git
+/// polling thread.
+pub fn fetch_pr_number(path: &str) -> Option<String> {
+    let mut child = Command::new("gh")
         .env("GIT_OPTIONAL_LOCKS", "0")
         .args(["pr", "view", "--json", "number", "-q", ".number"])
         .current_dir(path)
@@ -80,40 +92,94 @@ pub fn fetch_git_data(path: &str) -> GitData {
         .stderr(std::process::Stdio::null())
         .stdin(std::process::Stdio::null())
         .spawn()
-    {
-        use std::time::{Duration, Instant};
-        let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            match child.try_wait() {
-                Ok(Some(status)) => {
-                    if status.success()
-                        && let Some(stdout) = child.stdout.take()
-                    {
-                        use std::io::Read;
-                        let mut buf = String::new();
-                        let mut reader = stdout;
-                        let _ = reader.read_to_string(&mut buf);
-                        let num = buf.trim().to_string();
-                        if !num.is_empty() {
-                            data.pr_number = Some(num);
-                        }
+        .ok()?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if status.success()
+                    && let Some(stdout) = child.stdout.take()
+                {
+                    use std::io::Read;
+                    let mut buf = String::new();
+                    let mut reader = stdout;
+                    let _ = reader.read_to_string(&mut buf);
+                    let num = buf.trim().to_string();
+                    if !num.is_empty() {
+                        return Some(num);
                     }
-                    break;
                 }
-                Ok(None) => {
-                    if Instant::now() >= deadline {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        break;
-                    }
-                    std::thread::sleep(Duration::from_millis(100));
-                }
-                Err(_) => break,
+                return None;
             }
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(_) => return None,
         }
     }
+}
 
-    data
+/// Single-slot PR-number cache keyed by `(path, branch)` with a TTL. The git
+/// poll thread owns one instance and calls [`PrCache::get_or_fetch`] every
+/// tick; same-key repeat calls within `PR_CACHE_TTL` return cached values
+/// without hitting `gh`.
+#[derive(Debug, Default)]
+pub struct PrCache {
+    entry: Option<PrCacheEntry>,
+}
+
+#[derive(Debug)]
+struct PrCacheEntry {
+    path: String,
+    branch: String,
+    pr_number: Option<String>,
+    cached_at: Instant,
+}
+
+impl PrCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Return the cached PR number for `(path, branch)` when fresh, otherwise
+    /// call `fetcher`, store its result, and return it. Short-circuits to
+    /// `None` without invoking the fetcher or touching the cache when the
+    /// branch is unset (empty string) or detached (`git rev-parse
+    /// --abbrev-ref HEAD` prints the literal `HEAD` in that state) — a PR is
+    /// inherently branch-scoped, so there is no meaningful cache key.
+    pub fn get_or_fetch<F>(
+        &mut self,
+        path: &str,
+        branch: &str,
+        now: Instant,
+        fetcher: F,
+    ) -> Option<String>
+    where
+        F: FnOnce(&str) -> Option<String>,
+    {
+        if branch.is_empty() || branch == "HEAD" {
+            return None;
+        }
+        let fresh = self.entry.as_ref().is_some_and(|e| {
+            e.path == path && e.branch == branch && now.duration_since(e.cached_at) < PR_CACHE_TTL
+        });
+        if fresh {
+            return self.entry.as_ref().and_then(|e| e.pr_number.clone());
+        }
+        let pr = fetcher(path);
+        self.entry = Some(PrCacheEntry {
+            path: path.to_string(),
+            branch: branch.to_string(),
+            pr_number: pr.clone(),
+            cached_at: now,
+        });
+        pr
+    }
 }
 
 /// Parse `git status --short` output into staged/unstaged/untracked categories.
@@ -530,5 +596,142 @@ mod tests {
         assert!(data.staged_files.is_empty());
         assert!(data.unstaged_files.is_empty());
         assert!(data.untracked_files.is_empty());
+    }
+
+    // ─── PrCache tests ───────────────────────────────────────────────
+
+    use std::cell::Cell;
+
+    fn counting_fetcher<'a>(
+        count: &'a Cell<usize>,
+        result: Option<&'static str>,
+    ) -> impl FnOnce(&str) -> Option<String> + 'a {
+        move |_path: &str| {
+            count.set(count.get() + 1);
+            result.map(|s| s.to_string())
+        }
+    }
+
+    #[test]
+    fn pr_cache_first_lookup_invokes_fetcher() {
+        let mut cache = PrCache::new();
+        let calls = Cell::new(0);
+        let now = Instant::now();
+        let pr = cache.get_or_fetch("/a", "main", now, counting_fetcher(&calls, Some("42")));
+        assert_eq!(pr.as_deref(), Some("42"));
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn pr_cache_same_key_within_ttl_hits() {
+        let mut cache = PrCache::new();
+        let calls = Cell::new(0);
+        let now = Instant::now();
+        cache.get_or_fetch("/a", "main", now, counting_fetcher(&calls, Some("42")));
+        let pr = cache.get_or_fetch(
+            "/a",
+            "main",
+            now + Duration::from_secs(1),
+            counting_fetcher(&calls, Some("99")),
+        );
+        assert_eq!(pr.as_deref(), Some("42"), "cached value should be returned");
+        assert_eq!(calls.get(), 1, "fetcher must not run on a cache hit");
+    }
+
+    #[test]
+    fn pr_cache_branch_change_refetches() {
+        let mut cache = PrCache::new();
+        let calls = Cell::new(0);
+        let now = Instant::now();
+        cache.get_or_fetch("/a", "main", now, counting_fetcher(&calls, Some("42")));
+        let pr = cache.get_or_fetch("/a", "feature", now, counting_fetcher(&calls, Some("77")));
+        assert_eq!(pr.as_deref(), Some("77"));
+        assert_eq!(calls.get(), 2);
+    }
+
+    #[test]
+    fn pr_cache_path_change_refetches() {
+        let mut cache = PrCache::new();
+        let calls = Cell::new(0);
+        let now = Instant::now();
+        cache.get_or_fetch("/a", "main", now, counting_fetcher(&calls, Some("42")));
+        let pr = cache.get_or_fetch("/b", "main", now, counting_fetcher(&calls, Some("77")));
+        assert_eq!(pr.as_deref(), Some("77"));
+        assert_eq!(calls.get(), 2);
+    }
+
+    #[test]
+    fn pr_cache_ttl_expiry_refetches() {
+        let mut cache = PrCache::new();
+        let calls = Cell::new(0);
+        let now = Instant::now();
+        cache.get_or_fetch("/a", "main", now, counting_fetcher(&calls, Some("42")));
+        let pr = cache.get_or_fetch(
+            "/a",
+            "main",
+            now + PR_CACHE_TTL + Duration::from_secs(1),
+            counting_fetcher(&calls, Some("77")),
+        );
+        assert_eq!(pr.as_deref(), Some("77"));
+        assert_eq!(calls.get(), 2);
+    }
+
+    #[test]
+    fn pr_cache_empty_branch_skips_and_does_not_pollute_cache() {
+        let mut cache = PrCache::new();
+        let calls = Cell::new(0);
+        let now = Instant::now();
+        // Empty branch → no fetch, None returned.
+        let pr = cache.get_or_fetch(
+            "/a",
+            "",
+            now,
+            counting_fetcher(&calls, Some("should-not-run")),
+        );
+        assert!(pr.is_none());
+        assert_eq!(calls.get(), 0);
+        // Cache must still be empty: a real branch must invoke the fetcher.
+        let pr = cache.get_or_fetch("/a", "main", now, counting_fetcher(&calls, Some("42")));
+        assert_eq!(pr.as_deref(), Some("42"));
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn pr_cache_detached_head_skips_and_does_not_pollute_cache() {
+        // `git rev-parse --abbrev-ref HEAD` prints the literal "HEAD" when the
+        // working tree is detached. A PR is always branch-scoped so that case
+        // must short-circuit just like an empty branch.
+        let mut cache = PrCache::new();
+        let calls = Cell::new(0);
+        let now = Instant::now();
+        let pr = cache.get_or_fetch(
+            "/a",
+            "HEAD",
+            now,
+            counting_fetcher(&calls, Some("should-not-run")),
+        );
+        assert!(pr.is_none());
+        assert_eq!(calls.get(), 0);
+        // Cache must be untouched: the next real branch still triggers a fetch.
+        let pr = cache.get_or_fetch("/a", "main", now, counting_fetcher(&calls, Some("42")));
+        assert_eq!(pr.as_deref(), Some("42"));
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn pr_cache_none_result_is_cached() {
+        let mut cache = PrCache::new();
+        let calls = Cell::new(0);
+        let now = Instant::now();
+        // First call returns None (no PR exists) — that None should be cached.
+        cache.get_or_fetch("/a", "main", now, counting_fetcher(&calls, None));
+        let pr = cache.get_or_fetch(
+            "/a",
+            "main",
+            now + Duration::from_secs(1),
+            counting_fetcher(&calls, Some("should-not-run")),
+        );
+        assert!(pr.is_none());
+        assert_eq!(calls.get(), 1, "second call must hit the cached None");
     }
 }

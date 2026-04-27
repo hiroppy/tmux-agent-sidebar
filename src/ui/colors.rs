@@ -105,40 +105,40 @@ impl ColorTheme {
                 .unwrap_or(fallback)
         };
 
-        theme.accent = read("@sidebar_color_accent", theme.accent);
-        theme.border_inactive = read("@sidebar_color_border", theme.border_inactive);
-        theme.status_all = read("@sidebar_color_all", theme.status_all);
-        theme.status_running = read("@sidebar_color_running", theme.status_running);
-        theme.status_waiting = read("@sidebar_color_waiting", theme.status_waiting);
-        theme.status_idle = read("@sidebar_color_idle", theme.status_idle);
-        theme.status_error = read("@sidebar_color_error", theme.status_error);
-        theme.filter_inactive = read("@sidebar_color_filter_inactive", theme.filter_inactive);
-        theme.agent_claude = read("@sidebar_color_agent_claude", theme.agent_claude);
-        theme.agent_codex = read("@sidebar_color_agent_codex", theme.agent_codex);
-        theme.agent_opencode = read("@sidebar_color_agent_opencode", theme.agent_opencode);
-        theme.mascot_body = read("@sidebar_color_mascot_body", theme.mascot_body);
-        theme.mascot_eye = read("@sidebar_color_mascot_eye", theme.mascot_eye);
-        theme.text_active = read("@sidebar_color_text_active", theme.text_active);
-        theme.text_muted = read("@sidebar_color_text_muted", theme.text_muted);
-        theme.text_inactive = read("@sidebar_color_text_inactive", theme.text_inactive);
-        theme.session_header = read("@sidebar_color_session", theme.session_header);
-        theme.port = read("@sidebar_color_port", theme.port);
-        theme.wait_reason = read("@sidebar_color_wait_reason", theme.wait_reason);
-        theme.selection_bg = read("@sidebar_color_selection", theme.selection_bg);
-        theme.branch = read("@sidebar_color_branch", theme.branch);
-        theme.task_progress = read("@sidebar_color_task_progress", theme.task_progress);
-        theme.subagent = read("@sidebar_color_subagent", theme.subagent);
-        theme.commit_hash = read("@sidebar_color_commit_hash", theme.commit_hash);
-        theme.diff_added = read("@sidebar_color_diff_added", theme.diff_added);
-        theme.diff_deleted = read("@sidebar_color_diff_deleted", theme.diff_deleted);
-        theme.file_change = read("@sidebar_color_file_change", theme.file_change);
-        theme.pr_link = read("@sidebar_color_pr_link", theme.pr_link);
-        theme.section_title = read("@sidebar_color_section_title", theme.section_title);
+        theme.accent = read(tmux::SIDEBAR_COLOR_ACCENT, theme.accent);
+        theme.border_inactive = read(tmux::SIDEBAR_COLOR_BORDER, theme.border_inactive);
+        theme.status_all = read(tmux::SIDEBAR_COLOR_ALL, theme.status_all);
+        theme.status_running = read(tmux::SIDEBAR_COLOR_RUNNING, theme.status_running);
+        theme.status_waiting = read(tmux::SIDEBAR_COLOR_WAITING, theme.status_waiting);
+        theme.status_idle = read(tmux::SIDEBAR_COLOR_IDLE, theme.status_idle);
+        theme.status_error = read(tmux::SIDEBAR_COLOR_ERROR, theme.status_error);
+        theme.filter_inactive = read(tmux::SIDEBAR_COLOR_FILTER_INACTIVE, theme.filter_inactive);
+        theme.agent_claude = read(tmux::SIDEBAR_COLOR_AGENT_CLAUDE, theme.agent_claude);
+        theme.agent_codex = read(tmux::SIDEBAR_COLOR_AGENT_CODEX, theme.agent_codex);
+        theme.agent_opencode = read(tmux::SIDEBAR_COLOR_AGENT_OPENCODE, theme.agent_opencode);
+        theme.mascot_body = read(tmux::SIDEBAR_COLOR_MASCOT_BODY, theme.mascot_body);
+        theme.mascot_eye = read(tmux::SIDEBAR_COLOR_MASCOT_EYE, theme.mascot_eye);
+        theme.text_active = read(tmux::SIDEBAR_COLOR_TEXT_ACTIVE, theme.text_active);
+        theme.text_muted = read(tmux::SIDEBAR_COLOR_TEXT_MUTED, theme.text_muted);
+        theme.text_inactive = read(tmux::SIDEBAR_COLOR_TEXT_INACTIVE, theme.text_inactive);
+        theme.session_header = read(tmux::SIDEBAR_COLOR_SESSION, theme.session_header);
+        theme.port = read(tmux::SIDEBAR_COLOR_PORT, theme.port);
+        theme.wait_reason = read(tmux::SIDEBAR_COLOR_WAIT_REASON, theme.wait_reason);
+        theme.selection_bg = read(tmux::SIDEBAR_COLOR_SELECTION, theme.selection_bg);
+        theme.branch = read(tmux::SIDEBAR_COLOR_BRANCH, theme.branch);
+        theme.task_progress = read(tmux::SIDEBAR_COLOR_TASK_PROGRESS, theme.task_progress);
+        theme.subagent = read(tmux::SIDEBAR_COLOR_SUBAGENT, theme.subagent);
+        theme.commit_hash = read(tmux::SIDEBAR_COLOR_COMMIT_HASH, theme.commit_hash);
+        theme.diff_added = read(tmux::SIDEBAR_COLOR_DIFF_ADDED, theme.diff_added);
+        theme.diff_deleted = read(tmux::SIDEBAR_COLOR_DIFF_DELETED, theme.diff_deleted);
+        theme.file_change = read(tmux::SIDEBAR_COLOR_FILE_CHANGE, theme.file_change);
+        theme.pr_link = read(tmux::SIDEBAR_COLOR_PR_LINK, theme.pr_link);
+        theme.section_title = read(tmux::SIDEBAR_COLOR_SECTION_TITLE, theme.section_title);
         theme.activity_timestamp = read(
-            "@sidebar_color_activity_timestamp",
+            tmux::SIDEBAR_COLOR_ACTIVITY_TIMESTAMP,
             theme.activity_timestamp,
         );
-        theme.response_arrow = read("@sidebar_color_response_arrow", theme.response_arrow);
+        theme.response_arrow = read(tmux::SIDEBAR_COLOR_RESPONSE_ARROW, theme.response_arrow);
 
         theme
     }
@@ -149,6 +149,7 @@ impl ColorTheme {
         }
         match status {
             PaneStatus::Running => self.status_running,
+            PaneStatus::Background => self.status_running,
             PaneStatus::Waiting => self.status_waiting,
             PaneStatus::Idle => self.status_idle,
             PaneStatus::Error => self.status_error,

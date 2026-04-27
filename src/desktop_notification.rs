@@ -89,10 +89,10 @@ impl DesktopNotificationSettings {
         opts: &HashMap<String, String>,
         backend_available: bool,
     ) -> Self {
-        let enabled = read_bool(opts, "@sidebar_notifications").unwrap_or(true);
+        let enabled = read_bool(opts, tmux::SIDEBAR_NOTIFICATIONS).unwrap_or(true);
         let enabled = enabled && backend_available;
         let events = opts
-            .get("@sidebar_notifications_events")
+            .get(tmux::SIDEBAR_NOTIFICATIONS_EVENTS)
             .map_or_else(|| Self::default().events, |raw| parse_events(raw));
 
         Self { enabled, events }
@@ -365,7 +365,7 @@ mod tests {
     #[test]
     fn settings_parse_bool_and_numbers() {
         let mut opts = HashMap::new();
-        opts.insert("@sidebar_notifications".into(), "on".into());
+        opts.insert(tmux::SIDEBAR_NOTIFICATIONS.into(), "on".into());
 
         let settings = DesktopNotificationSettings::from_tmux_options_with_backend(&opts, true);
         assert!(settings.enabled);
@@ -374,7 +374,7 @@ mod tests {
     #[test]
     fn settings_default_when_invalid() {
         let mut opts = HashMap::new();
-        opts.insert("@sidebar_notifications".into(), "maybe".into());
+        opts.insert(tmux::SIDEBAR_NOTIFICATIONS.into(), "maybe".into());
 
         let settings = DesktopNotificationSettings::from_tmux_options_with_backend(&opts, true);
         assert!(settings.enabled);
@@ -383,7 +383,7 @@ mod tests {
     #[test]
     fn settings_disable_when_off() {
         let mut opts = HashMap::new();
-        opts.insert("@sidebar_notifications".into(), "off".into());
+        opts.insert(tmux::SIDEBAR_NOTIFICATIONS.into(), "off".into());
 
         let settings = DesktopNotificationSettings::from_tmux_options_with_backend(&opts, true);
         assert!(!settings.enabled);
@@ -444,7 +444,7 @@ mod tests {
     fn events_parse_explicit_subset() {
         let mut opts = HashMap::new();
         opts.insert(
-            "@sidebar_notifications_events".into(),
+            tmux::SIDEBAR_NOTIFICATIONS_EVENTS.into(),
             "stop, permission_denied".into(),
         );
         let settings = DesktopNotificationSettings::from_tmux_options_with_backend(&opts, true);
@@ -458,7 +458,7 @@ mod tests {
     #[test]
     fn events_all_keyword_enables_every_event() {
         let mut opts = HashMap::new();
-        opts.insert("@sidebar_notifications_events".into(), "all".into());
+        opts.insert(tmux::SIDEBAR_NOTIFICATIONS_EVENTS.into(), "all".into());
         let settings = DesktopNotificationSettings::from_tmux_options_with_backend(&opts, true);
         for event in DesktopNotificationEvent::ALL {
             assert!(settings.event_enabled(event));
@@ -468,7 +468,7 @@ mod tests {
     #[test]
     fn events_empty_value_disables_every_event() {
         let mut opts = HashMap::new();
-        opts.insert("@sidebar_notifications_events".into(), "".into());
+        opts.insert(tmux::SIDEBAR_NOTIFICATIONS_EVENTS.into(), "".into());
         let settings = DesktopNotificationSettings::from_tmux_options_with_backend(&opts, true);
         for event in DesktopNotificationEvent::ALL {
             assert!(!settings.event_enabled(event));
@@ -479,7 +479,7 @@ mod tests {
     fn events_unknown_tokens_are_ignored() {
         let mut opts = HashMap::new();
         opts.insert(
-            "@sidebar_notifications_events".into(),
+            tmux::SIDEBAR_NOTIFICATIONS_EVENTS.into(),
             "stop,bogus, task_completed".into(),
         );
         let settings = DesktopNotificationSettings::from_tmux_options_with_backend(&opts, true);

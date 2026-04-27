@@ -13,7 +13,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
 };
 
-use crate::state::AppState;
+use crate::{state::AppState, tmux};
 
 pub const BOTTOM_PANEL_HEIGHT: u16 = 20;
 
@@ -25,7 +25,7 @@ pub const MASCOT_SCENE_HEIGHT: u16 = 5;
 /// Read `@sidebar_bottom_height` from tmux global options, falling back to the default.
 /// A value of 0 hides the bottom panel entirely.
 pub fn bottom_panel_height_from_options(opts: &HashMap<String, String>) -> u16 {
-    opts.get("@sidebar_bottom_height")
+    opts.get(tmux::SIDEBAR_BOTTOM_HEIGHT)
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .and_then(|s| s.parse::<u16>().ok())
@@ -33,7 +33,7 @@ pub fn bottom_panel_height_from_options(opts: &HashMap<String, String>) -> u16 {
 }
 
 pub fn bottom_panel_height_from_tmux() -> u16 {
-    let opts = crate::tmux::get_all_global_options();
+    let opts = tmux::get_all_global_options();
     bottom_panel_height_from_options(&opts)
 }
 
@@ -106,31 +106,31 @@ mod tests {
 
     #[test]
     fn bottom_height_parses_valid_value() {
-        let opts = opts_with("@sidebar_bottom_height", "12");
+        let opts = opts_with(tmux::SIDEBAR_BOTTOM_HEIGHT, "12");
         assert_eq!(bottom_panel_height_from_options(&opts), 12);
     }
 
     #[test]
     fn bottom_height_trims_whitespace() {
-        let opts = opts_with("@sidebar_bottom_height", "  8  ");
+        let opts = opts_with(tmux::SIDEBAR_BOTTOM_HEIGHT, "  8  ");
         assert_eq!(bottom_panel_height_from_options(&opts), 8);
     }
 
     #[test]
     fn bottom_height_zero_hides_panel() {
-        let opts = opts_with("@sidebar_bottom_height", "0");
+        let opts = opts_with(tmux::SIDEBAR_BOTTOM_HEIGHT, "0");
         assert_eq!(bottom_panel_height_from_options(&opts), 0);
     }
 
     #[test]
     fn bottom_height_falls_back_on_invalid_value() {
-        let opts = opts_with("@sidebar_bottom_height", "abc");
+        let opts = opts_with(tmux::SIDEBAR_BOTTOM_HEIGHT, "abc");
         assert_eq!(bottom_panel_height_from_options(&opts), BOTTOM_PANEL_HEIGHT);
     }
 
     #[test]
     fn bottom_height_falls_back_on_empty_value() {
-        let opts = opts_with("@sidebar_bottom_height", "");
+        let opts = opts_with(tmux::SIDEBAR_BOTTOM_HEIGHT, "");
         assert_eq!(bottom_panel_height_from_options(&opts), BOTTOM_PANEL_HEIGHT);
     }
 

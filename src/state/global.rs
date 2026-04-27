@@ -44,7 +44,13 @@ impl GlobalState {
     /// Only updates `last_saved_filter` on success so that a failed write
     /// does not cause sync to overwrite the user's choice.
     pub fn save_filter(&mut self) {
-        if tmux::run_tmux(&["set", "-g", "@sidebar_filter", self.status_filter.as_str()]).is_some()
+        if tmux::run_tmux(&[
+            "set",
+            "-g",
+            tmux::SIDEBAR_FILTER,
+            self.status_filter.as_str(),
+        ])
+        .is_some()
         {
             self.last_saved_filter = self.status_filter;
         }
@@ -57,7 +63,7 @@ impl GlobalState {
         if tmux::run_tmux(&[
             "set",
             "-g",
-            "@sidebar_cursor",
+            tmux::SIDEBAR_CURSOR,
             &self.selected_pane_row.to_string(),
         ])
         .is_some()
@@ -100,7 +106,7 @@ impl GlobalState {
         if tmux::run_tmux(&[
             "set",
             "-g",
-            "@sidebar_repo_filter",
+            tmux::SIDEBAR_REPO_FILTER,
             self.repo_filter.as_str(),
         ])
         .is_some()
@@ -118,21 +124,21 @@ impl GlobalState {
 
     /// Apply all global options from tmux (filter, cursor, repo filter).
     pub fn apply_all(&mut self, opts: &HashMap<String, String>) {
-        if let Some(filter_str) = opts.get("@sidebar_filter") {
+        if let Some(filter_str) = opts.get(tmux::SIDEBAR_FILTER) {
             let tmux_filter = StatusFilter::from_label(filter_str);
             if tmux_filter != self.last_saved_filter {
                 self.status_filter = tmux_filter;
                 self.last_saved_filter = tmux_filter;
             }
         }
-        if let Some(cursor_str) = opts.get("@sidebar_cursor")
+        if let Some(cursor_str) = opts.get(tmux::SIDEBAR_CURSOR)
             && let Ok(n) = cursor_str.parse::<usize>()
             && n != self.last_saved_cursor
         {
             self.selected_pane_row = n;
             self.last_saved_cursor = n;
         }
-        if let Some(repo_str) = opts.get("@sidebar_repo_filter") {
+        if let Some(repo_str) = opts.get(tmux::SIDEBAR_REPO_FILTER) {
             let tmux_repo = RepoFilter::from_label(repo_str);
             if tmux_repo != self.last_saved_repo_filter {
                 self.repo_filter = tmux_repo.clone();

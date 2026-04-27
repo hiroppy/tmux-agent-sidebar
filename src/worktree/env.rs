@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use super::config::BRANCH_PREFIX_OPTION;
+use super::config::{BRANCH_PREFIX_OPTION, WORKTREE_DIR_OPTION};
 use crate::{git, tmux};
 
 /// All side effects `spawn_with` / `remove_with` depend on, extracted
@@ -9,6 +9,7 @@ use crate::{git, tmux};
 /// `RealEnv` below.
 pub(crate) trait SpawnEnv {
     fn branch_prefix(&self) -> Option<String>;
+    fn worktree_dir(&self) -> Option<String>;
     fn branch_is_free(&self, repo: &str, branch: &str) -> bool;
     /// Whether a branch currently exists in `repo`. Used by the
     /// remove flow to skip `git branch -D` when a previous partial
@@ -37,6 +38,11 @@ impl SpawnEnv for RealEnv {
     fn branch_prefix(&self) -> Option<String> {
         tmux::get_all_global_options()
             .get(BRANCH_PREFIX_OPTION)
+            .cloned()
+    }
+    fn worktree_dir(&self) -> Option<String> {
+        tmux::get_all_global_options()
+            .get(WORKTREE_DIR_OPTION)
             .cloned()
     }
     fn branch_is_free(&self, repo: &str, branch: &str) -> bool {

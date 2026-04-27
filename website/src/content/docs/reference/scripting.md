@@ -10,7 +10,7 @@ The sidebar writes agent state into tmux pane options on every hook event, so yo
 ```bash
 # Get a specific pane's agent status
 tmux show -t "$pane_id" -pv @pane_status
-# → running / waiting / idle / error / (empty)
+# → running / background / waiting / idle / error / (empty)
 
 # Get agent type
 tmux show -t "$pane_id" -pv @pane_agent
@@ -21,7 +21,7 @@ tmux show -t "$pane_id" -pv @pane_agent
 
 | Key                        | Value                                                              |
 | -------------------------- | ------------------------------------------------------------------ |
-| `@pane_status`             | `running` / `waiting` / `idle` / `error` / empty                   |
+| `@pane_status`             | `running` / `background` / `waiting` / `idle` / `error` / empty    |
 | `@pane_attention`          | `1` while the pane is flagged for attention, otherwise empty        |
 | `@pane_agent`              | `claude` / `codex` / `opencode` / empty                             |
 | `@pane_name`               | Friendly agent/session name (from `/rename` on Claude)              |
@@ -30,6 +30,7 @@ tmux show -t "$pane_id" -pv @pane_agent
 | `@pane_prompt_source`      | `user` when the prompt field holds the user's prompt, `response` when it holds the agent's last reply |
 | `@pane_started_at`         | Epoch seconds of the last `UserPromptSubmit`                        |
 | `@pane_wait_reason`        | Wait-reason text (populated only when waiting)                      |
+| `@pane_bg_cmd`             | Latest sanitized background Bash command (Claude `run_in_background`); empty when no bg shell is tracked. Cleared automatically by a `ps` liveness sweep when the process exits. |
 | `@pane_subagents`          | Comma-separated subagent labels (Claude only)                       |
 | `@pane_cwd`                | Working directory reported by the agent (preferred over `pane_current_path`) |
 | `@pane_permission_mode`    | Permission-mode string for the badge (`plan` / `edit` / `auto` / `!` / …) |

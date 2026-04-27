@@ -10,11 +10,12 @@ mod slug;
 
 pub use config::{
     AGENT_OPTION, AGENTS, BRANCH_PREFIX_OPTION, CLAUDE_MODES, CODEX_MODES, DEFAULT_AGENT,
-    DEFAULT_BRANCH_PREFIX, DEFAULT_MODE, OPENCODE_MODES, RemoveMode, agent_command, modes_for,
+    DEFAULT_BRANCH_PREFIX, DEFAULT_MODE, DEFAULT_WORKTREE_DIR, OPENCODE_MODES, RemoveMode,
+    WORKTREE_DIR_OPTION, agent_command, modes_for,
 };
 pub use flow::{SpawnRequest, remove, spawn};
 pub use markers::{
-    SPAWN_MARKERS_TEMPLATE, SPAWNED_BRANCH_OPTION, SPAWNED_FROM_OPTION, SPAWNED_OPTION,
-    SPAWNED_WORKTREE_OPTION, SpawnMarkers, read_spawn_markers,
+    SPAWNED_BRANCH_OPTION, SPAWNED_FROM_OPTION, SPAWNED_OPTION, SPAWNED_WORKTREE_OPTION,
+    SpawnMarkers, read_spawn_markers, spawn_markers_template,
 };
 pub use slug::{pick_unique_slug, slugify, worktree_path_for};

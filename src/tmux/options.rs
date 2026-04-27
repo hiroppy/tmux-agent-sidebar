@@ -12,12 +12,23 @@ use super::commands::run_tmux;
 /// Agent name the hooks identified for the pane (`claude` / `codex`
 /// / `opencode`). Drives the sidebar's per-row icon.
 pub const PANE_AGENT: &str = "@pane_agent";
+/// Optional human-readable pane label. Currently queried to preserve
+/// the `list-panes` field layout, but not rendered.
+pub const PANE_NAME: &str = "@pane_name";
 /// Visual attention flag (`notification` / `clear`) that lights up
 /// the row when a hook wants the user's eye.
 pub const PANE_ATTENTION: &str = "@pane_attention";
 /// Hook-reported working directory, preferred over tmux's
 /// `pane_current_path` for repo grouping.
 pub const PANE_CWD: &str = "@pane_cwd";
+/// Latest backgrounded Bash command (sanitized). Presence is the
+/// authoritative "live shell" signal: Stop routes to `background`
+/// while this is set, and the sidebar surfaces the command text.
+pub const PANE_BG_CMD: &str = "@pane_bg_cmd";
+/// Value written to [`PANE_BG_CMD`] when the hook payload omits the real
+/// command. The ps liveness sweep matches on this to skip its own entries
+/// (placeholder has no process to verify against).
+pub const BG_CMD_PLACEHOLDER: &str = "(background shell)";
 /// Epoch-ms identifier regenerated on every SessionStart so
 /// notification fingerprints stay scoped to the current run and
 /// don't dedupe across restarts.
@@ -68,6 +79,57 @@ pub const PANE_WAIT_REASON: &str = "@pane_wait_reason";
 pub const PANE_WORKTREE_BRANCH: &str = "@pane_worktree_branch";
 /// Worktree slug (directory basename) for the attached worktree.
 pub const PANE_WORKTREE_NAME: &str = "@pane_worktree_name";
+
+// ─── Sidebar global option keys ─────────────────────────────────────
+
+pub const SIDEBAR_PID: &str = "@sidebar_pid";
+pub const SIDEBAR_WIDTH: &str = "@sidebar_width";
+pub const SIDEBAR_FILTER: &str = "@sidebar_filter";
+pub const SIDEBAR_CURSOR: &str = "@sidebar_cursor";
+pub const SIDEBAR_REPO_FILTER: &str = "@sidebar_repo_filter";
+pub const SIDEBAR_BOTTOM_HEIGHT: &str = "@sidebar_bottom_height";
+pub const SIDEBAR_NOTIFICATIONS: &str = "@sidebar_notifications";
+pub const SIDEBAR_NOTIFICATIONS_EVENTS: &str = "@sidebar_notifications_events";
+
+pub const SIDEBAR_COLOR_ACCENT: &str = "@sidebar_color_accent";
+pub const SIDEBAR_COLOR_BORDER: &str = "@sidebar_color_border";
+pub const SIDEBAR_COLOR_ALL: &str = "@sidebar_color_all";
+pub const SIDEBAR_COLOR_RUNNING: &str = "@sidebar_color_running";
+pub const SIDEBAR_COLOR_WAITING: &str = "@sidebar_color_waiting";
+pub const SIDEBAR_COLOR_IDLE: &str = "@sidebar_color_idle";
+pub const SIDEBAR_COLOR_ERROR: &str = "@sidebar_color_error";
+pub const SIDEBAR_COLOR_FILTER_INACTIVE: &str = "@sidebar_color_filter_inactive";
+pub const SIDEBAR_COLOR_AGENT_CLAUDE: &str = "@sidebar_color_agent_claude";
+pub const SIDEBAR_COLOR_AGENT_CODEX: &str = "@sidebar_color_agent_codex";
+pub const SIDEBAR_COLOR_AGENT_OPENCODE: &str = "@sidebar_color_agent_opencode";
+pub const SIDEBAR_COLOR_MASCOT_BODY: &str = "@sidebar_color_mascot_body";
+pub const SIDEBAR_COLOR_MASCOT_EYE: &str = "@sidebar_color_mascot_eye";
+pub const SIDEBAR_COLOR_TEXT_ACTIVE: &str = "@sidebar_color_text_active";
+pub const SIDEBAR_COLOR_TEXT_MUTED: &str = "@sidebar_color_text_muted";
+pub const SIDEBAR_COLOR_TEXT_INACTIVE: &str = "@sidebar_color_text_inactive";
+pub const SIDEBAR_COLOR_SESSION: &str = "@sidebar_color_session";
+pub const SIDEBAR_COLOR_PORT: &str = "@sidebar_color_port";
+pub const SIDEBAR_COLOR_WAIT_REASON: &str = "@sidebar_color_wait_reason";
+pub const SIDEBAR_COLOR_SELECTION: &str = "@sidebar_color_selection";
+pub const SIDEBAR_COLOR_BRANCH: &str = "@sidebar_color_branch";
+pub const SIDEBAR_COLOR_TASK_PROGRESS: &str = "@sidebar_color_task_progress";
+pub const SIDEBAR_COLOR_SUBAGENT: &str = "@sidebar_color_subagent";
+pub const SIDEBAR_COLOR_COMMIT_HASH: &str = "@sidebar_color_commit_hash";
+pub const SIDEBAR_COLOR_DIFF_ADDED: &str = "@sidebar_color_diff_added";
+pub const SIDEBAR_COLOR_DIFF_DELETED: &str = "@sidebar_color_diff_deleted";
+pub const SIDEBAR_COLOR_FILE_CHANGE: &str = "@sidebar_color_file_change";
+pub const SIDEBAR_COLOR_PR_LINK: &str = "@sidebar_color_pr_link";
+pub const SIDEBAR_COLOR_SECTION_TITLE: &str = "@sidebar_color_section_title";
+pub const SIDEBAR_COLOR_ACTIVITY_TIMESTAMP: &str = "@sidebar_color_activity_timestamp";
+pub const SIDEBAR_COLOR_RESPONSE_ARROW: &str = "@sidebar_color_response_arrow";
+
+pub const SIDEBAR_ICON_ALL: &str = "@sidebar_icon_all";
+pub const SIDEBAR_ICON_RUNNING: &str = "@sidebar_icon_running";
+pub const SIDEBAR_ICON_BACKGROUND: &str = "@sidebar_icon_background";
+pub const SIDEBAR_ICON_WAITING: &str = "@sidebar_icon_waiting";
+pub const SIDEBAR_ICON_IDLE: &str = "@sidebar_icon_idle";
+pub const SIDEBAR_ICON_ERROR: &str = "@sidebar_icon_error";
+pub const SIDEBAR_ICON_UNKNOWN: &str = "@sidebar_icon_unknown";
 
 pub fn get_option(name: &str) -> Option<String> {
     run_tmux(&["show", "-gv", name])

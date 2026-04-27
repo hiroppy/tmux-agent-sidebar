@@ -20,17 +20,18 @@ Most options must be set **before** loading the plugin in your `tmux.conf`. Colo
 
 ## Worktree spawn defaults
 
-| Option                            | Default  | Description                                  |
-| --------------------------------- | -------- | -------------------------------------------- |
-| `@agent-sidebar-default-agent`    | `claude` | Agent launched by `n`&nbsp;(also accepts `codex`) |
-| `@agent-sidebar-branch-prefix`    | `agent/` | Branch prefix for new worktrees              |
+| Option                            | Default     | Description                                               |
+| --------------------------------- | ----------- | --------------------------------------------------------- |
+| `@agent-sidebar-default-agent`    | `claude`    | Agent launched by `n`&nbsp;(also accepts `codex`)         |
+| `@agent-sidebar-branch-prefix`    | `agent/`    | Branch prefix for new worktrees                           |
+| `@agent-sidebar-worktree-dir`     | `.worktrees` | Repo-relative directory for sidebar-spawned worktrees; absolute paths and `..` are rejected |
 
 ## Status and filter colors
 
 | Option                            | Default         | What it paints                                                    |
 | --------------------------------- | --------------- | ----------------------------------------------------------------- |
 | `@sidebar_color_all`              | `111`&nbsp;(sky blue)| Selected "all" filter icon                                        |
-| `@sidebar_color_running`          | `114`&nbsp;(green)   | Selected running filter icon and running pane status              |
+| `@sidebar_color_running`          | `114`&nbsp;(green)   | Selected running/background filter icon and running/background pane status |
 | `@sidebar_color_waiting`          | `221`&nbsp;(yellow)  | Selected waiting filter icon, waiting pane status, version banner |
 | `@sidebar_color_idle`             | `110`&nbsp;(soft blue) | Selected idle filter icon and idle pane status                  |
 | `@sidebar_color_error`            | `167`&nbsp;(soft red) | Selected error filter icon and error pane status                 |
@@ -96,8 +97,9 @@ Any Unicode glyph works. Make sure the glyphs render in your terminal font.
 | Option                  | Default | Meaning                      |
 | ----------------------- | ------- | ---------------------------- |
 | `@sidebar_icon_all`     | `≡`     | Status filter bar "all" icon |
-| `@sidebar_icon_running` | `●`     | Running status icon          |
-| `@sidebar_icon_waiting` | `◐`     | Waiting status icon          |
+| `@sidebar_icon_running`    | `●`     | Running status icon          |
+| `@sidebar_icon_background` | `◎`     | Background shell status icon |
+| `@sidebar_icon_waiting`    | `◐`     | Waiting status icon          |
 | `@sidebar_icon_idle`    | `○`     | Idle status icon             |
 | `@sidebar_icon_error`   | `✕`     | Error status icon            |
 | `@sidebar_icon_unknown` | `·`     | Unknown status icon          |

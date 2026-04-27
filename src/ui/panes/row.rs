@@ -9,7 +9,10 @@ mod branch;
 mod ctx;
 mod status;
 
-use body::{idle_hint_row, prompt_rows, subagent_rows, task_progress_row, wait_reason_row};
+use body::{
+    background_hint_row, idle_hint_row, prompt_rows, subagent_rows, task_progress_row,
+    wait_reason_row,
+};
 use branch::branch_ports_row;
 use ctx::{RowCtx, SELECTION_MARKER};
 #[cfg(test)]
@@ -81,6 +84,9 @@ pub(super) fn render_pane_lines_with_ports(
     if let Some(line) = wait_reason_row(&pane.wait_reason, &pane.status, ctx) {
         out.push(line);
     }
+    if let Some(cmd) = pane.bg_shell_cmd.as_deref() {
+        out.push(background_hint_row(ctx, cmd));
+    }
     if !pane.prompt.is_empty() {
         out.extend(prompt_rows(pane, ctx));
     } else if matches!(pane.status, PaneStatus::Idle) {
@@ -127,6 +133,7 @@ mod tests {
             session_id: None,
             session_name: String::new(),
             sidebar_spawned: false,
+            bg_shell_cmd: None,
         }
     }
 
@@ -376,6 +383,10 @@ mod tests {
             running_icon_for(&PaneStatus::Unknown, 0, &icons),
             ("·", None)
         );
+        assert_eq!(
+            running_icon_for(&PaneStatus::Background, 0, &icons),
+            ("◎", None)
+        );
 
         let (icon, color) = running_icon_for(&PaneStatus::Running, 0, &icons);
         assert_eq!(icon, "●");
@@ -403,6 +414,120 @@ mod tests {
         assert_eq!(lines.len(), 2);
         let hint = line_text(&lines[1]);
         assert!(hint.contains("Waiting for prompt"));
+    }
+
+    #[test]
+    fn render_pane_lines_shows_bg_command_even_while_running() {
+        // A live background shell must stay visible in the pane
+        // regardless of the agent's current status — running bursts in
+        // the middle of a background task should not make the shell
+        // look like it vanished.
+        let theme = ColorTheme::default();
+        let mut p = pane(PermissionMode::Default, PaneStatus::Running, "");
+        p.bg_shell_cmd = Some("npm run dev".into());
+        let lines = render_pane_lines_with_ports(
+            &p,
+            &PaneGitInfo::default(),
+            None,
+            None,
+            false,
+            false,
+            40,
+            &StatusIcons::default(),
+            &theme,
+            0,
+            0,
+        );
+
+        let hint = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+        assert!(
+            hint.contains("npm run dev"),
+            "bg command must render during running state, got:\n{hint}"
+        );
+    }
+
+    #[test]
+    fn render_pane_lines_shows_bg_command_even_while_idle() {
+        let theme = ColorTheme::default();
+        let mut p = pane(PermissionMode::Default, PaneStatus::Idle, "");
+        p.bg_shell_cmd = Some("cargo watch".into());
+        let lines = render_pane_lines_with_ports(
+            &p,
+            &PaneGitInfo::default(),
+            None,
+            None,
+            false,
+            false,
+            40,
+            &StatusIcons::default(),
+            &theme,
+            0,
+            0,
+        );
+
+        let joined = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+        assert!(
+            joined.contains("cargo watch"),
+            "bg command must render during idle state, got:\n{joined}"
+        );
+    }
+
+    #[test]
+    fn render_pane_lines_shows_background_command_when_known() {
+        let theme = ColorTheme::default();
+        let mut p = pane(PermissionMode::Default, PaneStatus::Background, "");
+        p.bg_shell_cmd = Some("cargo build --release".into());
+        let lines = render_pane_lines_with_ports(
+            &p,
+            &PaneGitInfo::default(),
+            None,
+            None,
+            false,
+            false,
+            40,
+            &StatusIcons::default(),
+            &theme,
+            0,
+            0,
+        );
+
+        assert_eq!(lines.len(), 2);
+        let hint = line_text(&lines[1]);
+        assert!(hint.contains("cargo build --release"), "got: {hint}");
+        assert!(
+            !hint.contains("Background shell running"),
+            "fallback text must not appear when a command is known, got: {hint}"
+        );
+    }
+
+    #[test]
+    fn render_pane_lines_truncates_long_background_command() {
+        let theme = ColorTheme::default();
+        let mut p = pane(PermissionMode::Default, PaneStatus::Background, "");
+        p.bg_shell_cmd = Some("cargo run --bin very-long-command-name --flag".into());
+        // Narrow width forces the ellipsis path in `truncate_to_width`.
+        let lines = render_pane_lines_with_ports(
+            &p,
+            &PaneGitInfo::default(),
+            None,
+            None,
+            false,
+            false,
+            20,
+            &StatusIcons::default(),
+            &theme,
+            0,
+            0,
+        );
+
+        let hint = line_text(&lines[1]);
+        assert!(hint.contains("cargo run"), "command missing in {hint}");
+        assert!(hint.contains('\u{2026}'), "ellipsis missing in {hint}");
+        assert!(
+            display_width(&hint) <= 20,
+            "row width {w} must not exceed inner_width 20: {hint}",
+            w = display_width(&hint)
+        );
     }
 
     #[test]

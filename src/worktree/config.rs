@@ -1,9 +1,11 @@
 pub const DEFAULT_BRANCH_PREFIX: &str = "agent/";
+pub const DEFAULT_WORKTREE_DIR: &str = ".worktrees";
 pub const DEFAULT_AGENT: &str = "claude";
 pub const DEFAULT_MODE: &str = "default";
 
 pub const AGENT_OPTION: &str = "@agent-sidebar-default-agent";
 pub const BRANCH_PREFIX_OPTION: &str = "@agent-sidebar-branch-prefix";
+pub const WORKTREE_DIR_OPTION: &str = "@agent-sidebar-worktree-dir";
 
 pub const AGENTS: &[&str] = &["claude", "codex", "opencode"];
 pub const CLAUDE_MODES: &[&str] = &[

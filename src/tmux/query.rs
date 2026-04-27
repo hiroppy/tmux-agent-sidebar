@@ -1,20 +1,22 @@
 use std::path::Path;
-use std::process::Command;
+
+use crate::process::{ProcessSnapshot, command_basename};
 
 use super::commands::run_tmux;
 use super::options::{
-    PANE_AGENT, PANE_ATTENTION, PANE_CWD, PANE_PENDING_SESSION_END, PANE_PENDING_WORKTREE_REMOVE,
-    PANE_PERMISSION_MODE, PANE_PROMPT, PANE_PROMPT_SOURCE, PANE_SESSION_ID, PANE_STARTED_AT,
-    PANE_STATUS, PANE_SUBAGENTS, PANE_WAIT_REASON, PANE_WORKTREE_BRANCH, PANE_WORKTREE_NAME,
-    unset_pane_option,
+    PANE_AGENT, PANE_ATTENTION, PANE_BG_CMD, PANE_CWD, PANE_NAME, PANE_PENDING_SESSION_END,
+    PANE_PENDING_WORKTREE_REMOVE, PANE_PERMISSION_MODE, PANE_PROMPT, PANE_PROMPT_SOURCE, PANE_ROLE,
+    PANE_SESSION_ID, PANE_STARTED_AT, PANE_STATUS, PANE_SUBAGENTS, PANE_WAIT_REASON,
+    PANE_WORKTREE_BRANCH, PANE_WORKTREE_NAME, unset_pane_option,
 };
 use super::types::{
     AgentType, CODEX_AGENT, PaneInfo, PaneStatus, PermissionMode, SessionInfo, WindowInfo,
     WorktreeMetadata,
 };
+use crate::worktree::SPAWNED_OPTION;
 
 // Field indices in `tmux list-panes -F` output. Keep in lock-step with
-// the `PANE_FORMAT` format string. When adding a new field, update both
+// the `pane_format()` field list. When adding a new field, update both
 // this module and the format string together.
 mod session_line_field {
     pub const SESSION_NAME: usize = 0;
@@ -24,8 +26,8 @@ mod session_line_field {
     pub const AUTOMATIC_RENAME: usize = 5;
     /// Index where the per-pane field suffix consumed by `parse_pane_line` begins.
     pub const PANE_LINE_OFFSET: usize = 6;
-    /// Minimum number of fields a valid `PANE_FORMAT` line must contain.
-    pub const MIN_FIELDS: usize = 27;
+    /// Minimum number of fields a valid `pane_format()` line must contain.
+    pub const MIN_FIELDS: usize = 28;
 }
 
 // Indices into the pane-line suffix that `parse_pane_line` operates on.
@@ -53,14 +55,52 @@ pub(super) mod pane_line_field {
     pub const WORKTREE_BRANCH: usize = 18; // absolute 24 (@pane_worktree_branch)
     pub const SESSION_ID: usize = 19; // absolute 25 (@pane_session_id)
     pub const SIDEBAR_SPAWNED: usize = 20; // absolute 26 (@agent-sidebar-spawned)
+    pub const BG_CMD: usize = 21; // absolute 27 (@pane_bg_cmd)
     /// Minimum number of fields the pane-line suffix must contain.
     /// Equals `session_line_field::MIN_FIELDS - PANE_LINE_OFFSET`.
-    pub const MIN_FIELDS: usize = 21;
+    pub const MIN_FIELDS: usize = 22;
 }
 
-/// tmux `list-panes -F` format used by [`query_sessions`]. Every field is
-/// quoted with `#{q:...}` so embedded pipes in user content survive the split.
-const PANE_FORMAT: &str = "#{q:session_name}|#{q:window_id}|#{q:window_index}|#{q:window_name}|#{q:window_active}|#{q:automatic-rename}|#{q:pane_active}|#{q:@pane_status}|#{q:@pane_attention}|#{q:@pane_agent}|#{q:@pane_name}|#{q:pane_current_path}|#{q:pane_current_command}|#{q:@pane_role}|#{q:pane_id}|#{q:@pane_prompt}|#{q:@pane_prompt_source}|#{q:@pane_started_at}|#{q:@pane_wait_reason}|#{q:pane_pid}|#{q:@pane_subagents}|#{q:@pane_cwd}|#{q:@pane_permission_mode}|#{q:@pane_worktree_name}|#{q:@pane_worktree_branch}|#{q:@pane_session_id}|#{q:@agent-sidebar-spawned}";
+/// Build the tmux `list-panes -F` format used by [`query_sessions`].
+/// Every field is quoted with `#{q:...}` so embedded pipes in user content
+/// survive the split.
+fn pane_format() -> String {
+    [
+        q("session_name"),
+        q("window_id"),
+        q("window_index"),
+        q("window_name"),
+        q("window_active"),
+        q("automatic-rename"),
+        q("pane_active"),
+        q(PANE_STATUS),
+        q(PANE_ATTENTION),
+        q(PANE_AGENT),
+        q(PANE_NAME),
+        q("pane_current_path"),
+        q("pane_current_command"),
+        q(PANE_ROLE),
+        q("pane_id"),
+        q(PANE_PROMPT),
+        q(PANE_PROMPT_SOURCE),
+        q(PANE_STARTED_AT),
+        q(PANE_WAIT_REASON),
+        q("pane_pid"),
+        q(PANE_SUBAGENTS),
+        q(PANE_CWD),
+        q(PANE_PERMISSION_MODE),
+        q(PANE_WORKTREE_NAME),
+        q(PANE_WORKTREE_BRANCH),
+        q(PANE_SESSION_ID),
+        q(SPAWNED_OPTION),
+        q(PANE_BG_CMD),
+    ]
+    .join("|")
+}
+
+fn q(field: &str) -> String {
+    format!("#{{q:{field}}}")
+}
 
 type SessionMap = indexmap::IndexMap<String, indexmap::IndexMap<String, WindowInfo>>;
 
@@ -69,25 +109,38 @@ type SessionMap = indexmap::IndexMap<String, indexmap::IndexMap<String, WindowIn
 type CodexPidEntry = (String, usize, u32);
 
 /// Query all sessions, windows, and panes in a single `tmux list-panes -a` call
-/// (plus one optional `ps` call to resolve Codex permission modes), instead of
+/// (plus one optional `ps` call for process-backed agent checks), instead of
 /// N+1 subprocess invocations.
 pub fn query_sessions() -> Vec<SessionInfo> {
-    let all_panes_output = match run_tmux(&["list-panes", "-a", "-F", PANE_FORMAT]) {
+    query_sessions_with_process_snapshot().0
+}
+
+pub(crate) fn query_sessions_with_process_snapshot() -> (Vec<SessionInfo>, Option<ProcessSnapshot>)
+{
+    let pane_format = pane_format();
+    let all_panes_output = match run_tmux(&["list-panes", "-a", "-F", &pane_format]) {
         Some(s) => s,
-        None => return vec![],
+        None => return (vec![], None),
     };
 
-    let (mut sessions_map, codex_pids) = build_session_hierarchy(&all_panes_output);
-    if !codex_pids.is_empty() {
-        resolve_codex_permission_modes(&mut sessions_map, &codex_pids);
+    let process_snapshot = process_snapshot_for_panes(&all_panes_output);
+    let (mut sessions_map, codex_pids) =
+        build_session_hierarchy(&all_panes_output, process_snapshot.as_ref());
+    if !codex_pids.is_empty()
+        && let Some(snapshot) = &process_snapshot
+    {
+        resolve_codex_permission_modes(&mut sessions_map, &codex_pids, snapshot);
     }
-    finalize_sessions(sessions_map)
+    (finalize_sessions(sessions_map), process_snapshot)
 }
 
 /// Parse the raw `tmux list-panes` output into an indexed session→window→pane
 /// hierarchy. Also returns every Codex pane's pid so the caller can resolve
 /// permission modes in a single `ps` pass.
-fn build_session_hierarchy(all_panes_output: &str) -> (SessionMap, Vec<CodexPidEntry>) {
+fn build_session_hierarchy(
+    all_panes_output: &str,
+    process_snapshot: Option<&ProcessSnapshot>,
+) -> (SessionMap, Vec<CodexPidEntry>) {
     let mut sessions_map: SessionMap = indexmap::IndexMap::new();
     let mut codex_pids: Vec<CodexPidEntry> = Vec::new();
 
@@ -117,7 +170,7 @@ fn build_session_hierarchy(all_panes_output: &str) -> (SessionMap, Vec<CodexPidE
                 panes: Vec::new(),
             });
 
-        if let Some(pane) = parse_pane_fields(pane_fields) {
+        if let Some(pane) = parse_pane_fields_with_processes(pane_fields, process_snapshot) {
             if pane.agent == AgentType::Codex
                 && let Some(pid) = pane.pane_pid
             {
@@ -130,20 +183,13 @@ fn build_session_hierarchy(all_panes_output: &str) -> (SessionMap, Vec<CodexPidE
     (sessions_map, codex_pids)
 }
 
-/// Single `ps` pass that fans out Codex permission mode updates to every
-/// Codex pane across every window. No-op if `ps` fails.
-fn resolve_codex_permission_modes(sessions_map: &mut SessionMap, codex_pids: &[CodexPidEntry]) {
-    let output = match Command::new("ps")
-        .args(["-eo", "pid=,ppid=,comm=,args="])
-        .output()
-    {
-        Ok(o) if o.status.success() => o,
-        _ => return,
-    };
-
-    let ps_out = String::from_utf8_lossy(&output.stdout);
-    let (children_of, info_by_pid) = parse_ps_processes(&ps_out);
-
+/// Fan out Codex permission mode updates to every Codex pane across every
+/// window using the same single process snapshot used for shell-fallback checks.
+fn resolve_codex_permission_modes(
+    sessions_map: &mut SessionMap,
+    codex_pids: &[CodexPidEntry],
+    process_snapshot: &ProcessSnapshot,
+) {
     for windows in sessions_map.values_mut() {
         for (window_id, window) in windows.iter_mut() {
             let window_pids: Vec<(usize, u32)> = codex_pids
@@ -154,12 +200,7 @@ fn resolve_codex_permission_modes(sessions_map: &mut SessionMap, codex_pids: &[C
             if window_pids.is_empty() {
                 continue;
             }
-            apply_codex_permission_modes(
-                &mut window.panes,
-                &window_pids,
-                &children_of,
-                &info_by_pid,
-            );
+            apply_codex_permission_modes(&mut window.panes, &window_pids, process_snapshot);
         }
     }
 }
@@ -185,19 +226,22 @@ fn finalize_sessions(sessions_map: SessionMap) -> Vec<SessionInfo> {
 }
 
 /// Parse a single pane line from `tmux list-panes -F`.
-/// Returns None if the line has fewer than 20 fields, is a sidebar, or has no agent.
+/// Returns None if the line has too few fields, is a sidebar, or has no agent.
 /// Thin wrapper used by the unit tests, which still construct a raw
 /// `|`-joined fixture line. Production callers go through
-/// `parse_pane_fields` directly to avoid re-joining and re-splitting
+/// `parse_pane_fields_with_processes` directly to avoid re-joining and re-splitting
 /// fields that may themselves contain literal `|` characters (cwd,
 /// prompt, branch) — see `build_session_hierarchy`.
 #[cfg(test)]
 pub(crate) fn parse_pane_line(line: &str) -> Option<PaneInfo> {
     let parts = split_tmux_fields(line, '|');
-    parse_pane_fields(&parts)
+    parse_pane_fields_with_processes(&parts, None)
 }
 
-pub(crate) fn parse_pane_fields(parts: &[String]) -> Option<PaneInfo> {
+fn parse_pane_fields_with_processes(
+    parts: &[String],
+    process_snapshot: Option<&ProcessSnapshot>,
+) -> Option<PaneInfo> {
     if parts.len() < pane_line_field::MIN_FIELDS {
         return None;
     }
@@ -208,6 +252,7 @@ pub(crate) fn parse_pane_fields(parts: &[String]) -> Option<PaneInfo> {
 
     let agent = AgentType::from_label(&parts[pane_line_field::AGENT])?;
     let current_command = parts[pane_line_field::PANE_CURRENT_COMMAND].as_str();
+    let pane_pid: Option<u32> = parts[pane_line_field::PANE_PID].parse().ok();
 
     // Codex / OpenCode panes can leave stale tmux metadata behind after the
     // agent exits and the pane falls back to the user's shell. Neither
@@ -220,11 +265,16 @@ pub(crate) fn parse_pane_fields(parts: &[String]) -> Option<PaneInfo> {
     // because its SessionEnd hook drives cleanup instead.
     if matches!(agent, AgentType::Codex | AgentType::OpenCode) && is_shell_command(current_command)
     {
-        clear_agent_pane_state(&parts[pane_line_field::PANE_ID]);
-        return None;
+        let agent_still_alive = pane_pid
+            .and_then(|pid| {
+                process_snapshot.map(|snapshot| snapshot.tree_has_agent(&[pid], &agent))
+            })
+            .unwrap_or(false);
+        if !agent_still_alive {
+            clear_agent_pane_state(&parts[pane_line_field::PANE_ID]);
+            return None;
+        }
     }
-
-    let pane_pid: Option<u32> = parts[pane_line_field::PANE_PID].parse().ok();
 
     // Prefer @pane_cwd (set by hook from agent's cwd) over pane_current_path
     let pane_cwd = &parts[pane_line_field::PANE_CWD];
@@ -276,6 +326,14 @@ pub(crate) fn parse_pane_fields(parts: &[String]) -> Option<PaneInfo> {
         session_id,
         session_name: String::new(),
         sidebar_spawned: parts[pane_line_field::SIDEBAR_SPAWNED] == "1",
+        bg_shell_cmd: {
+            let raw = &parts[pane_line_field::BG_CMD];
+            if raw.is_empty() {
+                None
+            } else {
+                Some(raw.to_string())
+            }
+        },
     })
 }
 
@@ -292,6 +350,7 @@ fn clear_agent_pane_state(pane_id: &str) {
         PANE_AGENT,
         PANE_PROMPT,
         PANE_PROMPT_SOURCE,
+        PANE_BG_CMD,
         PANE_SUBAGENTS,
         PANE_CWD,
         PANE_PERMISSION_MODE,
@@ -358,118 +417,37 @@ fn detect_codex_permission_mode(args: &str) -> PermissionMode {
     PermissionMode::Default
 }
 
-fn process_basename(command: &str) -> &str {
-    let command = command.trim_matches('"');
-    Path::new(command)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(command)
-}
-
-fn first_command_arg(args: &str) -> Option<&str> {
-    let args = args.trim();
-    if args.is_empty() {
+fn process_snapshot_for_panes(all_panes_output: &str) -> Option<ProcessSnapshot> {
+    if !pane_output_needs_process_snapshot(all_panes_output) {
         return None;
     }
-    if let Some(rest) = args.strip_prefix('"') {
-        return rest.split_once('"').map(|(cmd, _)| cmd).or(Some(rest));
-    }
-    args.split_whitespace().next()
+    ProcessSnapshot::scan()
 }
 
-fn process_matches_agent(info: &ProcessInfo, agent_name: &str) -> bool {
-    if process_basename(&info.comm) == agent_name {
-        return true;
-    }
-    first_command_arg(&info.args)
-        .map(|command| process_basename(command) == agent_name)
-        .unwrap_or(false)
-}
-
-#[derive(Debug, Clone)]
-struct ProcessInfo {
-    comm: String,
-    args: String,
-}
-
-fn parse_ps_processes(
-    ps_out: &str,
-) -> (
-    std::collections::HashMap<u32, Vec<u32>>,
-    std::collections::HashMap<u32, ProcessInfo>,
-) {
-    let mut children_of: std::collections::HashMap<u32, Vec<u32>> =
-        std::collections::HashMap::new();
-    let mut info_by_pid: std::collections::HashMap<u32, ProcessInfo> =
-        std::collections::HashMap::new();
-
-    for line in ps_out.lines() {
-        let mut parts = line.split_whitespace();
-        let Some(pid_str) = parts.next() else {
-            continue;
-        };
-        let Some(ppid_str) = parts.next() else {
-            continue;
-        };
-        let Ok(pid) = pid_str.parse::<u32>() else {
-            continue;
-        };
-        let Ok(ppid) = ppid_str.parse::<u32>() else {
-            continue;
-        };
-        let Some(comm) = parts.next() else {
-            continue;
-        };
-
-        children_of.entry(ppid).or_default().push(pid);
-        info_by_pid.insert(
-            pid,
-            ProcessInfo {
-                comm: comm.to_string(),
-                args: parts.collect::<Vec<_>>().join(" "),
-            },
-        );
-    }
-
-    (children_of, info_by_pid)
-}
-
-fn descendant_pids(
-    seed_pids: &[u32],
-    children_of: &std::collections::HashMap<u32, Vec<u32>>,
-) -> std::collections::HashSet<u32> {
-    let mut seen = std::collections::HashSet::new();
-    let mut queue: std::collections::VecDeque<u32> = seed_pids.iter().copied().collect();
-
-    while let Some(pid) = queue.pop_front() {
-        if !seen.insert(pid) {
-            continue;
+fn pane_output_needs_process_snapshot(all_panes_output: &str) -> bool {
+    all_panes_output.lines().any(|line| {
+        let parts = split_tmux_fields(line, '|');
+        if parts.len() < session_line_field::MIN_FIELDS {
+            return false;
         }
-        if let Some(children) = children_of.get(&pid) {
-            for &child in children {
-                if !seen.contains(&child) {
-                    queue.push_back(child);
-                }
-            }
-        }
-    }
-
-    seen
+        let pane_fields = &parts[session_line_field::PANE_LINE_OFFSET..];
+        AgentType::from_label(&pane_fields[pane_line_field::AGENT])
+            .is_some_and(|agent| matches!(agent, AgentType::Codex | AgentType::OpenCode))
+    })
 }
 
 fn apply_codex_permission_modes(
     panes: &mut [PaneInfo],
     pids_to_check: &[(usize, u32)],
-    children_of: &std::collections::HashMap<u32, Vec<u32>>,
-    info_by_pid: &std::collections::HashMap<u32, ProcessInfo>,
+    process_snapshot: &ProcessSnapshot,
 ) {
     for (idx, pid) in pids_to_check {
-        let descendants = descendant_pids(&[*pid], children_of);
+        let descendants = process_snapshot.descendants(&[*pid]);
         for descendant in descendants {
-            let Some(info) = info_by_pid.get(&descendant) else {
+            let Some(info) = process_snapshot.info_by_pid.get(&descendant) else {
                 continue;
             };
-            if !process_matches_agent(info, CODEX_AGENT) {
+            if command_basename(&info.comm) != CODEX_AGENT {
                 continue;
             }
             if let Some(pane) = panes.get_mut(*idx) {
@@ -611,6 +589,7 @@ mod tests {
             session_id: None,
             session_name: String::new(),
             sidebar_spawned: false,
+            bg_shell_cmd: None,
         }
     }
 
@@ -619,9 +598,9 @@ mod tests {
         let mut panes = vec![test_pane_codex("%1")];
         let pids = vec![(0, 101)];
         let ps_out = "101 1 bash /bin/bash\n102 101 codex /bin/codex --full-auto\n";
-        let (children_of, info_by_pid) = parse_ps_processes(ps_out);
+        let snapshot = ProcessSnapshot::from_ps_output(ps_out);
 
-        apply_codex_permission_modes(&mut panes, &pids, &children_of, &info_by_pid);
+        apply_codex_permission_modes(&mut panes, &pids, &snapshot);
         assert_eq!(panes[0].permission_mode, PermissionMode::Auto);
     }
 
@@ -630,9 +609,9 @@ mod tests {
         let mut panes = vec![test_pane_codex("%1")];
         let pids = vec![(0, 101)];
         let ps_out = "101 1 bash /bin/bash\n102 101 sh -c wrapper\n103 102 codex /usr/local/bin/codex --yolo\n";
-        let (children_of, info_by_pid) = parse_ps_processes(ps_out);
+        let snapshot = ProcessSnapshot::from_ps_output(ps_out);
 
-        apply_codex_permission_modes(&mut panes, &pids, &children_of, &info_by_pid);
+        apply_codex_permission_modes(&mut panes, &pids, &snapshot);
         assert_eq!(panes[0].permission_mode, PermissionMode::BypassPermissions);
     }
 
@@ -641,34 +620,32 @@ mod tests {
         let mut panes = vec![test_pane_codex("%1")];
         let pids = vec![(0, 101)];
         let ps_out = "101 1 /bin/zsh /bin/zsh\n102 101 /opt/homebrew/bin/codex /opt/homebrew/bin/codex --full-auto\n";
-        let (children_of, info_by_pid) = parse_ps_processes(ps_out);
+        let snapshot = ProcessSnapshot::from_ps_output(ps_out);
 
-        apply_codex_permission_modes(&mut panes, &pids, &children_of, &info_by_pid);
+        apply_codex_permission_modes(&mut panes, &pids, &snapshot);
         assert_eq!(panes[0].permission_mode, PermissionMode::Auto);
     }
 
     #[test]
-    fn apply_codex_permission_modes_matches_quoted_args_command() {
-        let mut panes = vec![test_pane_codex("%1")];
-        let pids = vec![(0, 101)];
-        let ps_out =
-            "101 1 /bin/zsh /bin/zsh\n102 101 node \"/opt/Codex Tools/bin/codex\" --yolo\n";
-        let (children_of, info_by_pid) = parse_ps_processes(ps_out);
-
-        apply_codex_permission_modes(&mut panes, &pids, &children_of, &info_by_pid);
-        assert_eq!(panes[0].permission_mode, PermissionMode::BypassPermissions);
-    }
-
-    #[test]
     fn parse_ps_processes_preserves_spaced_args() {
-        let (children_of, info_by_pid) = parse_ps_processes(
+        let snapshot = ProcessSnapshot::from_ps_output(
             "100 1 codex /Applications/Codex App/bin/codex --full-auto\n101 100 sh sh -c wrapper\n",
         );
 
-        assert_eq!(children_of.get(&1).cloned(), Some(vec![100]));
-        let info = info_by_pid.get(&100).expect("process info");
+        assert_eq!(snapshot.children_of.get(&1).cloned(), Some(vec![100]));
+        let info = snapshot.info_by_pid.get(&100).expect("process info");
         assert_eq!(info.comm, "codex");
         assert_eq!(info.args, "/Applications/Codex App/bin/codex --full-auto");
+    }
+
+    #[test]
+    fn process_tree_has_agent_matches_descendant_process_name() {
+        let snapshot = ProcessSnapshot::from_ps_output(
+            "100 1 fish fish -c opencode\n101 100 opencode opencode\n",
+        );
+
+        assert!(snapshot.tree_has_agent(&[100], &AgentType::OpenCode));
+        assert!(!snapshot.tree_has_agent(&[100], &AgentType::Codex));
     }
 
     // ─── sanitize_prompt tests ──────────────────────────────────────
@@ -802,13 +779,22 @@ mod tests {
             "",                   // 18: @pane_worktree_branch
             "",                   // 19: @pane_session_id
             "",                   // 20: @agent-sidebar-spawned
+            "",                   // 21: @pane_bg_cmd
         ]
+    }
+
+    fn process_snapshot(ps_out: &str) -> ProcessSnapshot {
+        ProcessSnapshot::from_ps_output(ps_out)
+    }
+
+    fn field_strings(fields: &[&str]) -> Vec<String> {
+        fields.iter().map(|field| (*field).to_string()).collect()
     }
 
     #[test]
     fn parse_pane_line_full_fields() {
         let line = make_pane_line(&full_fields());
-        let pane = parse_pane_line(&line).expect("should parse 17 fields");
+        let pane = parse_pane_line(&line).expect("should parse 22 fields");
         assert!(pane.pane_active);
         assert_eq!(pane.status, PaneStatus::Running);
         assert_eq!(pane.agent, AgentType::Claude);
@@ -852,7 +838,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_pane_line_rejects_fewer_than_21_fields() {
+    fn parse_pane_line_rejects_fewer_than_min_fields() {
         // Only 15 fields — should be rejected
         let fields_15 =
             "1|running||claude|name|/path|fish||%1|prompt|1700000000||12345|Explore|/cwd";
@@ -861,11 +847,30 @@ mod tests {
             "15 fields should be rejected"
         );
 
-        // 20 fields — still rejected (need 21)
-        let fields_20 = "1|running||claude|name|/path|fish||%1|prompt|user|1700000000||12345|Explore|/cwd|auto|||";
+        // 21 fields — still rejected (need 22 including @pane_bg_cmd).
+        let fields_21 = "1|running||claude|name|/path|fish||%1|prompt|user|1700000000||12345|Explore|/cwd|auto||||";
         assert!(
-            parse_pane_line(fields_20).is_none(),
-            "20 fields should be rejected"
+            parse_pane_line(fields_21).is_none(),
+            "21 fields should be rejected"
+        );
+    }
+
+    #[test]
+    fn parse_pane_line_reads_bg_cmd_field() {
+        let mut fields = full_fields();
+        fields[pane_line_field::BG_CMD] = "cargo build --release";
+        let pane = parse_pane_line(&make_pane_line(&fields)).unwrap();
+        assert_eq!(
+            pane.bg_shell_cmd.as_deref(),
+            Some("cargo build --release"),
+            "bg_shell_cmd should surface the @pane_bg_cmd value"
+        );
+
+        fields[pane_line_field::BG_CMD] = "";
+        let pane = parse_pane_line(&make_pane_line(&fields)).unwrap();
+        assert!(
+            pane.bg_shell_cmd.is_none(),
+            "empty @pane_bg_cmd should parse as None"
         );
     }
 
@@ -981,6 +986,62 @@ mod tests {
             test_mock::get(pane, PANE_PROMPT).as_deref(),
             Some("keep me"),
             "claude prompt must survive — SessionEnd hook is the clear path",
+        );
+    }
+
+    #[test]
+    fn parse_pane_fields_keeps_opencode_shell_pane_when_process_is_alive() {
+        let _guard = test_mock::install();
+        let pane = "%OPENCODE_LIVE";
+        test_mock::set(pane, PANE_AGENT, "opencode");
+        test_mock::set(pane, PANE_PROMPT, "keep me");
+
+        let mut fields = full_fields();
+        fields[pane_line_field::PANE_ID] = pane;
+        fields[pane_line_field::AGENT] = "opencode";
+        fields[pane_line_field::PANE_CURRENT_COMMAND] = "fish";
+        fields[pane_line_field::PANE_PID] = "100";
+        let fields = field_strings(&fields);
+        let snapshot = process_snapshot("100 1 fish fish -c opencode\n101 100 opencode opencode\n");
+
+        let pane_info = parse_pane_fields_with_processes(&fields, Some(&snapshot))
+            .expect("live OpenCode child process should keep pane visible");
+
+        assert_eq!(pane_info.agent, AgentType::OpenCode);
+        assert!(test_mock::contains(pane, PANE_AGENT));
+        assert_eq!(
+            test_mock::get(pane, PANE_PROMPT).as_deref(),
+            Some("keep me"),
+            "live OpenCode panes must not be swept just because tmux reports a shell"
+        );
+    }
+
+    #[test]
+    fn parse_pane_fields_keeps_codex_shell_pane_when_process_is_alive() {
+        let _guard = test_mock::install();
+        let pane = "%CODEX_LIVE";
+        test_mock::set(pane, PANE_AGENT, "codex");
+        test_mock::set(pane, PANE_PROMPT, "keep me");
+
+        let mut fields = full_fields();
+        fields[pane_line_field::PANE_ID] = pane;
+        fields[pane_line_field::AGENT] = "codex";
+        fields[pane_line_field::PANE_CURRENT_COMMAND] = "zsh";
+        fields[pane_line_field::PANE_PID] = "200";
+        let fields = field_strings(&fields);
+        let snapshot = process_snapshot(
+            "200 1 zsh zsh -c codex\n201 200 codex /opt/homebrew/bin/codex --full-auto\n",
+        );
+
+        let pane_info = parse_pane_fields_with_processes(&fields, Some(&snapshot))
+            .expect("live Codex child process should keep pane visible");
+
+        assert_eq!(pane_info.agent, AgentType::Codex);
+        assert!(test_mock::contains(pane, PANE_AGENT));
+        assert_eq!(
+            test_mock::get(pane, PANE_PROMPT).as_deref(),
+            Some("keep me"),
+            "live Codex panes must not be swept just because tmux reports a shell"
         );
     }
 
@@ -1114,6 +1175,7 @@ mod tests {
                     session_id: None,
                     session_name: String::new(),
                     sidebar_spawned: false,
+                    bg_shell_cmd: None,
                 }],
             },
         );

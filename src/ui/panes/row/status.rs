@@ -30,8 +30,7 @@ pub(super) fn status_row(
     let elapsed = elapsed_label(pane.started_at, now);
 
     let title_fg = theme.agent_color(&pane.agent);
-    let is_active_status = matches!(pane.status, PaneStatus::Running | PaneStatus::Waiting);
-    let elapsed_fg = if is_active_status {
+    let elapsed_fg = if pane.status.is_active() {
         theme.text_active
     } else {
         theme.text_muted
