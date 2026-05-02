@@ -15,7 +15,7 @@ pub(super) fn init_state(tmux_pane: String) -> AppState {
     state.theme = ui::colors::ColorTheme::from_tmux();
     state.icons = ui::icons::StatusIcons::from_tmux();
     state.bottom_panel_height = ui::bottom_panel_height_from_tmux();
-    state.mascot_enabled = ui::mascot_enabled_from_tmux();
+    state.pet_enabled = ui::pet_enabled_from_tmux();
     state.global.load_from_tmux();
     state.refresh();
 

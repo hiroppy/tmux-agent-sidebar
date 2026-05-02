@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Single-frame snapshot of the mascot working at the desk. Uses
+# Single-frame snapshot of the pet working at the desk. Uses
 # build_layout's default 2 running agents — paper stack height (per
-# paper_sprite in src/ui/mascot.rs:401) is 2 rows at running_count = 2.
+# paper_sprite in src/ui/pet.rs:401) is 2 rows at running_count = 2.
 #
 # Timing:
 #   - Walk completes ~2.4 s after start_sidebar returns (10 ticks
@@ -22,14 +22,14 @@ source "$(cd "$(dirname "$0")/../common" && pwd)/_lib.sh"
 export CROP_ROWS=21:26
 export CROP_COLS=0:46
 
-setup "mascot-working"
+setup "pet-working"
 trap cleanup EXIT
 
 mkdir -p "$OUT"
 
 build_layout
 
-enable_mascot
+enable_pet
 start_sidebar
 
 sleep 5

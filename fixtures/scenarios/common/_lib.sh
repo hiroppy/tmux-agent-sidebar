@@ -10,7 +10,7 @@
 #   run_fake_agent <pane> <agent> [port]
 #                         — respawn a pane with just the fake agent binary
 #                           (and optional TCP listener on `port`)
-#   enable_mascot         — set @sidebar_mascot on before start_sidebar
+#   enable_pet           — set @sidebar_pet on before start_sidebar
 #   start_sidebar         — launch the real sidebar binary in $SIDEBAR_PANE
 #   capture_loop <ms> <fps>
 #                         — call `capture --frames-out …` for a loop
@@ -324,11 +324,11 @@ run_fake_agent() {
 
 # -- sidebar + capture ---------------------------------------------
 
-# Enable the sidebar mascot (cat at the bottom of the sidebar). Must be
-# called before start_sidebar so the initial @sidebar_mascot read picks
+# Enable the sidebar pet (cat at the bottom of the sidebar). Must be
+# called before start_sidebar so the initial @sidebar_pet read picks
 # it up — the option is read once at startup and not refreshed.
-enable_mascot() {
-    tmux set-option -g @sidebar_mascot on
+enable_pet() {
+    tmux set-option -g @sidebar_pet on
 }
 
 # Start the real sidebar binary in $SIDEBAR_PANE and wait for the

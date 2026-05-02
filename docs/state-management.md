@@ -92,11 +92,11 @@ Per-pane file-based state:
 | `notices` | Once at startup / on copy | `NoticesState` sub-struct: `button_col`, `missing_hook_groups`, `claude_plugin_status`, `claude_settings_has_residual_hooks`, `claude_plugin_notice`, `copy_targets`, `copied_at` |
 | `timers` | Refresh cycle / on user input | `RefreshTimers` sub-struct gating periodic work: `last_filter_click` (debounce), `last_port_refresh`, `port_scan_initialized` |
 | `pending_osc52_copy` | On successful copy / frame flush | OSC 52 clipboard payload queued for terminal forwarding |
-| `mascot_state` | Every 200ms (animation) | `Idle` / `WalkRight` / `Working` / `WalkLeft` |
-| `mascot_x` | Every 200ms (animation) | Mascot X position |
-| `mascot_frame` | Every 200ms (animation) | Animation frame counter |
-| `mascot_bob_timer` | Every 200ms (animation) | Idle bob motion timer |
-| `mascot_enabled` | Once at startup | Whether the mascot is drawn and ticked (from `@sidebar_mascot`) |
+| `pet_state` | Every 200ms (animation) | `Idle` / `WalkRight` / `Working` / `WalkLeft` |
+| `pet_x` | Every 200ms (animation) | Pet X position |
+| `pet_frame` | Every 200ms (animation) | Animation frame counter |
+| `pet_bob_timer` | Every 200ms (animation) | Idle bob motion timer |
+| `pet_enabled` | Once at startup | Whether the pet is drawn and ticked (from `@sidebar_pet`) |
 | `spinner_frame` | Every 200ms (animation) | Spinner animation frame counter |
 | `icons` | Once at startup | `StatusIcons` theme (overridable via tmux options) |
 | `tmux_pane` | Once at startup | This sidebar's own tmux pane ID |
@@ -112,7 +112,7 @@ Per-pane file-based state:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Every frame (~200ms)                                       │
-│  layout.* (rebuilt by ui::draw), spinner + mascot animation │
+│  layout.* (rebuilt by ui::draw), spinner + pet animation     │
 ├─────────────────────────────────────────────────────────────┤
 │  Every 1s (refresh cycle)                                   │
 │  repo_groups, focus_state.focused_pane_id,                  │

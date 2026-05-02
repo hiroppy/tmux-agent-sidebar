@@ -110,7 +110,7 @@ export default defineConfig({
             { slug: 'features/activity-log' },
             { slug: 'features/git-status' },
             { slug: 'features/notifications' },
-            { slug: 'features/mascot' },
+            { slug: 'features/pet' },
           ],
         },
         {

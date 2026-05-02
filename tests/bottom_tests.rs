@@ -1527,7 +1527,7 @@ fn snapshot_focused_group_active_border_styled() {
 }
 
 #[test]
-fn test_mascot_enabled_preserves_bottom_panel_border() {
+fn test_pet_enabled_preserves_bottom_panel_border() {
     let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
     let mut state = make_state(vec![SessionInfo {
         session_name: "main".into(),
@@ -1542,7 +1542,7 @@ fn test_mascot_enabled_preserves_bottom_panel_border() {
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
     state.focus_state.sidebar_focused = false;
-    state.mascot_enabled = true;
+    state.pet_enabled = true;
 
     insta::assert_snapshot!(render_to_string(&mut state, 40, 30), @r"
      ≡1  ●0  ◎0  ◐0  ○1  ✕0

@@ -30,8 +30,8 @@ fn test_all_color_theme_defaults() {
     // Agent colors
     assert_eq!(theme.agent_claude, Color::Indexed(174));
     assert_eq!(theme.agent_codex, Color::Indexed(141));
-    assert_eq!(theme.mascot_body, Color::Indexed(208));
-    assert_eq!(theme.mascot_eye, Color::Indexed(114));
+    assert_eq!(theme.pet_body, Color::Indexed(208));
+    assert_eq!(theme.pet_eye, Color::Indexed(114));
 
     // Text colors
     assert_eq!(theme.text_active, Color::Indexed(255));
@@ -810,8 +810,8 @@ fn test_custom_theme_new_fields_override() {
     // Original fields should still be default
     assert_eq!(theme.accent, Color::Indexed(153));
     assert_eq!(theme.agent_claude, Color::Indexed(174));
-    assert_eq!(theme.mascot_body, Color::Indexed(208));
-    assert_eq!(theme.mascot_eye, Color::Indexed(114));
+    assert_eq!(theme.pet_body, Color::Indexed(208));
+    assert_eq!(theme.pet_eye, Color::Indexed(114));
 }
 
 // ─── Branch color in styled output ──────────────────────────────────

@@ -8,9 +8,9 @@ mod filter;
 mod focus;
 mod global;
 mod layout;
-mod mascot;
 mod notices;
 mod pane_runtime;
+mod pet;
 mod popup;
 mod refresh;
 mod scroll;
@@ -79,42 +79,42 @@ pub struct AppState {
     /// forward it to the upstream terminal's clipboard — covering the
     /// SSH case where `arboard` would only reach the remote machine.
     pub pending_osc52_copy: Option<String>,
-    pub mascot_state: crate::ui::mascot::MascotState,
-    /// Mascot animation X position (character offset from left of bottom panel).
-    pub mascot_x: u16,
-    /// Mascot animation frame index (0 = sitting, 1-4 = running/working).
-    pub mascot_frame: usize,
+    pub pet_state: crate::ui::pet::PetState,
+    /// Pet animation X position (character offset from left of bottom panel).
+    pub pet_x: u16,
+    /// Pet animation frame index (0 = sitting, 1-4 = running/working).
+    pub pet_frame: usize,
     /// Working animation tick used to slow the hand motion down a bit.
-    pub mascot_working_frame_tick: usize,
+    pub pet_working_frame_tick: usize,
     /// Walking animation tick used to pace the optional bounce.
-    pub mascot_walk_tick: usize,
+    pub pet_walk_tick: usize,
     /// Seed used to randomize walking bounce timing.
-    pub mascot_walk_seed: usize,
+    pub pet_walk_seed: usize,
     /// Tick at which the next walk bounce should start.
-    pub mascot_walk_bounce_next_tick: usize,
+    pub pet_walk_bounce_next_tick: usize,
     /// Tick until which the current walk bounce stays lifted.
-    pub mascot_walk_bounce_lift_until: usize,
-    pub mascot_bob_timer: usize,
+    pub pet_walk_bounce_lift_until: usize,
+    pub pet_bob_timer: usize,
     /// Idle animation schedule tick for jump motion within the bob cycle.
-    pub mascot_idle_jump_tick: usize,
+    pub pet_idle_jump_tick: usize,
     /// Idle animation schedule tick for blink motion within the bob cycle.
-    pub mascot_idle_blink_tick: usize,
+    pub pet_idle_blink_tick: usize,
     /// Idle animation schedule tick for the hand-raise motion within the bob cycle.
-    pub mascot_idle_wave_tick: usize,
+    pub pet_idle_wave_tick: usize,
     /// Whether the hand-raise motion is enabled for the current idle cycle.
-    pub mascot_idle_wave_enabled: bool,
+    pub pet_idle_wave_enabled: bool,
     /// Seed used to reshuffle idle motion timing.
-    pub mascot_idle_seed: usize,
+    pub pet_idle_seed: usize,
     /// Current working animation tick, used to pace paper motion.
-    pub mascot_working_paper_timer: usize,
+    pub pet_working_paper_timer: usize,
     /// Tick at which the paper stack should next lift.
-    pub mascot_working_paper_next_lift_tick: usize,
+    pub pet_working_paper_next_lift_tick: usize,
     /// Tick until which the paper stack stays lifted after a trigger.
-    pub mascot_working_paper_lift_until: usize,
+    pub pet_working_paper_lift_until: usize,
     /// Horizontal offset applied to the paper stack during a lift.
-    pub mascot_working_paper_x_offset: u16,
+    pub pet_working_paper_x_offset: u16,
     /// Seed used to reshuffle working paper motion timing.
-    pub mascot_working_paper_seed: usize,
+    pub pet_working_paper_seed: usize,
     /// Update notice shown when a newer GitHub release is available.
     pub version_notice: Option<crate::version::UpdateNotice>,
     /// Shared state across sidebar instances, persisted to tmux global variables.
@@ -131,9 +131,9 @@ pub struct AppState {
     /// pane each tick when the map is unchanged (the polling thread only
     /// updates it every 10s).
     pub sessions: SessionNamesState,
-    /// Whether the mascot animation is drawn and ticked. Loaded once at startup
-    /// from the `@sidebar_mascot` tmux option. Defaults to `false`.
-    pub mascot_enabled: bool,
+    /// Whether the pet animation is drawn and ticked. Loaded once at startup
+    /// from the `@sidebar_pet` tmux option. Defaults to `false`.
+    pub pet_enabled: bool,
 }
 
 impl AppState {
@@ -157,32 +157,32 @@ impl AppState {
             popup: PopupState::None,
             notices: NoticesState::default(),
             pending_osc52_copy: None,
-            mascot_state: crate::ui::mascot::MascotState::Idle,
-            mascot_x: crate::ui::mascot::MASCOT_HOME_X,
-            mascot_frame: 0,
-            mascot_working_frame_tick: 0,
-            mascot_walk_tick: 0,
-            mascot_walk_seed: 1,
-            mascot_walk_bounce_next_tick: 0,
-            mascot_walk_bounce_lift_until: 0,
-            mascot_bob_timer: 0,
-            mascot_idle_jump_tick: 8,
-            mascot_idle_blink_tick: 24,
-            mascot_idle_wave_tick: 0,
-            mascot_idle_wave_enabled: false,
-            mascot_idle_seed: 1,
-            mascot_working_paper_timer: 0,
-            mascot_working_paper_next_lift_tick: 0,
-            mascot_working_paper_lift_until: 0,
-            mascot_working_paper_x_offset: 0,
-            mascot_working_paper_seed: 1,
+            pet_state: crate::ui::pet::PetState::Idle,
+            pet_x: crate::ui::pet::PET_HOME_X,
+            pet_frame: 0,
+            pet_working_frame_tick: 0,
+            pet_walk_tick: 0,
+            pet_walk_seed: 1,
+            pet_walk_bounce_next_tick: 0,
+            pet_walk_bounce_lift_until: 0,
+            pet_bob_timer: 0,
+            pet_idle_jump_tick: 8,
+            pet_idle_blink_tick: 24,
+            pet_idle_wave_tick: 0,
+            pet_idle_wave_enabled: false,
+            pet_idle_seed: 1,
+            pet_working_paper_timer: 0,
+            pet_working_paper_next_lift_tick: 0,
+            pet_working_paper_lift_until: 0,
+            pet_working_paper_x_offset: 0,
+            pet_working_paper_seed: 1,
             version_notice: None,
             global: GlobalState::new(),
             bottom_panel_height: crate::ui::BOTTOM_PANEL_HEIGHT,
             sessions: SessionNamesState::new(),
-            mascot_enabled: false,
+            pet_enabled: false,
         };
-        crate::state::mascot::reseed_mascot_idle_motion(&mut state);
+        crate::state::pet::reseed_pet_idle_motion(&mut state);
         state
     }
 }

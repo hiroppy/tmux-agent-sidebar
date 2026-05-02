@@ -174,13 +174,10 @@ mod tests {
         let info = resolve_pane_git_info(env!("CARGO_MANIFEST_DIR"));
         assert!(info.repo_root.is_some(), "should detect git repo");
         assert!(info.branch.is_some(), "should detect branch");
-        // The repo root should be the tmux-agent-sidebar repo
         let root = info.repo_root.unwrap();
-        assert!(
-            root.contains("tmux-agent-sidebar"),
-            "repo root should be tmux-agent-sidebar: {}",
-            root
-        );
+        let root = std::fs::canonicalize(&root).unwrap();
+        let manifest_dir = std::fs::canonicalize(env!("CARGO_MANIFEST_DIR")).unwrap();
+        assert_eq!(root, manifest_dir, "repo root should be manifest dir");
     }
 
     #[test]
@@ -295,8 +292,12 @@ mod tests {
         let groups = group_panes_by_repo(&sessions);
 
         assert_eq!(groups.len(), 1);
+        let expected_name = std::path::Path::new(manifest_dir)
+            .file_name()
+            .unwrap()
+            .to_string_lossy();
         assert_eq!(
-            groups[0].name, "tmux-agent-sidebar",
+            groups[0].name, expected_name,
             "display name should be repo basename"
         );
     }

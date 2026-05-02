@@ -76,9 +76,9 @@ pub fn run(
 
         if last_spinner.elapsed() >= spinner_interval {
             state.spinner_frame = (state.spinner_frame + 1) % SPINNER_PULSE.len();
-            if state.mascot_enabled {
+            if state.pet_enabled {
                 let term_width = terminal.size().map(|s| s.width).unwrap_or(60);
-                state.tick_mascot(term_width);
+                state.tick_pet(term_width);
             }
             last_spinner = std::time::Instant::now();
             needs_redraw = true;
