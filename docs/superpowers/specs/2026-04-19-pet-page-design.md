@@ -24,7 +24,7 @@ Path: `website/src/content/docs/features/pet.mdx`
 
 Structure:
 
-```
+```mdx
 ---
 title: Pet
 description: A short, evergreen blurb (under 160 chars). Used as og:description.

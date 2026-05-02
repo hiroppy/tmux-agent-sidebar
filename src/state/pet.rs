@@ -60,12 +60,7 @@ impl AppState {
 
     /// Advance pet animation state. Called every spinner tick (200ms).
     pub fn tick_pet(&mut self, panel_width: u16) {
-        let running_count = self
-            .repo_groups
-            .iter()
-            .flat_map(|g| &g.panes)
-            .filter(|(p, _)| p.status == crate::tmux::PaneStatus::Running)
-            .count();
+        let running_count = self.running_count();
 
         // Pet stops so the seated sprite leaves one column before the desk.
         let working_width = crate::ui::pet::CHAIR_WIDTH + 3;

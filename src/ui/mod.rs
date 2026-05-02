@@ -40,7 +40,7 @@ pub fn bottom_panel_height_from_tmux() -> u16 {
 /// Read `@sidebar_pet` from tmux global options, defaulting to `false` (off).
 /// Accepts `on`/`off`, `true`/`false`, `1`/`0` (case-insensitive).
 pub fn pet_enabled_from_options(opts: &HashMap<String, String>) -> bool {
-    opts.get("@sidebar_pet")
+    opts.get(tmux::SIDEBAR_PET)
         .map(|s| s.trim().to_ascii_lowercase())
         .map(|s| matches!(s.as_str(), "on" | "true" | "1" | "yes"))
         .unwrap_or(false)
@@ -143,7 +143,7 @@ mod tests {
     #[test]
     fn pet_enabled_when_on() {
         for value in ["on", "ON", "true", "1", "yes"] {
-            let opts = opts_with("@sidebar_pet", value);
+            let opts = opts_with(tmux::SIDEBAR_PET, value);
             assert!(
                 pet_enabled_from_options(&opts),
                 "expected {value} to enable"
@@ -154,7 +154,7 @@ mod tests {
     #[test]
     fn pet_disabled_when_off() {
         for value in ["off", "false", "0", "no", ""] {
-            let opts = opts_with("@sidebar_pet", value);
+            let opts = opts_with(tmux::SIDEBAR_PET, value);
             assert!(
                 !pet_enabled_from_options(&opts),
                 "expected {value} to disable"
