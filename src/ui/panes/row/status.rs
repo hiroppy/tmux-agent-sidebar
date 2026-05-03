@@ -42,9 +42,11 @@ pub(super) fn status_row(
     // long; cap the title to the space left after reserving room for the
     // icon, badge, and elapsed label so they stay visible instead of
     // being pushed off-screen.
+    let elapsed_width = display_width(&elapsed);
+    let elapsed_gap = usize::from(elapsed_width > 0);
     let title_budget = ctx
         .inner_width
-        .saturating_sub(fixed_width + display_width(&elapsed));
+        .saturating_sub(fixed_width + elapsed_gap + elapsed_width);
     let title = truncate_to_width(title_raw, title_budget);
 
     let left_width = fixed_width + display_width(&title);

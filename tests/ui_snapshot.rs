@@ -4,7 +4,7 @@ mod test_helpers;
 use test_helpers::*;
 use tmux_agent_sidebar::activity::{ActivityEntry, TaskProgress, TaskStatus};
 use tmux_agent_sidebar::group::{PaneGitInfo, RepoGroup};
-use tmux_agent_sidebar::state::{Focus, PopupState, StatusFilter};
+use tmux_agent_sidebar::state::{Focus, PopupState, RepoFilter, StatusFilter};
 use tmux_agent_sidebar::tmux::{
     AgentType, PaneInfo, PaneStatus, PermissionMode, SessionInfo, WindowInfo, WorktreeMetadata,
 };
@@ -74,6 +74,36 @@ fn snapshot_secondary_header_without_notices() {
 }
 
 #[test]
+fn snapshot_secondary_header_long_repo_filter_truncated() {
+    let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
+    let repo_name = "very-long-repository-name-that-exceeds-width";
+    let mut state = make_state(vec![SessionInfo {
+        session_name: "main".into(),
+        windows: vec![WindowInfo {
+            window_id: "@1".into(),
+            window_name: "project".into(),
+            window_active: true,
+            auto_rename: false,
+            panes: vec![pane.clone()],
+        }],
+    }]);
+    state.repo_groups = vec![make_repo_group(repo_name, vec![pane])];
+    state.global.repo_filter = RepoFilter::Repo(repo_name.into());
+    state.rebuild_row_targets();
+
+    let output = render_to_string(&mut state, 28, 25);
+    insta::assert_snapshot!(output, @r"
+     ≡1  ●0  ◎0  ◐0  ○1  ✕0
+    ⓘ  very-long-repository-n… ▾
+    ┃ ○ claude
+        Waiting for prompt…
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
+}
+
+#[test]
 fn snapshot_version_banner_does_not_duplicate_in_scroll_area() {
     let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
     let mut state = make_state(vec![SessionInfo {
@@ -128,6 +158,37 @@ fn snapshot_single_agent_running_with_elapsed() {
     ⓘ                        — ▾
     dotfiles
     ┃ ● claude              2m5s
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
+}
+
+#[test]
+fn snapshot_long_session_name_truncated_keeps_elapsed_visible() {
+    let mut pane = make_pane(AgentType::Claude, PaneStatus::Running);
+    pane.session_name = "this-is-a-ridiculously-long-session-name-that-will-not-fit".into();
+    pane.started_at = Some(FIXED_NOW - 125); // 2m5s ago
+
+    let mut state = make_state(vec![SessionInfo {
+        session_name: "main".into(),
+        windows: vec![WindowInfo {
+            window_id: "@1".into(),
+            window_name: "dotfiles".into(),
+            window_active: true,
+            auto_rename: false,
+            panes: vec![pane.clone()],
+        }],
+    }]);
+    state.repo_groups = vec![make_repo_group("dotfiles", vec![pane])];
+    state.rebuild_row_targets();
+
+    let output = render_to_string(&mut state, 28, 25);
+    insta::assert_snapshot!(output, @r"
+     ≡1  ●1  ◎0  ◐0  ○0  ✕0
+    ⓘ                        — ▾
+    dotfiles
+    ┃ ● this-is-a-ridiculo… 2m5s
     ╭ Activity │ Git ──────────╮
     │      No activity yet     │
     ╰──────────────────────────╯
