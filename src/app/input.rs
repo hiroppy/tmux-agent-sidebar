@@ -1,7 +1,7 @@
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crossterm::event::{Event, KeyCode, MouseButton, MouseEventKind};
+use crossterm::event::{Event, KeyCode, KeyModifiers, MouseButton, MouseEventKind};
 use ratatui::{Terminal, backend::CrosstermBackend};
 
 use crate::state::{AppState, BottomTab, Focus};
@@ -53,21 +53,13 @@ pub(super) fn handle_event(
         }
         Event::Key(key) if state.is_repo_popup_open() => {
             needs_redraw = true;
+            let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
             match key.code {
                 KeyCode::Esc => state.close_repo_popup(),
-                KeyCode::Char('j') | KeyCode::Down => {
-                    let count = state.repo_names().len();
-                    let current = state.repo_popup_selected();
-                    if current + 1 < count {
-                        state.set_repo_popup_selected(current + 1);
-                    }
-                }
-                KeyCode::Char('k') | KeyCode::Up => {
-                    let current = state.repo_popup_selected();
-                    if current > 0 {
-                        state.set_repo_popup_selected(current - 1);
-                    }
-                }
+                KeyCode::Char('j') | KeyCode::Down => repo_popup_nav_down(state),
+                KeyCode::Char('n') if ctrl => repo_popup_nav_down(state),
+                KeyCode::Char('k') | KeyCode::Up => repo_popup_nav_up(state),
+                KeyCode::Char('p') if ctrl => repo_popup_nav_up(state),
                 KeyCode::Enter => state.confirm_repo_popup(),
                 _ => {}
             }
@@ -194,4 +186,19 @@ pub(super) fn handle_event(
         _ => {}
     }
     needs_redraw
+}
+
+fn repo_popup_nav_down(state: &mut AppState) {
+    let count = state.repo_names().len();
+    let current = state.repo_popup_selected();
+    if current + 1 < count {
+        state.set_repo_popup_selected(current + 1);
+    }
+}
+
+fn repo_popup_nav_up(state: &mut AppState) {
+    let current = state.repo_popup_selected();
+    if current > 0 {
+        state.set_repo_popup_selected(current - 1);
+    }
 }
