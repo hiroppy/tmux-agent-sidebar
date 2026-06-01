@@ -74,40 +74,8 @@ pub(super) fn handle_event(
                         state.focus_state.focus = Focus::Panes;
                     }
                 }
-                KeyCode::Char('j') | KeyCode::Down => match state.focus_state.focus {
-                    Focus::Filter => {
-                        state.focus_state.focus = Focus::Panes;
-                    }
-                    Focus::Panes => {
-                        if state.move_pane_selection(1) {
-                            state.global.queue_cursor_save();
-                        } else {
-                            state.focus_state.focus = Focus::ActivityLog;
-                        }
-                    }
-                    Focus::ActivityLog => state.scroll_bottom(1),
-                },
-                KeyCode::Char('k') | KeyCode::Up => match state.focus_state.focus {
-                    Focus::Filter => {}
-                    Focus::Panes => {
-                        if state.move_pane_selection(-1) {
-                            state.global.queue_cursor_save();
-                        } else {
-                            state.focus_state.focus = Focus::Filter;
-                        }
-                    }
-                    Focus::ActivityLog => {
-                        let at_top = match state.bottom_tab {
-                            BottomTab::Activity => state.activity.scroll.offset == 0,
-                            BottomTab::GitStatus => state.scrolls.git.offset == 0,
-                        };
-                        if at_top {
-                            state.focus_state.focus = Focus::Panes;
-                        } else {
-                            state.scroll_bottom(-1);
-                        }
-                    }
-                },
+                KeyCode::Char('j') | KeyCode::Down => pane_nav_down(state),
+                KeyCode::Char('k') | KeyCode::Up => pane_nav_up(state),
                 KeyCode::Char('h') | KeyCode::Left => {
                     if state.focus_state.focus == Focus::Filter {
                         state.global.status_filter = state.global.status_filter.prev();
@@ -186,6 +154,46 @@ pub(super) fn handle_event(
         _ => {}
     }
     needs_redraw
+}
+
+fn pane_nav_down(state: &mut AppState) {
+    match state.focus_state.focus {
+        Focus::Filter => {
+            state.focus_state.focus = Focus::Panes;
+        }
+        Focus::Panes => {
+            if state.move_pane_selection(1) {
+                state.global.queue_cursor_save();
+            } else {
+                state.focus_state.focus = Focus::ActivityLog;
+            }
+        }
+        Focus::ActivityLog => state.scroll_bottom(1),
+    }
+}
+
+fn pane_nav_up(state: &mut AppState) {
+    match state.focus_state.focus {
+        Focus::Filter => {}
+        Focus::Panes => {
+            if state.move_pane_selection(-1) {
+                state.global.queue_cursor_save();
+            } else {
+                state.focus_state.focus = Focus::Filter;
+            }
+        }
+        Focus::ActivityLog => {
+            let at_top = match state.bottom_tab {
+                BottomTab::Activity => state.activity.scroll.offset == 0,
+                BottomTab::GitStatus => state.scrolls.git.offset == 0,
+            };
+            if at_top {
+                state.focus_state.focus = Focus::Panes;
+            } else {
+                state.scroll_bottom(-1);
+            }
+        }
+    }
 }
 
 fn repo_popup_nav_down(state: &mut AppState) {
