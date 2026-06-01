@@ -66,6 +66,7 @@ pub(super) fn handle_event(
         }
         Event::Key(key) => {
             needs_redraw = true;
+            let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
             match key.code {
                 KeyCode::Esc => {
                     if state.focus_state.focus == Focus::ActivityLog
@@ -75,7 +76,9 @@ pub(super) fn handle_event(
                     }
                 }
                 KeyCode::Char('j') | KeyCode::Down => pane_nav_down(state),
+                KeyCode::Char('n') if ctrl => pane_nav_down(state),
                 KeyCode::Char('k') | KeyCode::Up => pane_nav_up(state),
+                KeyCode::Char('p') if ctrl => pane_nav_up(state),
                 KeyCode::Char('h') | KeyCode::Left => {
                     if state.focus_state.focus == Focus::Filter {
                         state.global.status_filter = state.global.status_filter.prev();
