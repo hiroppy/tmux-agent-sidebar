@@ -7,7 +7,13 @@ const DEFAULT_OPEN_COMMAND: &str = "${EDITOR:-nvim} {file}";
 const TARGET_RIGHT_PANE: &str = "right-pane";
 
 pub fn open_git_file(sidebar_pane: &str, repo_root: &str, file_path: &str) -> Result<(), String> {
-    let opts = tmux::get_all_global_options();
+    let mut opts = HashMap::new();
+    if let Some(value) = tmux::get_option(tmux::SIDEBAR_GIT_OPEN_COMMAND) {
+        opts.insert(tmux::SIDEBAR_GIT_OPEN_COMMAND.to_string(), value);
+    }
+    if let Some(value) = tmux::get_option(tmux::SIDEBAR_GIT_OPEN_TARGET) {
+        opts.insert(tmux::SIDEBAR_GIT_OPEN_TARGET.to_string(), value);
+    }
     let mut ops = RealTmuxOps;
     open_git_file_with_ops(sidebar_pane, repo_root, file_path, &opts, &mut ops)
 }

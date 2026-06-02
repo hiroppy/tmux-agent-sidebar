@@ -363,7 +363,18 @@ mod tests {
         state.git.untracked_files = vec!["debug.log".into()];
         state.git.untracked_paths = vec!["tmp/debug.log".into()];
 
-        draw(&mut state, 40, 10);
+        let output = render(&mut state, 40, 10);
+        insta::assert_snapshot!(output, @"
+
+        main
+                                         2 files
+        ────────────────────────────────────────
+        Staged (1)
+        M lib.rs                           +1/-0
+
+        Untracked (1)
+        ? debug.log
+        ");
 
         let paths: Vec<_> = state
             .layout

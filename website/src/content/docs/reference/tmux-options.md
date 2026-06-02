@@ -28,7 +28,8 @@ Most options must be set **before** loading the plugin in your `tmux.conf`. Colo
 | `@sidebar_git_open_target`   | `popup`          | Where to run the Git open command: `popup` or `right-pane`                                                      |
 
 The open command runs from the repository root. `{file}` expands to the
-repo-relative path, and `{abs_file}` expands to the absolute path.
+shell-escaped repo-relative path, and `{abs_file}` expands to the
+shell-escaped absolute path. Do not wrap either placeholder in extra quotes.
 
 ## Worktree spawn defaults
 
