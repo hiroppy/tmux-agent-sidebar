@@ -337,6 +337,10 @@ mod tests {
         assert!(state.pane_task_progress(&pane_id).is_none());
 
         // Now add a new in-progress task → should re-show
+        // Ensure the second write gets a distinct mtime on filesystems with
+        // coarse timestamp resolution; refresh_task_progress skips active
+        // panes when the log mtime appears unchanged.
+        std::thread::sleep(std::time::Duration::from_millis(10));
         fs::write(
             &log_path,
             "10:00|TaskCreate|#1 A\n10:01|TaskUpdate|completed #1\n10:02|TaskCreate|#2 B\n10:03|TaskUpdate|in_progress #2\n",
