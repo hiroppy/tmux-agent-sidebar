@@ -27,8 +27,11 @@ pub struct SpawnRemoveTarget {
 /// Click target for a visible file row rendered in the Git bottom tab.
 #[derive(Debug, Clone)]
 pub struct GitFileTarget {
+    /// Screen rectangle containing the clickable file name.
     pub rect: ratatui::layout::Rect,
+    /// Repository root used as the command working directory.
     pub repo_root: String,
+    /// Repository-relative file path to open.
     pub file_path: String,
 }
 

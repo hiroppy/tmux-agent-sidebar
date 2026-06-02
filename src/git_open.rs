@@ -6,6 +6,7 @@ use crate::tmux;
 const DEFAULT_OPEN_COMMAND: &str = "${EDITOR:-nvim} {file}";
 const TARGET_RIGHT_PANE: &str = "right-pane";
 
+/// Opens a Git file row from the sidebar using the configured tmux target.
 pub fn open_git_file(sidebar_pane: &str, repo_root: &str, file_path: &str) -> Result<(), String> {
     let mut opts = HashMap::new();
     if let Some(value) = tmux::get_option(tmux::SIDEBAR_GIT_OPEN_COMMAND) {
@@ -18,10 +19,15 @@ pub fn open_git_file(sidebar_pane: &str, repo_root: &str, file_path: &str) -> Re
     open_git_file_with_ops(sidebar_pane, repo_root, file_path, &opts, &mut ops)
 }
 
+/// Tmux operations needed by Git file opening, abstracted for tests.
 pub(crate) trait GitOpenTmuxOps {
+    /// Runs a tmux command and returns captured stdout.
     fn run_tmux_capture(&mut self, args: &[&str]) -> Result<String, String>;
+    /// Expands a tmux format string for the target pane.
     fn display_message(&mut self, target: &str, format: &str) -> String;
+    /// Reads a pane-local tmux option.
     fn get_pane_option_value(&mut self, pane: &str, key: &str) -> String;
+    /// Stores a pane-local tmux option.
     fn set_pane_option(&mut self, pane: &str, key: &str, value: &str);
 }
 
@@ -45,6 +51,7 @@ impl GitOpenTmuxOps for RealTmuxOps {
     }
 }
 
+/// Opens a Git file using injected tmux operations and option values.
 pub(crate) fn open_git_file_with_ops<T: GitOpenTmuxOps>(
     sidebar_pane: &str,
     repo_root: &str,
@@ -136,6 +143,7 @@ fn run_tmux_args<T: GitOpenTmuxOps>(ops: &mut T, args: Vec<String>) -> Result<St
     ops.run_tmux_capture(&refs)
 }
 
+/// Expands the configured command template with shell-escaped file paths.
 pub(crate) fn build_open_command(template: &str, repo_root: &str, file_path: &str) -> String {
     let abs_file = Path::new(repo_root).join(file_path);
     let quoted_abs_file = shell_quote(&abs_file.to_string_lossy());

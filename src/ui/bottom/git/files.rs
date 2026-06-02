@@ -8,14 +8,21 @@ use crate::ui::text::{display_width, pad_to, truncate_to_width};
 
 pub(super) const MAX_CHANGED_FILES: usize = 10;
 
+/// Rendered file rows plus their per-row open targets.
 pub(super) struct RenderedFileSection {
+    /// Lines to draw in the Git panel.
     pub lines: Vec<Line<'static>>,
+    /// Open targets aligned to visible file-name spans.
     pub targets: Vec<RenderedFileTarget>,
 }
 
+/// File metadata needed to register a clickable target after layout.
 pub(super) struct RenderedFileTarget {
+    /// Row index within the rendered file section.
     pub line_index: usize,
+    /// Repository-relative path to open.
     pub file_path: String,
+    /// Display width of the rendered file name.
     pub name_width: usize,
 }
 
