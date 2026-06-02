@@ -22,7 +22,9 @@ pub use activity::ActivityState;
 pub use filter::{RepoFilter, StatusFilter};
 pub use focus::{Focus, FocusState};
 pub use global::GlobalState;
-pub use layout::{FrameLayout, HyperlinkOverlay, RepoSpawnTarget, RowTarget, SpawnRemoveTarget};
+pub use layout::{
+    FrameLayout, GitFileTarget, HyperlinkOverlay, RepoSpawnTarget, RowTarget, SpawnRemoveTarget,
+};
 pub(crate) use notices::debug_forced_display;
 pub use notices::{ClaudePluginNotice, NoticesCopyTarget, NoticesMissingHookGroup, NoticesState};
 pub use pane_runtime::{PaneRuntimeMap, PaneRuntimeState};
@@ -874,6 +876,7 @@ mod tests {
     fn apply_git_data_copies_all_fields() {
         let mut state = AppState::new("%99".into());
         let data = crate::git::GitData {
+            repo_root: "/repo".into(),
             diff_stat: Some((10, 5)),
             branch: "feature/test".into(),
             ahead_behind: Some((2, 1)),
@@ -886,6 +889,7 @@ mod tests {
             }],
             unstaged_files: vec![],
             untracked_files: vec!["new.rs".into()],
+            untracked_paths: vec!["new.rs".into()],
             remote_url: "https://github.com/user/repo".into(),
             pr_number: Some("42".into()),
         };
@@ -899,6 +903,7 @@ mod tests {
         assert_eq!(state.git.staged_files[0].status, 'M');
         assert!(state.git.unstaged_files.is_empty());
         assert_eq!(state.git.untracked_files, vec!["new.rs"]);
+        assert_eq!(state.git.untracked_paths, vec!["new.rs"]);
         assert_eq!(state.git.changed_file_count(), 2);
         assert_eq!(state.git.remote_url, "https://github.com/user/repo");
         assert_eq!(state.git.pr_number, Some("42".into()));

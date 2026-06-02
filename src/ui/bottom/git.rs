@@ -16,6 +16,12 @@ mod header;
 use files::{render_file_section, render_untracked_section};
 use header::render_git_header;
 
+struct PendingGitFileTarget {
+    line_index: usize,
+    file_path: String,
+    name_width: usize,
+}
+
 /// Build the `+ins/-del` trio that appears in both the git header's
 /// diff-summary line and each changed file row. Returns the styled
 /// spans along with their total rendered width so callers can pad the
@@ -96,22 +102,28 @@ pub(super) fn draw_git_content(frame: &mut Frame, state: &mut AppState, inner: R
 
     let staged = render_file_section("Staged", &state.git.staged_files, inner_w, theme, true);
     let unstaged = render_file_section("Unstaged", &state.git.unstaged_files, inner_w, theme, true);
-    let untracked = render_untracked_section(&state.git.untracked_files, inner_w, theme);
+    let untracked = render_untracked_section(
+        &state.git.untracked_files,
+        &state.git.untracked_paths,
+        inner_w,
+        theme,
+    );
+    let mut pending_targets: Vec<PendingGitFileTarget> = Vec::new();
 
-    if !staged.is_empty() {
-        lines.extend(staged);
+    if !staged.lines.is_empty() {
+        append_file_section(&mut lines, &mut pending_targets, staged);
     }
-    if !unstaged.is_empty() {
+    if !unstaged.lines.is_empty() {
         if !lines.is_empty() {
             lines.push(Line::from(""));
         }
-        lines.extend(unstaged);
+        append_file_section(&mut lines, &mut pending_targets, unstaged);
     }
-    if !untracked.is_empty() {
+    if !untracked.lines.is_empty() {
         if !lines.is_empty() {
             lines.push(Line::from(""));
         }
-        lines.extend(untracked);
+        append_file_section(&mut lines, &mut pending_targets, untracked);
     }
 
     // Working tree clean
@@ -128,8 +140,71 @@ pub(super) fn draw_git_content(frame: &mut Frame, state: &mut AppState, inner: R
     state.scrolls.git.scroll(0);
 
     let scroll_offset = state.scrolls.git.offset as u16;
+    register_visible_git_file_targets(
+        state,
+        content_area,
+        scroll_offset as usize,
+        content_height as usize,
+        pending_targets,
+    );
     let paragraph = Paragraph::new(lines).scroll((scroll_offset, 0));
     frame.render_widget(paragraph, content_area);
+}
+
+fn append_file_section(
+    lines: &mut Vec<Line<'_>>,
+    pending_targets: &mut Vec<PendingGitFileTarget>,
+    section: files::RenderedFileSection,
+) {
+    let base = lines.len();
+    pending_targets.extend(
+        section
+            .targets
+            .into_iter()
+            .map(|target| PendingGitFileTarget {
+                line_index: base + target.line_index,
+                file_path: target.file_path,
+                name_width: target.name_width,
+            }),
+    );
+    lines.extend(section.lines);
+}
+
+fn register_visible_git_file_targets(
+    state: &mut AppState,
+    content_area: Rect,
+    scroll_offset: usize,
+    visible_height: usize,
+    pending_targets: Vec<PendingGitFileTarget>,
+) {
+    if state.git.repo_root.is_empty() {
+        return;
+    }
+
+    let visible_end = scroll_offset + visible_height;
+    for target in pending_targets {
+        if target.line_index < scroll_offset || target.line_index >= visible_end {
+            continue;
+        }
+        let y = content_area.y + (target.line_index - scroll_offset) as u16;
+        let width = (target.name_width as u16).min(content_area.width.saturating_sub(2));
+        if width == 0 {
+            continue;
+        }
+        state
+            .layout
+            .git_file_targets
+            .push(crate::state::GitFileTarget {
+                rect: Rect {
+                    x: content_area.x + 2,
+                    y,
+                    width,
+                    height: 1,
+                },
+                repo_root: state.git.repo_root.clone(),
+                file_path: target.file_path,
+            });
+    }
 }
 
 #[cfg(test)]
@@ -273,6 +348,41 @@ mod tests {
         assert_eq!(overlay.y, 1);
     }
 
+    #[test]
+    fn git_file_targets_registered_for_visible_file_rows() {
+        let mut state = AppState::new(String::new());
+        state.git.branch = "main".into();
+        state.git.repo_root = "/repo".into();
+        state.git.staged_files = vec![GitFileEntry {
+            status: 'M',
+            name: "lib.rs".into(),
+            path: "src/lib.rs".into(),
+            additions: 1,
+            deletions: 0,
+        }];
+        state.git.untracked_files = vec!["debug.log".into()];
+        state.git.untracked_paths = vec!["tmp/debug.log".into()];
+
+        draw(&mut state, 40, 10);
+
+        let paths: Vec<_> = state
+            .layout
+            .git_file_targets
+            .iter()
+            .map(|target| target.file_path.as_str())
+            .collect();
+        assert_eq!(paths, vec!["src/lib.rs", "tmp/debug.log"]);
+        assert!(
+            state
+                .layout
+                .git_file_targets
+                .iter()
+                .all(|target| target.repo_root == "/repo"
+                    && target.rect.height == 1
+                    && target.rect.width > 0)
+        );
+    }
+
     // ─── Branch / PR header rendering ────────────────────────────────
 
     #[test]
@@ -398,7 +508,7 @@ mod tests {
                                          1[fg:252] [fg:252]f[fg:252]i[fg:252]l[fg:252]e[fg:252]s[fg:252]
         ─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]
         S[fg:109]t[fg:109]a[fg:109]g[fg:109]e[fg:109]d[fg:109] [fg:109]([fg:109]1[fg:109])[fg:109]
-        M[fg:221] a[fg:252].[fg:252]r[fg:252]s[fg:252]                             +[fg:114]1[fg:114]/[fg:252]-[fg:174]0[fg:174]
+        M[fg:221] a[fg:117,underline].[fg:117,underline]r[fg:117,underline]s[fg:117,underline]                             +[fg:114]1[fg:114]/[fg:252]-[fg:174]0[fg:174]
         ");
     }
 
@@ -413,7 +523,7 @@ mod tests {
                                          1[fg:252] [fg:252]f[fg:252]i[fg:252]l[fg:252]e[fg:252]s[fg:252]
         ─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]
         U[fg:109]n[fg:109]t[fg:109]r[fg:109]a[fg:109]c[fg:109]k[fg:109]e[fg:109]d[fg:109] [fg:109]([fg:109]1[fg:109])[fg:109]
-        ?[fg:252] t[fg:252]m[fg:252]p[fg:252].[fg:252]l[fg:252]o[fg:252]g[fg:252]
+        ?[fg:252] t[fg:117,underline]m[fg:117,underline]p[fg:117,underline].[fg:117,underline]l[fg:117,underline]o[fg:117,underline]g[fg:117,underline]
         ");
     }
 

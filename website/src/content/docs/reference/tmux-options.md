@@ -20,6 +20,16 @@ Most options must be set **before** loading the plugin in your `tmux.conf`. Colo
 | `@sidebar_notifications_events`  | unset   | Restrict events — see [Notifications](/tmux-agent-sidebar/features/notifications/)       |
 | `@sidebar_pet`                  | `off`   | Show the animated pet in a 5-row band above the bottom panel                           |
 
+## Git tab behavior
+
+| Option                       | Default          | Description                                                                                                    |
+| ---------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------- |
+| `@sidebar_git_open_command`  | `$EDITOR {file}` | Command template for `Ctrl + Left Click` on Git file rows; falls back to `nvim {file}` when `$EDITOR` is empty |
+| `@sidebar_git_open_target`   | `popup`          | Where to run the Git open command: `popup` or `right-pane`                                                      |
+
+The open command runs from the repository root. `{file}` expands to the
+repo-relative path, and `{abs_file}` expands to the absolute path.
+
 ## Worktree spawn defaults
 
 | Option                            | Default     | Description                                               |
