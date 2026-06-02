@@ -220,3 +220,139 @@ fn repo_popup_nav_up(state: &mut AppState) {
         state.set_repo_popup_selected(current - 1);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::group::RepoGroup;
+    use crate::state::RowTarget;
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn ctrl_key(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+
+    /// Build an AppState with three navigable pane rows and Panes focus,
+    /// which is the precondition the navigation arms operate against.
+    fn state_with_three_panes() -> AppState {
+        let mut state = AppState::new("%99".into());
+        state.layout.pane_row_targets = vec![
+            RowTarget {
+                pane_id: "%1".into(),
+            },
+            RowTarget {
+                pane_id: "%2".into(),
+            },
+            RowTarget {
+                pane_id: "%3".into(),
+            },
+        ];
+        state.global.selected_pane_row = 0;
+        state.focus_state.focus = Focus::Panes;
+        state
+    }
+
+    fn state_with_repo_popup_open() -> AppState {
+        let mut state = AppState::new("%99".into());
+        // toggle_repo_popup uses repo_names(), which always includes the
+        // "All" sentinel — pad with two named groups so the selection has
+        // somewhere to move.
+        state.repo_groups = vec![
+            RepoGroup {
+                name: "repo-a".into(),
+                has_focus: false,
+                panes: vec![],
+            },
+            RepoGroup {
+                name: "repo-b".into(),
+                has_focus: false,
+                panes: vec![],
+            },
+        ];
+        state.toggle_repo_popup();
+        state.set_repo_popup_selected(0);
+        state
+    }
+
+    #[test]
+    fn ctrl_n_moves_pane_selection_down() {
+        let mut state = state_with_three_panes();
+        let flag = AtomicBool::new(false);
+        handle_key_event(ctrl_key('n'), &mut state, &flag);
+        assert_eq!(state.global.selected_pane_row, 1);
+        handle_key_event(ctrl_key('n'), &mut state, &flag);
+        assert_eq!(state.global.selected_pane_row, 2);
+    }
+
+    #[test]
+    fn ctrl_p_moves_pane_selection_up() {
+        let mut state = state_with_three_panes();
+        state.global.selected_pane_row = 2;
+        let flag = AtomicBool::new(false);
+        handle_key_event(ctrl_key('p'), &mut state, &flag);
+        assert_eq!(state.global.selected_pane_row, 1);
+        handle_key_event(ctrl_key('p'), &mut state, &flag);
+        assert_eq!(state.global.selected_pane_row, 0);
+    }
+
+    #[test]
+    fn bare_j_and_k_still_navigate_panes() {
+        let mut state = state_with_three_panes();
+        let flag = AtomicBool::new(false);
+        handle_key_event(key(KeyCode::Char('j')), &mut state, &flag);
+        assert_eq!(state.global.selected_pane_row, 1);
+        handle_key_event(key(KeyCode::Char('k')), &mut state, &flag);
+        assert_eq!(state.global.selected_pane_row, 0);
+    }
+
+    #[test]
+    fn bare_n_does_not_move_selection() {
+        // The bare `n` arm is wired to the spawn input flow, not navigation.
+        // We don't assert the popup opens (that requires repo_groups +
+        // git metadata, exercised elsewhere) — only that it does NOT
+        // shadow the Ctrl-N navigation arm.
+        let mut state = state_with_three_panes();
+        let flag = AtomicBool::new(false);
+        handle_key_event(key(KeyCode::Char('n')), &mut state, &flag);
+        assert_eq!(state.global.selected_pane_row, 0);
+    }
+
+    #[test]
+    fn bare_p_is_unbound_in_panes_focus() {
+        let mut state = state_with_three_panes();
+        state.global.selected_pane_row = 1;
+        let flag = AtomicBool::new(false);
+        handle_key_event(key(KeyCode::Char('p')), &mut state, &flag);
+        assert_eq!(state.global.selected_pane_row, 1);
+    }
+
+    #[test]
+    fn ctrl_n_navigates_repo_popup_down() {
+        let mut state = state_with_repo_popup_open();
+        let flag = AtomicBool::new(false);
+        handle_key_event(ctrl_key('n'), &mut state, &flag);
+        assert_eq!(state.repo_popup_selected(), 1);
+        handle_key_event(ctrl_key('n'), &mut state, &flag);
+        assert_eq!(state.repo_popup_selected(), 2);
+        // Past the last entry the popup nav helper is a no-op.
+        handle_key_event(ctrl_key('n'), &mut state, &flag);
+        assert_eq!(state.repo_popup_selected(), 2);
+    }
+
+    #[test]
+    fn ctrl_p_navigates_repo_popup_up() {
+        let mut state = state_with_repo_popup_open();
+        state.set_repo_popup_selected(2);
+        let flag = AtomicBool::new(false);
+        handle_key_event(ctrl_key('p'), &mut state, &flag);
+        assert_eq!(state.repo_popup_selected(), 1);
+        handle_key_event(ctrl_key('p'), &mut state, &flag);
+        assert_eq!(state.repo_popup_selected(), 0);
+        // Below 0 the popup nav helper is a no-op.
+        handle_key_event(ctrl_key('p'), &mut state, &flag);
+        assert_eq!(state.repo_popup_selected(), 0);
+    }
+}
