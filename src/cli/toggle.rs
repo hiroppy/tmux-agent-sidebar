@@ -48,6 +48,11 @@ pub(crate) fn cmd_toggle(args: &[String]) -> i32 {
         sidebar_width_setting
     };
 
+    let sidebar_position = SidebarPosition::from_setting(&tmux::display_message(
+        window_id,
+        &format!("#{{{}}}", tmux::SIDEBAR_POSITION),
+    ));
+
     // Check for existing sidebar
     let pane_id_role_format = pane_id_role_format();
     let panes_output = tmux::run_tmux(&["list-panes", "-t", window_id, "-F", &pane_id_role_format])
@@ -70,30 +75,18 @@ pub(crate) fn cmd_toggle(args: &[String]) -> i32 {
         return 0;
     }
 
-    // Find leftmost pane
-    let leftmost_output = tmux::run_tmux(&[
+    let pane_geometry_output = tmux::run_tmux(&[
         "list-panes",
         "-t",
         window_id,
         "-F",
-        "#{pane_left} #{pane_id}",
+        "#{pane_left} #{pane_width} #{pane_id}",
     ])
     .unwrap_or_default();
 
-    let leftmost_pane = leftmost_output
-        .lines()
-        .filter_map(|line| {
-            let parts: Vec<&str> = line.splitn(2, ' ').collect();
-            if parts.len() >= 2 {
-                let left: u32 = parts[0].parse().unwrap_or(u32::MAX);
-                Some((left, parts[1].to_string()))
-            } else {
-                None
-            }
-        })
-        .min_by_key(|(left, _)| *left)
-        .map(|(_, id)| id)
+    let target_pane = target_pane_for_position(&pane_geometry_output, sidebar_position)
         .unwrap_or_else(|| window_id.to_string());
+    let split_flags = split_window_flags(sidebar_position);
 
     // Remember active pane
     let active_pane = tmux::display_message(window_id, "#{pane_id}");
@@ -107,11 +100,11 @@ pub(crate) fn cmd_toggle(args: &[String]) -> i32 {
     // Create sidebar pane
     let sidebar_pane = tmux::run_tmux(&[
         "split-window",
-        "-hfb",
+        split_flags,
         "-l",
         &sidebar_width,
         "-t",
-        &leftmost_pane,
+        &target_pane,
         "-c",
         pane_path,
         "-P",
@@ -189,6 +182,57 @@ fn unique_window_paths(output: &str) -> Vec<(String, String)> {
     }
 
     windows
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SidebarPosition {
+    Left,
+    Right,
+}
+
+impl SidebarPosition {
+    fn from_setting(setting: &str) -> Self {
+        if setting.trim().eq_ignore_ascii_case("right") {
+            Self::Right
+        } else {
+            Self::Left
+        }
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct PaneGeometry {
+    left: u32,
+    width: u32,
+    pane_id: String,
+}
+
+fn parse_pane_geometry(line: &str) -> Option<PaneGeometry> {
+    let mut parts = line.split_whitespace();
+    let left = parts.next()?.parse().ok()?;
+    let width = parts.next()?.parse().ok()?;
+    let pane_id = parts.next()?.to_string();
+    Some(PaneGeometry {
+        left,
+        width,
+        pane_id,
+    })
+}
+
+fn target_pane_for_position(output: &str, position: SidebarPosition) -> Option<String> {
+    let panes = output.lines().filter_map(parse_pane_geometry);
+    match position {
+        SidebarPosition::Left => panes.min_by_key(|pane| pane.left),
+        SidebarPosition::Right => panes.max_by_key(|pane| pane.left.saturating_add(pane.width)),
+    }
+    .map(|pane| pane.pane_id)
+}
+
+fn split_window_flags(position: SidebarPosition) -> &'static str {
+    match position {
+        SidebarPosition::Left => "-hfb",
+        SidebarPosition::Right => "-hf",
+    }
 }
 
 /// Decide whether `cmd_auto_close` should kill the window, given the raw
@@ -319,6 +363,63 @@ mod tests {
             unique_window_paths(output),
             vec![("%1".to_string(), "/tmp".to_string())]
         );
+    }
+
+    // ─── sidebar placement ───────────────────────────────────────────
+
+    #[test]
+    fn sidebar_position_parses_right_only() {
+        assert_eq!(
+            SidebarPosition::from_setting("right"),
+            SidebarPosition::Right
+        );
+        assert_eq!(
+            SidebarPosition::from_setting(" RIGHT "),
+            SidebarPosition::Right
+        );
+        assert_eq!(SidebarPosition::from_setting("left"), SidebarPosition::Left);
+        assert_eq!(SidebarPosition::from_setting(""), SidebarPosition::Left);
+        assert_eq!(
+            SidebarPosition::from_setting("invalid"),
+            SidebarPosition::Left
+        );
+    }
+
+    #[test]
+    fn target_pane_for_left_position_uses_leftmost_pane() {
+        let output = "40 80 %3\n0 20 %1\n20 20 %2";
+
+        assert_eq!(
+            target_pane_for_position(output, SidebarPosition::Left),
+            Some("%1".to_string())
+        );
+    }
+
+    #[test]
+    fn target_pane_for_right_position_uses_largest_right_edge() {
+        let output = "0 20 %1\n20 20 %2\n40 80 %3";
+
+        assert_eq!(
+            target_pane_for_position(output, SidebarPosition::Right),
+            Some("%3".to_string())
+        );
+    }
+
+    #[test]
+    fn target_pane_for_position_skips_malformed_lines() {
+        let output = "bad-line\n0 nope %1\n12 30 %2";
+
+        assert_eq!(
+            target_pane_for_position(output, SidebarPosition::Left),
+            Some("%2".to_string())
+        );
+        assert_eq!(target_pane_for_position("", SidebarPosition::Right), None);
+    }
+
+    #[test]
+    fn split_window_flags_match_tmux_side_semantics() {
+        assert_eq!(split_window_flags(SidebarPosition::Left), "-hfb");
+        assert_eq!(split_window_flags(SidebarPosition::Right), "-hf");
     }
 
     // ─── should_kill_window ───────────────────────────────────────────

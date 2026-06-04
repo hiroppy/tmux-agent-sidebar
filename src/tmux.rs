@@ -27,8 +27,9 @@ pub use options::{
     SIDEBAR_COLOR_WAITING, SIDEBAR_CURSOR, SIDEBAR_FILTER, SIDEBAR_ICON_ALL,
     SIDEBAR_ICON_BACKGROUND, SIDEBAR_ICON_ERROR, SIDEBAR_ICON_IDLE, SIDEBAR_ICON_RUNNING,
     SIDEBAR_ICON_UNKNOWN, SIDEBAR_ICON_WAITING, SIDEBAR_NOTIFICATIONS,
-    SIDEBAR_NOTIFICATIONS_EVENTS, SIDEBAR_PET, SIDEBAR_PID, SIDEBAR_REPO_FILTER, SIDEBAR_WIDTH,
-    get_all_global_options, get_option, get_pane_option_value, set_pane_option, unset_pane_option,
+    SIDEBAR_NOTIFICATIONS_EVENTS, SIDEBAR_PET, SIDEBAR_PID, SIDEBAR_POSITION, SIDEBAR_REPO_FILTER,
+    SIDEBAR_WIDTH, get_all_global_options, get_option, get_pane_option_value, set_pane_option,
+    unset_pane_option,
 };
 pub use panes::{
     find_active_pane, focused_pane_path, get_pane_path, get_sidebar_pane_info,

@@ -12,6 +12,7 @@ Most options must be set **before** loading the plugin in your `tmux.conf`. Colo
 | `@sidebar_key`                   | `e`     | Prefix-triggered keybinding to toggle the sidebar in the current window                 |
 | `@sidebar_key_all`               | `E`     | Prefix-triggered keybinding to toggle the sidebar in all windows                        |
 | `@sidebar_width`                 | `15%`   | Width in columns or as a percentage                                                     |
+| `@sidebar_position`              | `left`  | Sidebar placement (`left` or `right`)                                                   |
 | `@sidebar_bottom_height`         | `20`    | Bottom panel height in lines (set `0` to hide)                                          |
 | `@sidebar_auto_create`           | `on`    | Auto-create the sidebar on new windows (set `off` to disable)                           |
 | `@sidebar_notifications`         | `on`    | Master switch for desktop notifications                                                 |
@@ -110,6 +111,7 @@ Any Unicode glyph works. Make sure the glyphs render in your terminal font.
 # Behavior
 set -g @sidebar_key T
 set -g @sidebar_width 32
+set -g @sidebar_position right
 set -g @sidebar_bottom_height 25
 set -g @sidebar_notifications_events "stop,notification"
 set -g @agent-sidebar-default-agent codex
