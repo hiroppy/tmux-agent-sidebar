@@ -184,6 +184,8 @@ fn unique_window_paths(output: &str) -> Vec<(String, String)> {
     windows
 }
 
+/// Which side of the window the sidebar pane is created on, driven by
+/// the `@sidebar_position` tmux option.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SidebarPosition {
     Left,
@@ -191,6 +193,11 @@ enum SidebarPosition {
 }
 
 impl SidebarPosition {
+    /// Parse the raw `@sidebar_position` option value. Only an explicit
+    /// (case-insensitive, whitespace-tolerant) `right` selects the right
+    /// side; everything else — including unset, empty, or invalid values
+    /// — falls back to the historical default of `left`, so a typo never
+    /// moves the sidebar somewhere unexpected.
     fn from_setting(setting: &str) -> Self {
         if setting.trim().eq_ignore_ascii_case("right") {
             Self::Right
@@ -200,6 +207,8 @@ impl SidebarPosition {
     }
 }
 
+/// Horizontal placement of one pane, parsed from a
+/// `#{pane_left} #{pane_width} #{pane_id}` formatted `list-panes` line.
 #[derive(Debug, Eq, PartialEq)]
 struct PaneGeometry {
     left: u32,
@@ -207,6 +216,8 @@ struct PaneGeometry {
     pane_id: String,
 }
 
+/// Parse a single `list-panes` output line into a [`PaneGeometry`].
+/// Returns `None` for malformed lines so callers can simply skip them.
 fn parse_pane_geometry(line: &str) -> Option<PaneGeometry> {
     let mut parts = line.split_whitespace();
     let left = parts.next()?.parse().ok()?;
@@ -219,6 +230,10 @@ fn parse_pane_geometry(line: &str) -> Option<PaneGeometry> {
     })
 }
 
+/// Pick the pane the sidebar splits from: the leftmost pane for a left
+/// sidebar, or the pane with the largest right edge (`left + width`) for
+/// a right sidebar, so the new pane always lands at the window's outer
+/// edge. Returns `None` when no line of `output` parses as geometry.
 fn target_pane_for_position(output: &str, position: SidebarPosition) -> Option<String> {
     let panes = output.lines().filter_map(parse_pane_geometry);
     match position {
@@ -228,6 +243,9 @@ fn target_pane_for_position(output: &str, position: SidebarPosition) -> Option<S
     .map(|pane| pane.pane_id)
 }
 
+/// `split-window` flags for each placement: `-hfb` inserts the new pane
+/// before the target (left of it), `-hf` after it (right of it). Both
+/// `f` variants span the full window height.
 fn split_window_flags(position: SidebarPosition) -> &'static str {
     match position {
         SidebarPosition::Left => "-hfb",
