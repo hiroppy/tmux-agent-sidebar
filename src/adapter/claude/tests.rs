@@ -385,27 +385,6 @@ fn teammate_idle_with_reason() {
 }
 
 #[test]
-fn worktree_create() {
-    let adapter = ClaudeAdapter;
-    assert_eq!(
-        adapter.parse("worktree-create", &json!({})).unwrap(),
-        AgentEvent::WorktreeCreate
-    );
-}
-
-#[test]
-fn worktree_remove() {
-    let adapter = ClaudeAdapter;
-    let input = json!({"worktree_path": "/tmp/wt"});
-    assert_eq!(
-        adapter.parse("worktree-remove", &input).unwrap(),
-        AgentEvent::WorktreeRemove {
-            worktree_path: "/tmp/wt".into(),
-        }
-    );
-}
-
-#[test]
 fn task_created_empty_fields() {
     let adapter = ClaudeAdapter;
     assert_eq!(
@@ -438,17 +417,6 @@ fn teammate_idle_empty_fields() {
             teammate_name: "".into(),
             team_name: "".into(),
             idle_reason: "".into(),
-        }
-    );
-}
-
-#[test]
-fn worktree_remove_empty_path() {
-    let adapter = ClaudeAdapter;
-    assert_eq!(
-        adapter.parse("worktree-remove", &json!({})).unwrap(),
-        AgentEvent::WorktreeRemove {
-            worktree_path: "".into(),
         }
     );
 }
@@ -521,42 +489,6 @@ fn teammate_idle_full_upstream_payload() {
             teammate_name: "code-reviewer".into(),
             team_name: "review-team".into(),
             idle_reason: "".into(),
-        }
-    );
-}
-
-#[test]
-fn worktree_create_full_upstream_payload() {
-    let adapter = ClaudeAdapter;
-    let input = json!({
-        "session_id": "sess-1",
-        "transcript_path": "/tmp/transcript",
-        "cwd": "/home/user/project",
-        "hook_event_name": "WorktreeCreate",
-        "agent_id": "sub-1"
-    });
-    assert_eq!(
-        adapter.parse("worktree-create", &input).unwrap(),
-        AgentEvent::WorktreeCreate
-    );
-}
-
-#[test]
-fn worktree_remove_full_upstream_payload() {
-    let adapter = ClaudeAdapter;
-    let input = json!({
-        "session_id": "sess-1",
-        "transcript_path": "/tmp/transcript",
-        "cwd": "/home/user/project",
-        "hook_event_name": "WorktreeRemove",
-        "worktree_path": "/tmp/worktrees/feat-branch",
-        "agent_id": "sub-1"
-    });
-    let event = adapter.parse("worktree-remove", &input).unwrap();
-    assert_eq!(
-        event,
-        AgentEvent::WorktreeRemove {
-            worktree_path: "/tmp/worktrees/feat-branch".into(),
         }
     );
 }

@@ -30,7 +30,6 @@ Claude Code is the reference agent for the sidebar — every feature is wired th
 ### Git and worktrees
 
 - Branch display, updated dynamically via `CwdChanged`
-- Worktree lifecycle tracking via `WorktreeCreate` / `WorktreeRemove`
 - PR number (needs `gh` CLI)
 
 ### Notifications

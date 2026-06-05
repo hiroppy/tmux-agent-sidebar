@@ -126,16 +126,6 @@ impl ClaudeAdapter {
             matcher: None,
             kind: AgentEventKind::TeammateIdle,
         },
-        HookRegistration {
-            trigger: "WorktreeCreate",
-            matcher: None,
-            kind: AgentEventKind::WorktreeCreate,
-        },
-        HookRegistration {
-            trigger: "WorktreeRemove",
-            matcher: None,
-            kind: AgentEventKind::WorktreeRemove,
-        },
     ];
 }
 
@@ -272,10 +262,6 @@ impl EventAdapter for ClaudeAdapter {
                 teammate_name: json_str(input, "teammate_name").into(),
                 team_name: json_str(input, "team_name").into(),
                 idle_reason: json_str(input, "idle_reason").into(),
-            }),
-            "worktree-create" => Some(AgentEvent::WorktreeCreate),
-            "worktree-remove" => Some(AgentEvent::WorktreeRemove {
-                worktree_path: json_str(input, "worktree_path").into(),
             }),
             _ => None,
         }

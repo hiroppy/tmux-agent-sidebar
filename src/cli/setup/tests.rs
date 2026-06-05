@@ -669,18 +669,6 @@ const EXPECTED_FULL_OUTPUT: &str = r#"{
           "event": "teammate-idle",
           "matcher": null,
           "trigger": "TeammateIdle"
-        },
-        {
-          "command": "bash /fake/hook.sh claude worktree-create",
-          "event": "worktree-create",
-          "matcher": null,
-          "trigger": "WorktreeCreate"
-        },
-        {
-          "command": "bash /fake/hook.sh claude worktree-remove",
-          "event": "worktree-remove",
-          "matcher": null,
-          "trigger": "WorktreeRemove"
         }
       ],
       "snippet": {
@@ -833,28 +821,6 @@ const EXPECTED_FULL_OUTPUT: &str = r#"{
               "hooks": [
                 {
                   "command": "bash /fake/hook.sh claude user-prompt-submit",
-                  "type": "command"
-                }
-              ],
-              "matcher": ""
-            }
-          ],
-          "WorktreeCreate": [
-            {
-              "hooks": [
-                {
-                  "command": "bash /fake/hook.sh claude worktree-create",
-                  "type": "command"
-                }
-              ],
-              "matcher": ""
-            }
-          ],
-          "WorktreeRemove": [
-            {
-              "hooks": [
-                {
-                  "command": "bash /fake/hook.sh claude worktree-remove",
                   "type": "command"
                 }
               ],

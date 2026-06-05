@@ -48,4 +48,4 @@ Spawn-created branches are auto-generated under the `agent/` prefix for short-li
 
 ## Availability
 
-Worktree lifecycle tracking is Claude-only today — it needs the `WorktreeCreate` / `WorktreeRemove` hooks, which Codex and OpenCode do not emit.
+The plugin no longer registers Claude Code's `WorktreeCreate` / `WorktreeRemove` hooks: Claude Code treats them as delegation hooks that must perform the worktree operation and return its path, so observe-only registrations break Claude Code's built-in worktree isolation. The sidebar still tracks worktrees it spawns itself and follows agent location changes via `CwdChanged`.

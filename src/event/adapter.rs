@@ -309,26 +309,6 @@ mod tests {
     }
 
     #[test]
-    fn claude_worktree_create_round_trip() {
-        let adapter = resolve_adapter("claude").unwrap();
-        let event = adapter.parse("worktree-create", &json!({})).unwrap();
-        assert_eq!(event, AgentEvent::WorktreeCreate);
-    }
-
-    #[test]
-    fn claude_worktree_remove_round_trip() {
-        let adapter = resolve_adapter("claude").unwrap();
-        let input = json!({"worktree_path": "/tmp/wt-feat"});
-        let event = adapter.parse("worktree-remove", &input).unwrap();
-        match event {
-            AgentEvent::WorktreeRemove { worktree_path } => {
-                assert_eq!(worktree_path, "/tmp/wt-feat");
-            }
-            other => panic!("expected WorktreeRemove, got {:?}", other),
-        }
-    }
-
-    #[test]
     fn codex_rejects_new_events_with_full_payloads() {
         let adapter = resolve_adapter("codex").unwrap();
         // Codex should ignore all new lifecycle events even with realistic payloads

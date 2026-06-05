@@ -153,28 +153,6 @@
           }
         ]
       }
-    ],
-    "WorktreeCreate": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hook.sh\" claude worktree-create"
-          }
-        ]
-      }
-    ],
-    "WorktreeRemove": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hook.sh\" claude worktree-remove"
-          }
-        ]
-      }
     ]
   }
 }
