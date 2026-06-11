@@ -38,9 +38,15 @@ Each section lists up to 10 entries and collapses the rest into a `+N more` row.
 
 ## Opening files
 
-Hold `Ctrl` and left-click a visible file row to open it in a tmux popup.
+Hold `Ctrl` and left-click a visible file row to run the configured Git open action.
 
-By default the popup runs `${EDITOR:-vim} {file}` from the repository root.
-Set `EDITOR` to use a different editor such as `nvim`.
+By default the sidebar opens a tmux popup in the repository root and runs
+`${EDITOR:-vim} {file}`. Set `EDITOR` to use a different editor such as
+`nvim`.
+
+Use `@sidebar_git_open_command` to change the command. Use
+`@sidebar_git_open_target` to choose `popup` or `right-pane`. The right-pane
+target is best suited to repo-level tools such as `lazygit` or custom diff
+viewers.
 
 Git data is refreshed from a background polling thread, so interaction with the sidebar stays snappy even in repositories with slow git operations.

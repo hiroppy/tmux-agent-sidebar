@@ -23,7 +23,7 @@ description: Every shortcut in the sidebar, the worktree spawn modal, and the cl
 
 | Key                  | Action                                                        |
 | -------------------- | ------------------------------------------------------------- |
-| `Ctrl + Left Click`  | Open the clicked visible file row in the editor popup         |
+| `Ctrl + Left Click`  | Open the clicked visible file row with the configured command |
 
 ## Repo filter popup
 
