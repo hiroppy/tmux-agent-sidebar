@@ -5,7 +5,7 @@ pub mod plugin_state;
 pub(crate) mod setup;
 pub(crate) mod shared_html;
 mod spawn;
-mod toggle;
+pub(crate) mod toggle;
 
 use std::io::Read;
 

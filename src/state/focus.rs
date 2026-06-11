@@ -92,6 +92,25 @@ impl AppState {
             // periodic tmux refresh.
             self.focus_state.focused_pane_id = Some(target_pane_id.clone());
             tmux::select_pane(&target_pane_id);
+
+            // The jump may land on a window that has no sidebar of its own
+            // (e.g. with @sidebar_auto_create off). Summon one there so the
+            // sidebar "follows" the jump instead of disappearing. create-only
+            // is a no-op when that window already has a sidebar.
+            let window_id = tmux::display_message(&target_pane_id, "#{window_id}");
+            if !window_id.is_empty() {
+                let pane_path = tmux::display_message(&target_pane_id, "#{pane_current_path}");
+                let pane_path = if pane_path.is_empty() {
+                    "~".to_string()
+                } else {
+                    pane_path
+                };
+                crate::cli::toggle::cmd_toggle(&[
+                    "--create-only".to_string(),
+                    window_id,
+                    pane_path,
+                ]);
+            }
         }
     }
 }
