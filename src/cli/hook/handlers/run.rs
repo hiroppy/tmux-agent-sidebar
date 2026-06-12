@@ -49,6 +49,12 @@ pub(in crate::cli::hook) fn on_stop(
         tmux::set_pane_option(pane, tmux::PANE_PROMPT_SOURCE, "response");
     }
     let bg_shell_live = !tmux::get_pane_option_value(pane, tmux::PANE_BG_CMD).is_empty();
+    // `Stop` is emitted for the parent turn, and Claude Code `Task` subagents
+    // are synchronous: once the parent reaches Stop, no child should still be
+    // running. Treat any leftover list as stale state from a missed or
+    // mismatched SubagentStop and clear it before `mark_task_reset`, whose
+    // guard intentionally skips writes while subagents are active.
+    tmux::unset_pane_option(pane, tmux::PANE_SUBAGENTS);
     if bg_shell_live {
         tmux::unset_pane_option(pane, tmux::PANE_WAIT_REASON);
     } else {
@@ -282,6 +288,44 @@ mod tests {
             Some("idle")
         );
         assert!(!tmux::test_mock::contains(pane, tmux::PANE_STARTED_AT));
+    }
+
+    #[test]
+    fn on_stop_clears_stale_subagents() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%STOP_STALE_SUBAGENTS";
+        tmux::test_mock::set(
+            pane,
+            tmux::PANE_SUBAGENTS,
+            "general-purpose:sub-1,general-purpose:sub-2",
+        );
+        let ctx = AgentContext {
+            agent: "claude",
+            cwd: "/repo",
+            permission_mode: "default",
+            worktree: &None,
+            session_id: &None,
+        };
+
+        on_stop(
+            pane,
+            &ctx,
+            "",
+            None,
+            &desktop_notification::DesktopNotificationSettings {
+                enabled: false,
+                events: Default::default(),
+            },
+        );
+
+        assert!(
+            !tmux::test_mock::contains(pane, tmux::PANE_SUBAGENTS),
+            "parent Stop must clear stale subagent list"
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("idle")
+        );
     }
 
     #[test]
