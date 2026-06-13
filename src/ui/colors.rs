@@ -3,6 +3,7 @@ use ratatui::style::Color;
 use crate::tmux::{self, AgentType, PaneStatus};
 
 /// Runtime color theme, loaded from tmux @sidebar_color_* variables on startup.
+/// Overrides may be xterm-256 indexes or six-digit RGB hex values.
 /// Falls back to defaults if tmux variables are not set.
 #[derive(Debug, Clone)]
 pub struct ColorTheme {
@@ -93,15 +94,17 @@ impl ColorTheme {
     /// Load colors from tmux @sidebar_color_* variables, falling back to defaults.
     /// Fetches all global options in a single tmux call to avoid N subprocess forks.
     pub fn from_tmux() -> Self {
-        let mut theme = Self::default();
-
         let all_opts = tmux::get_all_global_options();
+        Self::from_options(&all_opts)
+    }
+
+    fn from_options(all_opts: &std::collections::HashMap<String, String>) -> Self {
+        let mut theme = Self::default();
 
         let read = |var: &str, fallback: Color| -> Color {
             all_opts
                 .get(var)
-                .and_then(|s| s.parse::<u8>().ok())
-                .map(Color::Indexed)
+                .and_then(|s| parse_tmux_color(s))
                 .unwrap_or(fallback)
         };
 
@@ -167,6 +170,25 @@ impl ColorTheme {
     }
 }
 
+fn parse_tmux_color(value: &str) -> Option<Color> {
+    let value = value.trim();
+    if let Ok(index) = value.parse::<u8>() {
+        return Some(Color::Indexed(index));
+    }
+
+    let hex = value.strip_prefix('#').unwrap_or(value);
+    if hex.len() != 6 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+
+    let rgb = u32::from_str_radix(hex, 16).ok()?;
+    Some(Color::Rgb(
+        ((rgb >> 16) & 0xff) as u8,
+        ((rgb >> 8) & 0xff) as u8,
+        (rgb & 0xff) as u8,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,5 +251,43 @@ mod tests {
         let theme = ColorTheme::default();
         assert_eq!(theme.pet_body, Color::Indexed(208));
         assert_eq!(theme.pet_eye, Color::Indexed(114));
+    }
+
+    #[test]
+    fn from_options_accepts_hex_and_indexed_colors() {
+        let mut options = std::collections::HashMap::new();
+        options.insert(
+            tmux::SIDEBAR_COLOR_ACCENT.to_string(),
+            "#1a2b3c".to_string(),
+        );
+        options.insert(
+            tmux::SIDEBAR_COLOR_AGENT_CODEX.to_string(),
+            "d0e7ff".to_string(),
+        );
+        options.insert(tmux::SIDEBAR_COLOR_BORDER.to_string(), "42".to_string());
+
+        let theme = ColorTheme::from_options(&options);
+
+        assert_eq!(theme.accent, Color::Rgb(0x1a, 0x2b, 0x3c));
+        assert_eq!(theme.agent_codex, Color::Rgb(0xd0, 0xe7, 0xff));
+        assert_eq!(theme.border_inactive, Color::Indexed(42));
+    }
+
+    #[test]
+    fn from_options_falls_back_for_invalid_colors() {
+        let mut options = std::collections::HashMap::new();
+        options.insert(tmux::SIDEBAR_COLOR_ACCENT.to_string(), "#12".to_string());
+        options.insert(
+            tmux::SIDEBAR_COLOR_AGENT_CLAUDE.to_string(),
+            "not-a-color".to_string(),
+        );
+        options.insert(tmux::SIDEBAR_COLOR_BORDER.to_string(), "256".to_string());
+
+        let theme = ColorTheme::from_options(&options);
+        let default_theme = ColorTheme::default();
+
+        assert_eq!(theme.accent, default_theme.accent);
+        assert_eq!(theme.agent_claude, default_theme.agent_claude);
+        assert_eq!(theme.border_inactive, default_theme.border_inactive);
     }
 }

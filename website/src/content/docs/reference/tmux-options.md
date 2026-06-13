@@ -3,7 +3,7 @@ title: tmux options
 description: Every @sidebar_* / @agent-sidebar-* option the plugin reads.
 ---
 
-Most options must be set **before** loading the plugin in your `tmux.conf`. Color codes are xterm 256-color numbers (0–255); icons can be any Unicode glyph.
+Most options must be set **before** loading the plugin in your `tmux.conf`. Color values can be xterm 256-color numbers (`0`-`255`) or six-digit hex colors (`#RRGGBB` or `RRGGBB`); icons can be any Unicode glyph.
 
 ## Sidebar behavior
 
@@ -119,7 +119,7 @@ set -g @agent-sidebar-default-agent codex
 
 # Colors
 set -g @sidebar_color_accent 117
-set -g @sidebar_color_agent_claude 203
+set -g @sidebar_color_agent_claude "#d97757"
 set -g @sidebar_color_agent_opencode 39
 
 # Icons
