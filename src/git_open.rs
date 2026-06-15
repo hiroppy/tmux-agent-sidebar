@@ -72,6 +72,14 @@ pub(crate) fn open_git_file_with_ops<T: GitOpenTmuxOps>(
     if file_path.is_empty() {
         return Err("missing file path".into());
     }
+    let path = Path::new(file_path);
+    if path.is_absolute()
+        || path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err("file path must be repo-relative".into());
+    }
 
     let template = opts
         .get(tmux::SIDEBAR_GIT_OPEN_COMMAND)
@@ -270,6 +278,31 @@ mod tests {
                 r#"bash -lc "nvim 'src/main.rs'""#.to_string(),
             ]]
         );
+    }
+
+    #[test]
+    fn rejects_absolute_file_path_before_dispatch() {
+        let mut ops = FakeTmuxOps::default();
+        let opts = HashMap::new();
+
+        let err = open_git_file_with_ops("%sidebar", "/repo", "/tmp/outside.rs", &opts, &mut ops)
+            .unwrap_err();
+
+        assert_eq!(err, "file path must be repo-relative");
+        assert!(ops.commands.is_empty());
+    }
+
+    #[test]
+    fn rejects_parent_traversal_file_path_before_dispatch() {
+        let mut ops = FakeTmuxOps::default();
+        let opts = HashMap::new();
+
+        let err =
+            open_git_file_with_ops("%sidebar", "/repo", "src/../../outside.rs", &opts, &mut ops)
+                .unwrap_err();
+
+        assert_eq!(err, "file path must be repo-relative");
+        assert!(ops.commands.is_empty());
     }
 
     #[test]
