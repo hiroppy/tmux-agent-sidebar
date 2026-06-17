@@ -9,6 +9,35 @@ pub fn run_tmux(args: &[&str]) -> Option<String> {
     }
 }
 
+/// Poke every *other* sidebar instance (each advertises its pid in the
+/// `@sidebar_pid` pane option) with SIGUSR1 so it reloads globally-shared
+/// state right away. Use after writing a shared tmux option (status filter,
+/// repo filter, selection cursor) so the change propagates to all instances —
+/// including hidden ones — immediately, instead of each picking it up lazily on
+/// its next refresh. The caller already holds the new value, so its own pid is
+/// skipped.
+pub fn notify_other_sidebars() {
+    let self_pid = std::process::id();
+    let Some(out) = run_tmux(&["list-panes", "-a", "-F", "#{@sidebar_pid}"]) else {
+        return;
+    };
+    for line in out.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Ok(pid) = line.parse::<u32>()
+            && pid != self_pid
+        {
+            // SIGUSR1 is the existing "reload" signal; an invalid/dead pid just
+            // yields ESRCH, which we ignore.
+            unsafe {
+                libc::kill(pid as libc::pid_t, libc::SIGUSR1);
+            }
+        }
+    }
+}
+
 /// Run a tmux command, returning trimmed stdout on success and stderr on failure.
 /// Used by the spawn/remove flow so the UI can surface a meaningful error message
 /// instead of a silent fallthrough.

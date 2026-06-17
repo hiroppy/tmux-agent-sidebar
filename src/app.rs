@@ -64,9 +64,28 @@ pub fn run(
         };
         if event::poll(timeout)? {
             loop {
-                let ev = event::read()?;
-                if input::handle_event(ev, &mut state, &git_tab_active, terminal) {
-                    needs_redraw = true;
+                match event::read()? {
+                    // tmux moved focus off this pane (window/session switch).
+                    // Drop the selection highlight immediately so a backgrounded
+                    // sidebar doesn't leave a stale "keyboard focus" residual in
+                    // its buffer that flashes back on a fast switch — instead of
+                    // waiting up to a full refresh tick for session_attached to
+                    // catch up.
+                    event::Event::FocusLost => {
+                        if state.focus_state.sidebar_focused {
+                            state.focus_state.sidebar_focused = false;
+                            needs_redraw = true;
+                        }
+                    }
+                    // Regained focus: re-derive focus/selection state now.
+                    event::Event::FocusGained => {
+                        needs_refresh.store(true, Ordering::Relaxed);
+                    }
+                    ev => {
+                        if input::handle_event(ev, &mut state, &git_tab_active, terminal) {
+                            needs_redraw = true;
+                        }
+                    }
                 }
                 if !event::poll(Duration::ZERO)? {
                     break;
@@ -88,6 +107,15 @@ pub fn run(
         if sigusr1 || last_refresh.elapsed() >= refresh_interval {
             let previous_focused_pane_id = state.focus_state.focused_pane_id.clone();
             let is_window_active = state.refresh();
+            // A SIGUSR1 poke is either a focus hook or a peer broadcasting a
+            // shared-state change (status/repo filter, selection cursor). Reload
+            // globally-shared options now so the change lands immediately, even
+            // on a hidden/background instance — which otherwise only reloads
+            // when its own window next becomes active.
+            if sigusr1 {
+                state.global.load_from_tmux();
+                state.rebuild_row_targets();
+            }
             if state.focus_state.focused_pane_id != previous_focused_pane_id {
                 render::refresh_git_for_focused_pane(&mut state);
             }
@@ -124,5 +152,8 @@ pub fn run(
         state
             .global
             .flush_pending_cursor_save(std::time::Duration::from_millis(120));
+        state
+            .global
+            .flush_pending_broadcast(std::time::Duration::from_millis(150));
     }
 }
