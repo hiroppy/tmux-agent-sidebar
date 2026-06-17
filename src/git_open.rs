@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::tmux;
 
-const DEFAULT_OPEN_COMMAND: &str = "${EDITOR:-vim} {file}";
+const DEFAULT_OPEN_COMMAND: &str = "${EDITOR:-nvim} {file}";
 const DEFAULT_POPUP_WIDTH: &str = "95%";
 const DEFAULT_POPUP_HEIGHT: &str = "95%";
 const TARGET_RIGHT_PANE: &str = "right-pane";
@@ -136,13 +136,14 @@ fn open_in_right_pane<T: GitOpenTmuxOps>(
         .map(|_| ());
     }
 
+    let split_target = right_pane_split_target(sidebar_pane, ops)?;
     let pane_id = run_tmux_args(
         ops,
         vec![
             "split-window".into(),
             "-h".into(),
             "-t".into(),
-            sidebar_pane.into(),
+            split_target,
             "-c".into(),
             repo_root.into(),
             "-P".into(),
@@ -155,6 +156,57 @@ fn open_in_right_pane<T: GitOpenTmuxOps>(
         ops.set_pane_option(sidebar_pane, tmux::SIDEBAR_GIT_OPEN_PANE, &pane_id);
     }
     Ok(())
+}
+
+fn right_pane_split_target<T: GitOpenTmuxOps>(
+    sidebar_pane: &str,
+    ops: &mut T,
+) -> Result<String, String> {
+    let window_id = ops.display_message(sidebar_pane, "#{window_id}");
+    if window_id.is_empty() {
+        return Ok(sidebar_pane.to_string());
+    }
+
+    let output = run_tmux_args(
+        ops,
+        vec![
+            "list-panes".into(),
+            "-t".into(),
+            window_id,
+            "-F".into(),
+            format!(
+                "#{{pane_left}} #{{pane_width}} #{{pane_id}} #{{{}}}",
+                tmux::PANE_ROLE
+            ),
+        ],
+    )?;
+
+    Ok(output
+        .lines()
+        .filter_map(PaneGeometry::parse)
+        .filter(|pane| pane.pane_id != sidebar_pane && pane.role != "sidebar")
+        .max_by_key(|pane| pane.left.saturating_add(pane.width))
+        .map(|pane| pane.pane_id)
+        .unwrap_or_else(|| sidebar_pane.to_string()))
+}
+
+struct PaneGeometry {
+    left: u32,
+    width: u32,
+    pane_id: String,
+    role: String,
+}
+
+impl PaneGeometry {
+    fn parse(line: &str) -> Option<Self> {
+        let mut parts = line.splitn(4, ' ');
+        Some(Self {
+            left: parts.next()?.parse().ok()?,
+            width: parts.next()?.parse().ok()?,
+            pane_id: parts.next()?.to_string(),
+            role: parts.next().unwrap_or_default().to_string(),
+        })
+    }
 }
 
 fn run_tmux_args<T: GitOpenTmuxOps>(ops: &mut T, args: Vec<String>) -> Result<String, String> {
@@ -249,7 +301,7 @@ mod tests {
                 "95%".to_string(),
                 "-d".to_string(),
                 "/repo".to_string(),
-                "${EDITOR:-vim} 'src/main.rs'".to_string(),
+                "${EDITOR:-nvim} 'src/main.rs'".to_string(),
             ]]
         );
     }
@@ -328,7 +380,7 @@ mod tests {
                 "%git".to_string(),
                 "-c".to_string(),
                 "/repo".to_string(),
-                "${EDITOR:-vim} 'src/main.rs'".to_string(),
+                "${EDITOR:-nvim} 'src/main.rs'".to_string(),
             ]]
         );
     }
@@ -337,6 +389,8 @@ mod tests {
     fn right_pane_target_creates_and_remembers_missing_sidebar_pane() {
         let mut ops = FakeTmuxOps {
             split_output: "%new".into(),
+            window_id: "@1".into(),
+            list_panes_output: "0 47 %sidebar sidebar\n48 123 %main \n".into(),
             ..FakeTmuxOps::default()
         };
         let opts = HashMap::from([(
@@ -348,18 +402,27 @@ mod tests {
 
         assert_eq!(
             ops.commands,
-            vec![vec![
-                "split-window".to_string(),
-                "-h".to_string(),
-                "-t".to_string(),
-                "%sidebar".to_string(),
-                "-c".to_string(),
-                "/repo".to_string(),
-                "-P".to_string(),
-                "-F".to_string(),
-                "#{pane_id}".to_string(),
-                "${EDITOR:-vim} 'src/main.rs'".to_string(),
-            ]]
+            vec![
+                vec![
+                    "list-panes".to_string(),
+                    "-t".to_string(),
+                    "@1".to_string(),
+                    "-F".to_string(),
+                    "#{pane_left} #{pane_width} #{pane_id} #{@pane_role}".to_string(),
+                ],
+                vec![
+                    "split-window".to_string(),
+                    "-h".to_string(),
+                    "-t".to_string(),
+                    "%main".to_string(),
+                    "-c".to_string(),
+                    "/repo".to_string(),
+                    "-P".to_string(),
+                    "-F".to_string(),
+                    "#{pane_id}".to_string(),
+                    "${EDITOR:-nvim} 'src/main.rs'".to_string(),
+                ]
+            ]
         );
         assert_eq!(ops.set_options, vec![("%sidebar".into(), "%new".into())]);
     }
@@ -371,6 +434,8 @@ mod tests {
         stored_pane: String,
         split_output: String,
         pane_exists: bool,
+        window_id: String,
+        list_panes_output: String,
     }
 
     impl GitOpenTmuxOps for FakeTmuxOps {
@@ -379,6 +444,8 @@ mod tests {
                 .push(args.iter().map(|arg| arg.to_string()).collect());
             if args.first() == Some(&"split-window") {
                 Ok(self.split_output.clone())
+            } else if args.first() == Some(&"list-panes") {
+                Ok(self.list_panes_output.clone())
             } else {
                 Ok(String::new())
             }
@@ -388,7 +455,10 @@ mod tests {
             self.stored_pane.clone()
         }
 
-        fn display_message(&mut self, target: &str, _: &str) -> String {
+        fn display_message(&mut self, target: &str, format: &str) -> String {
+            if format == "#{window_id}" {
+                return self.window_id.clone();
+            }
             if self.pane_exists {
                 target.to_string()
             } else {

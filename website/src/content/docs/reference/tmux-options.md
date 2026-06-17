@@ -24,7 +24,7 @@ Most options must be set **before** loading the plugin in your `tmux.conf`. Colo
 
 | Option                       | Default          | Description                                                                                                    |
 | ---------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------- |
-| `@sidebar_git_open_command`  | `${EDITOR:-vim} {file}` | Command template for `Ctrl + Left Click` on Git file rows                                                     |
+| `@sidebar_git_open_command`  | `${EDITOR:-nvim} {file}` | Command template for `Ctrl + Left Click` on Git file rows                                                    |
 | `@sidebar_git_open_target`   | `popup`          | Where to run the Git open command: `popup` or `right-pane`                                                     |
 
 The open command runs from the repository root. `{file}` expands to the
