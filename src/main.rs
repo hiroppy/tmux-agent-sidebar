@@ -18,8 +18,12 @@ struct TuiSession {
 impl TuiSession {
     fn enter(stdout: &mut io::Stdout) -> io::Result<Self> {
         enable_raw_mode()?;
-        if let Err(err) = execute!(stdout, EnterAlternateScreen, EnableMouseCapture, EnableFocusChange)
-        {
+        if let Err(err) = execute!(
+            stdout,
+            EnterAlternateScreen,
+            EnableMouseCapture,
+            EnableFocusChange
+        ) {
             let _ = disable_raw_mode();
             return Err(err);
         }
@@ -34,7 +38,12 @@ impl Drop for TuiSession {
         let _ = disable_raw_mode();
         if self.entered_alt_screen {
             let mut stdout = io::stdout();
-            let _ = execute!(stdout, LeaveAlternateScreen, DisableMouseCapture, DisableFocusChange);
+            let _ = execute!(
+                stdout,
+                LeaveAlternateScreen,
+                DisableMouseCapture,
+                DisableFocusChange
+            );
         }
     }
 }

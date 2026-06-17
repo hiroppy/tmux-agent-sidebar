@@ -63,8 +63,12 @@ impl GlobalState {
         if queued_at.elapsed() < debounce {
             return;
         }
-        self.pending_broadcast_since = None;
-        tmux::notify_other_sidebars();
+        // Only clear the queued broadcast once tmux actually accepted the pane
+        // enumeration — otherwise a transient failure would silently drop the
+        // fan-out instead of retrying on the next flush tick.
+        if tmux::notify_other_sidebars() {
+            self.pending_broadcast_since = None;
+        }
     }
 
     /// Save filter to tmux global variable.
