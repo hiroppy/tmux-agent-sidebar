@@ -434,9 +434,6 @@ fn pane_output_needs_process_snapshot(all_panes_output: &str) -> bool {
             return false;
         }
         let pane_fields = &parts[session_line_field::PANE_LINE_OFFSET..];
-        if pane_fields.len() != pane_line_field::MIN_FIELDS {
-            return false;
-        }
         AgentType::from_label(&pane_fields[pane_line_field::AGENT])
             .is_some_and(|agent| matches!(agent, AgentType::Codex | AgentType::OpenCode))
     })

@@ -206,9 +206,9 @@ fn sanitize_query_value_replaces_newlines_and_unit_separators() {
 }
 ```
 
-- [ ] **Step 3: Sanitize StopFailure wait reasons**
+- [ ] **Step 3: Sanitize wait reasons**
 
-Update `src/cli/hook/handlers/run.rs` so `on_stop_failure` writes a sanitized `@pane_wait_reason`, and add a regression that proves a raw delimiter in the error string is normalized before storage.
+Update both wait-reason write paths: `src/cli/hook/handlers/run.rs` must sanitize the `on_stop_failure` `@pane_wait_reason` write, and `src/cli/hook/handlers/attention.rs` must sanitize the `Notification` wait-reason write. Add regressions proving a raw delimiter in each reason is normalized before storage.
 
 - [ ] **Step 4: Run the sanitizer tests**
 
