@@ -15,6 +15,9 @@ use super::types::{
 };
 use crate::worktree::SPAWNED_OPTION;
 
+const TMUX_FIELD_DELIMITER: char = '\x1f';
+const TMUX_FIELD_DELIMITER_STR: &str = "\x1f";
+
 // Field indices in `tmux list-panes -F` output. Keep in lock-step with
 // the `pane_format()` field list. When adding a new field, update both
 // this module and the format string together.
@@ -26,14 +29,14 @@ mod session_line_field {
     pub const AUTOMATIC_RENAME: usize = 5;
     /// Index where the per-pane field suffix consumed by `parse_pane_line` begins.
     pub const PANE_LINE_OFFSET: usize = 6;
-    /// Minimum number of fields a valid `pane_format()` line must contain.
+    /// Expected number of fields a valid `pane_format()` line must contain.
     pub const MIN_FIELDS: usize = 28;
 }
 
 // Indices into the pane-line suffix that `parse_pane_line` operates on.
 // Each value = (absolute index in the full format string) - 6, because
 // `build_session_hierarchy` strips the leading 6 window-level fields
-// before joining the remainder back into `pane_line`.
+// before passing the remainder to the pane parser.
 pub(super) mod pane_line_field {
     pub const PANE_ACTIVE: usize = 0; // absolute 6
     pub const PANE_STATUS: usize = 1; // absolute 7  (@pane_status)
@@ -56,50 +59,50 @@ pub(super) mod pane_line_field {
     pub const SESSION_ID: usize = 19; // absolute 25 (@pane_session_id)
     pub const SIDEBAR_SPAWNED: usize = 20; // absolute 26 (@agent-sidebar-spawned)
     pub const BG_CMD: usize = 21; // absolute 27 (@pane_bg_cmd)
-    /// Minimum number of fields the pane-line suffix must contain.
+    /// Expected number of fields the pane-line suffix must contain.
     /// Equals `session_line_field::MIN_FIELDS - PANE_LINE_OFFSET`.
     pub const MIN_FIELDS: usize = 22;
 }
 
 /// Build the tmux `list-panes -F` format used by [`query_sessions`].
-/// Every field is quoted with `#{q:...}` so embedded pipes in user content
-/// survive the split.
+/// Fields use a raw unit-separator delimiter instead of `#{q:...}` quoting
+/// so the hot path avoids tmux's backslash-escaping cost.
 fn pane_format() -> String {
     [
-        q("session_name"),
-        q("window_id"),
-        q("window_index"),
-        q("window_name"),
-        q("window_active"),
-        q("automatic-rename"),
-        q("pane_active"),
-        q(PANE_STATUS),
-        q(PANE_ATTENTION),
-        q(PANE_AGENT),
-        q(PANE_NAME),
-        q("pane_current_path"),
-        q("pane_current_command"),
-        q(PANE_ROLE),
-        q("pane_id"),
-        q(PANE_PROMPT),
-        q(PANE_PROMPT_SOURCE),
-        q(PANE_STARTED_AT),
-        q(PANE_WAIT_REASON),
-        q("pane_pid"),
-        q(PANE_SUBAGENTS),
-        q(PANE_CWD),
-        q(PANE_PERMISSION_MODE),
-        q(PANE_WORKTREE_NAME),
-        q(PANE_WORKTREE_BRANCH),
-        q(PANE_SESSION_ID),
-        q(SPAWNED_OPTION),
-        q(PANE_BG_CMD),
+        fmt("session_name"),
+        fmt("window_id"),
+        fmt("window_index"),
+        fmt("window_name"),
+        fmt("window_active"),
+        fmt("automatic-rename"),
+        fmt("pane_active"),
+        fmt(PANE_STATUS),
+        fmt(PANE_ATTENTION),
+        fmt(PANE_AGENT),
+        fmt(PANE_NAME),
+        fmt("pane_current_path"),
+        fmt("pane_current_command"),
+        fmt(PANE_ROLE),
+        fmt("pane_id"),
+        fmt(PANE_PROMPT),
+        fmt(PANE_PROMPT_SOURCE),
+        fmt(PANE_STARTED_AT),
+        fmt(PANE_WAIT_REASON),
+        fmt("pane_pid"),
+        fmt(PANE_SUBAGENTS),
+        fmt(PANE_CWD),
+        fmt(PANE_PERMISSION_MODE),
+        fmt(PANE_WORKTREE_NAME),
+        fmt(PANE_WORKTREE_BRANCH),
+        fmt(PANE_SESSION_ID),
+        fmt(SPAWNED_OPTION),
+        fmt(PANE_BG_CMD),
     ]
-    .join("|")
+    .join(TMUX_FIELD_DELIMITER_STR)
 }
 
-fn q(field: &str) -> String {
-    format!("#{{q:{field}}}")
+fn fmt(field: &str) -> String {
+    format!("#{{{field}}}")
 }
 
 type SessionMap = indexmap::IndexMap<String, indexmap::IndexMap<String, WindowInfo>>;
@@ -145,8 +148,8 @@ fn build_session_hierarchy(
     let mut codex_pids: Vec<CodexPidEntry> = Vec::new();
 
     for line in all_panes_output.lines() {
-        let parts = split_tmux_fields(line, '|');
-        if parts.len() < session_line_field::MIN_FIELDS {
+        let parts = split_tmux_fields(line);
+        if parts.len() != session_line_field::MIN_FIELDS {
             continue;
         }
 
@@ -228,13 +231,13 @@ fn finalize_sessions(sessions_map: SessionMap) -> Vec<SessionInfo> {
 /// Parse a single pane line from `tmux list-panes -F`.
 /// Returns None if the line has too few fields, is a sidebar, or has no agent.
 /// Thin wrapper used by the unit tests, which still construct a raw
-/// `|`-joined fixture line. Production callers go through
+/// unit-separator-delimited fixture line. Production callers go through
 /// `parse_pane_fields_with_processes` directly to avoid re-joining and re-splitting
-/// fields that may themselves contain literal `|` characters (cwd,
-/// prompt, branch) — see `build_session_hierarchy`.
+/// fields that may themselves contain literal separator-like characters
+/// (cwd, prompt, branch) — see `build_session_hierarchy`.
 #[cfg(test)]
 pub(crate) fn parse_pane_line(line: &str) -> Option<PaneInfo> {
-    let parts = split_tmux_fields(line, '|');
+    let parts = split_tmux_fields(line);
     parse_pane_fields_with_processes(&parts, None)
 }
 
@@ -242,7 +245,7 @@ fn parse_pane_fields_with_processes(
     parts: &[String],
     process_snapshot: Option<&ProcessSnapshot>,
 ) -> Option<PaneInfo> {
-    if parts.len() < pane_line_field::MIN_FIELDS {
+    if parts.len() != pane_line_field::MIN_FIELDS {
         return None;
     }
 
@@ -426,11 +429,14 @@ fn process_snapshot_for_panes(all_panes_output: &str) -> Option<ProcessSnapshot>
 
 fn pane_output_needs_process_snapshot(all_panes_output: &str) -> bool {
     all_panes_output.lines().any(|line| {
-        let parts = split_tmux_fields(line, '|');
-        if parts.len() < session_line_field::MIN_FIELDS {
+        let parts = split_tmux_fields(line);
+        if parts.len() != session_line_field::MIN_FIELDS {
             return false;
         }
         let pane_fields = &parts[session_line_field::PANE_LINE_OFFSET..];
+        if pane_fields.len() != pane_line_field::MIN_FIELDS {
+            return false;
+        }
         AgentType::from_label(&pane_fields[pane_line_field::AGENT])
             .is_some_and(|agent| matches!(agent, AgentType::Codex | AgentType::OpenCode))
     })
@@ -509,39 +515,11 @@ fn parse_subagents(raw: &str) -> Vec<String> {
         .collect()
 }
 
-/// Split a tmux format line while honoring tmux `#{q:...}` backslash escapes.
-fn split_tmux_fields(line: &str, delimiter: char) -> Vec<String> {
-    let mut fields = Vec::new();
-    let mut current = String::new();
-    let mut escaped = false;
-
-    for ch in line.chars() {
-        if escaped {
-            current.push(ch);
-            escaped = false;
-            continue;
-        }
-
-        if ch == '\\' {
-            escaped = true;
-            continue;
-        }
-
-        if ch == delimiter {
-            fields.push(current);
-            current = String::new();
-            continue;
-        }
-
-        current.push(ch);
-    }
-
-    if escaped {
-        current.push('\\');
-    }
-
-    fields.push(current);
-    fields
+/// Split a raw tmux format line on the unit-separator delimiter.
+fn split_tmux_fields(line: &str) -> Vec<String> {
+    line.split(TMUX_FIELD_DELIMITER)
+        .map(ToString::to_string)
+        .collect()
 }
 
 #[cfg(test)]
@@ -753,7 +731,11 @@ mod tests {
     // ─── parse_pane_line tests ──────────────────────────────────────
 
     fn make_pane_line(fields: &[&str]) -> String {
-        fields.join("|")
+        fields.join("\x1f")
+    }
+
+    fn make_session_line(fields: &[&str]) -> String {
+        fields.join("\x1f")
     }
 
     fn full_fields() -> Vec<&'static str> {
@@ -810,6 +792,50 @@ mod tests {
     }
 
     #[test]
+    fn pane_format_uses_raw_delimiter_without_tmux_quoting() {
+        let format = pane_format();
+
+        assert!(
+            !format.contains("#{q:"),
+            "hot list-panes format must avoid tmux q quoting"
+        );
+        assert!(format.contains('\x1f'));
+        assert_eq!(
+            format.split('\x1f').collect::<Vec<_>>(),
+            vec![
+                "#{session_name}",
+                "#{window_id}",
+                "#{window_index}",
+                "#{window_name}",
+                "#{window_active}",
+                "#{automatic-rename}",
+                "#{pane_active}",
+                "#{@pane_status}",
+                "#{@pane_attention}",
+                "#{@pane_agent}",
+                "#{@pane_name}",
+                "#{pane_current_path}",
+                "#{pane_current_command}",
+                "#{@pane_role}",
+                "#{pane_id}",
+                "#{@pane_prompt}",
+                "#{@pane_prompt_source}",
+                "#{@pane_started_at}",
+                "#{@pane_wait_reason}",
+                "#{pane_pid}",
+                "#{@pane_subagents}",
+                "#{@pane_cwd}",
+                "#{@pane_permission_mode}",
+                "#{@pane_worktree_name}",
+                "#{@pane_worktree_branch}",
+                "#{@pane_session_id}",
+                "#{@agent-sidebar-spawned}",
+                "#{@pane_bg_cmd}",
+            ]
+        );
+    }
+
+    #[test]
     fn parse_pane_line_sidebar_spawned_field() {
         let mut fields = full_fields();
         fields[20] = "1";
@@ -840,18 +866,67 @@ mod tests {
     #[test]
     fn parse_pane_line_rejects_fewer_than_min_fields() {
         // Only 15 fields — should be rejected
-        let fields_15 =
-            "1|running||claude|name|/path|fish||%1|prompt|1700000000||12345|Explore|/cwd";
+        let fields_15 = [
+            "1",
+            "running",
+            "",
+            "claude",
+            "name",
+            "/path",
+            "fish",
+            "",
+            "%1",
+            "prompt",
+            "1700000000",
+            "",
+            "12345",
+            "Explore",
+            "/cwd",
+        ]
+        .join("\x1f");
         assert!(
-            parse_pane_line(fields_15).is_none(),
+            parse_pane_line(&fields_15).is_none(),
             "15 fields should be rejected"
         );
 
         // 21 fields — still rejected (need 22 including @pane_bg_cmd).
-        let fields_21 = "1|running||claude|name|/path|fish||%1|prompt|user|1700000000||12345|Explore|/cwd|auto||||";
+        let fields_21 = [
+            "1",
+            "running",
+            "",
+            "claude",
+            "name",
+            "/path",
+            "fish",
+            "",
+            "%1",
+            "prompt",
+            "user",
+            "1700000000",
+            "",
+            "12345",
+            "Explore",
+            "/cwd",
+            "auto",
+            "",
+            "",
+            "",
+            "",
+        ]
+        .join("\x1f");
         assert!(
-            parse_pane_line(fields_21).is_none(),
+            parse_pane_line(&fields_21).is_none(),
             "21 fields should be rejected"
+        );
+    }
+
+    #[test]
+    fn parse_pane_line_rejects_extra_fields() {
+        let mut fields = full_fields();
+        fields.push("collision");
+        assert!(
+            parse_pane_line(&make_pane_line(&fields)).is_none(),
+            "rows with extra fields should be rejected"
         );
     }
 
@@ -911,7 +986,7 @@ mod tests {
     #[test]
     fn parse_pane_line_preserves_pipe_in_path() {
         let mut fields = full_fields();
-        fields[5] = "/home/user/a\\|b";
+        fields[5] = "/home/user/a|b";
         fields[15] = "";
         let line = make_pane_line(&fields);
         let pane = parse_pane_line(&line).unwrap();
@@ -919,9 +994,72 @@ mod tests {
     }
 
     #[test]
-    fn split_tmux_fields_unescapes_delimiter() {
-        let fields = split_tmux_fields("one|two\\|still-two|three", '|');
-        assert_eq!(fields, vec!["one", "two|still-two", "three"]);
+    fn parse_pane_line_preserves_literal_backslashes() {
+        let mut fields = full_fields();
+        fields[pane_line_field::PANE_CWD] = "";
+        fields[pane_line_field::PANE_CURRENT_PATH] = r"/home/user/a\|b";
+        fields[pane_line_field::PROMPT] = r"keep \slashes\ literal";
+
+        let pane = parse_pane_line(&make_pane_line(&fields)).unwrap();
+
+        assert_eq!(pane.path, r"/home/user/a\|b");
+        assert_eq!(pane.prompt, r"keep \slashes\ literal");
+    }
+
+    #[test]
+    fn build_session_hierarchy_preserves_raw_delimited_pane_semantics() {
+        let mut fields = vec![
+            "main|session", // 0: session_name
+            "@1",           // 1: window_id
+            "0",            // 2: window_index
+            "win|name",     // 3: window_name
+            "1",            // 4: window_active
+            "0",            // 5: automatic-rename
+        ];
+        fields.extend(full_fields());
+        fields[session_line_field::PANE_LINE_OFFSET + pane_line_field::PANE_CURRENT_PATH] =
+            "/repo/a|b";
+        fields[session_line_field::PANE_LINE_OFFSET + pane_line_field::PANE_CWD] = "";
+        fields[session_line_field::PANE_LINE_OFFSET + pane_line_field::PROMPT] =
+            r"fix a|b without losing \slashes";
+        fields[session_line_field::PANE_LINE_OFFSET + pane_line_field::BG_CMD] =
+            "cargo test tmux::query -- --nocapture";
+
+        let (sessions_map, codex_pids) = build_session_hierarchy(&make_session_line(&fields), None);
+
+        assert!(codex_pids.is_empty());
+        let windows = sessions_map.get("main|session").expect("session");
+        let window = windows.get("@1").expect("window");
+        assert_eq!(window.window_name, "win|name");
+        assert!(window.window_active);
+        assert!(!window.auto_rename);
+
+        let pane = window.panes.first().expect("pane");
+        assert_eq!(pane.path, "/repo/a|b");
+        assert_eq!(pane.prompt, r"fix a|b without losing \slashes");
+        assert_eq!(
+            pane.bg_shell_cmd.as_deref(),
+            Some("cargo test tmux::query -- --nocapture")
+        );
+    }
+
+    #[test]
+    fn build_session_hierarchy_rejects_extra_fields() {
+        let mut fields = vec![
+            "main|session", // 0: session_name
+            "@1",           // 1: window_id
+            "0",            // 2: window_index
+            "win|name",     // 3: window_name
+            "1",            // 4: window_active
+            "0",            // 5: automatic-rename
+        ];
+        fields.extend(full_fields());
+        fields.push("collision");
+
+        let (sessions_map, codex_pids) = build_session_hierarchy(&make_session_line(&fields), None);
+
+        assert!(sessions_map.is_empty());
+        assert!(codex_pids.is_empty());
     }
 
     #[test]

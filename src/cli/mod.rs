@@ -82,14 +82,20 @@ fn set_attention(pane: &str, state: &str) {
     }
 }
 
-/// Canonicalize a string before storing it in a tmux pane option. Tmux's
-/// pane-option format uses `|` as a field separator and `\n` as a record
-/// terminator, so both must be replaced with spaces to keep the stored
-/// value a single safe field. Readers that compare against raw process
-/// data (e.g. the bg-shell ps sweep) must apply the same normalization
-/// so round-tripping through storage doesn't silently break equality.
+/// Canonicalize a string before storing it in the pipe-delimited activity log
+/// or a tmux pane option that is compared against pipe-delimited process data.
+/// Replace `|`, `\n`, and the raw query delimiter so round-tripping stays
+/// safe for both readers.
 pub(crate) fn sanitize_tmux_value(s: &str) -> String {
-    s.replace(['\n', '|'], " ")
+    s.replace(['\n', '|', '\x1f'], " ")
+}
+
+/// Canonicalize tmux pane metadata that is read back by the raw
+/// unit-separator query path. Keep pipes intact, but strip newlines and the
+/// raw delimiter so values like cwd, worktree name/branch, session id,
+/// subagent lists, and wait reasons cannot split the query.
+pub(crate) fn sanitize_tmux_query_value(s: &str) -> String {
+    s.replace(['\n', '\x1f'], " ")
 }
 
 // ─── set-status subcommand ──────────────────────────────────────────────────
@@ -176,6 +182,16 @@ mod tests {
     #[test]
     fn sanitize_replaces_pipes() {
         assert_eq!(sanitize_tmux_value("a|b|c"), "a b c");
+    }
+
+    #[test]
+    fn sanitize_replaces_unit_separators() {
+        assert_eq!(sanitize_tmux_value("a\x1fb\x1fc"), "a b c");
+    }
+
+    #[test]
+    fn sanitize_query_value_replaces_newlines_and_unit_separators() {
+        assert_eq!(sanitize_tmux_query_value("a\x1fb\nc"), "a b c");
     }
 
     #[test]

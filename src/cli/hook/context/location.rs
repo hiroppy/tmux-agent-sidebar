@@ -1,3 +1,4 @@
+use crate::cli::sanitize_tmux_query_value;
 use crate::event::WorktreeInfo;
 use crate::tmux;
 
@@ -34,12 +35,20 @@ pub(in crate::cli::hook) fn sync_worktree_meta(pane: &str, worktree: &Option<Wor
         if wt.name.is_empty() {
             tmux::unset_pane_option(pane, tmux::PANE_WORKTREE_NAME);
         } else {
-            tmux::set_pane_option(pane, tmux::PANE_WORKTREE_NAME, &wt.name);
+            tmux::set_pane_option(
+                pane,
+                tmux::PANE_WORKTREE_NAME,
+                &sanitize_tmux_query_value(&wt.name),
+            );
         }
         if wt.branch.is_empty() {
             tmux::unset_pane_option(pane, tmux::PANE_WORKTREE_BRANCH);
         } else {
-            tmux::set_pane_option(pane, tmux::PANE_WORKTREE_BRANCH, &wt.branch);
+            tmux::set_pane_option(
+                pane,
+                tmux::PANE_WORKTREE_BRANCH,
+                &sanitize_tmux_query_value(&wt.branch),
+            );
         }
     } else {
         tmux::unset_pane_option(pane, tmux::PANE_WORKTREE_NAME);
@@ -63,12 +72,14 @@ pub(in crate::cli::hook) fn sync_pane_location(
         return;
     }
     match session_id.as_deref() {
-        Some(sid) if !sid.is_empty() => tmux::set_pane_option(pane, tmux::PANE_SESSION_ID, sid),
+        Some(sid) if !sid.is_empty() => {
+            tmux::set_pane_option(pane, tmux::PANE_SESSION_ID, &sanitize_tmux_query_value(sid))
+        }
         _ => tmux::unset_pane_option(pane, tmux::PANE_SESSION_ID),
     }
     if !cwd.is_empty() {
-        let effective_cwd = resolve_cwd(cwd, worktree);
-        tmux::set_pane_option(pane, tmux::PANE_CWD, effective_cwd);
+        let effective_cwd = sanitize_tmux_query_value(resolve_cwd(cwd, worktree));
+        tmux::set_pane_option(pane, tmux::PANE_CWD, &effective_cwd);
     }
     sync_worktree_meta(pane, worktree);
 }
@@ -200,6 +211,37 @@ mod tests {
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_SESSION_ID).as_deref(),
             Some("sess-1")
+        );
+    }
+
+    #[test]
+    fn sync_pane_location_sanitizes_raw_query_fields() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%SANITIZE_RAW";
+        let wt = Some(WorktreeInfo {
+            name: "feat\x1fbranch".into(),
+            path: "/wt/feat".into(),
+            branch: "topic\x1fmain".into(),
+            original_repo_dir: "/repo\x1fmain".into(),
+        });
+
+        sync_pane_location(pane, "/wt/feat", &wt, &Some("sess\x1f123".into()));
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_WORKTREE_NAME).as_deref(),
+            Some("feat branch")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_WORKTREE_BRANCH).as_deref(),
+            Some("topic main")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_CWD).as_deref(),
+            Some("/repo main")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_SESSION_ID).as_deref(),
+            Some("sess 123")
         );
     }
 
