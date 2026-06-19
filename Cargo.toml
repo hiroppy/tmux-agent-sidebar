@@ -12,7 +12,7 @@ repository = "https://github.com/hiroppy/tmux-agent-sidebar"
 debug = []
 
 [dependencies]
-ratatui = "=0.30.1"
+ratatui = "=0.30.2"
 crossterm = "=0.29.0"
 unicode-width = "=0.2.2"
 libc = "=0.2.186"
