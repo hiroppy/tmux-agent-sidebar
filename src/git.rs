@@ -294,7 +294,7 @@ pub(crate) fn run_git(path: &str, args: &[&str]) -> Option<String> {
         .output()
         .ok()?;
     if output.status.success() {
-        let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let s = String::from_utf8_lossy(&output.stdout).trim_end().to_string();
         if s.is_empty() { None } else { Some(s) }
     } else {
         None
@@ -596,6 +596,47 @@ mod tests {
         assert!(data.staged_files.is_empty());
         assert!(data.unstaged_files.is_empty());
         assert!(data.untracked_files.is_empty());
+    }
+
+    /// Exercises the real `run_git` -> `parse_status_short` path. Regression
+    /// for `run_git` previously `.trim()`-ing whole output, which stripped the
+    /// leading space (empty index column) off the first `status --short` line
+    /// and misclassified the first unstaged file as staged.
+    #[test]
+    fn fetch_git_data_first_modified_file_is_unstaged() {
+        fn git(dir: &std::path::Path, args: &[&str]) {
+            let ok = Command::new("git")
+                .args(["-C", dir.to_str().unwrap()])
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success();
+            assert!(ok, "git {args:?} failed");
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        git(dir, &["init", "-q"]);
+        git(dir, &["config", "user.email", "test@example.com"]);
+        git(dir, &["config", "user.name", "Test"]);
+        // Two tracked files; "a.txt" sorts first so it is the leading status line.
+        std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+        std::fs::write(dir.join("b.txt"), "one\n").unwrap();
+        git(dir, &["add", "."]);
+        git(dir, &["commit", "-qm", "init"]);
+        // Modify both in the worktree only — both should be unstaged.
+        std::fs::write(dir.join("a.txt"), "two\n").unwrap();
+        std::fs::write(dir.join("b.txt"), "two\n").unwrap();
+
+        let data = fetch_git_data(dir.to_str().unwrap());
+        assert!(
+            data.staged_files.is_empty(),
+            "no file should be staged, got {:?}",
+            data.staged_files
+        );
+        assert_eq!(data.unstaged_files.len(), 2);
+        assert_eq!(data.unstaged_files[0].name, "a.txt");
     }
 
     // ─── PrCache tests ───────────────────────────────────────────────
