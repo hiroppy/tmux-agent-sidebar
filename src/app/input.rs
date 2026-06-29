@@ -348,6 +348,14 @@ mod tests {
     }
 
     #[test]
+    fn question_mark_opens_help_popup() {
+        let mut state = state_with_three_panes();
+        let flag = AtomicBool::new(false);
+        handle_key_event(key(KeyCode::Char('?')), &mut state, &flag);
+        assert!(state.is_help_popup_open());
+    }
+
+    #[test]
     fn question_mark_toggles_help_popup() {
         let mut state = state_with_three_panes();
         let flag = AtomicBool::new(false);
