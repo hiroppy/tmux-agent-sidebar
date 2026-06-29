@@ -108,6 +108,80 @@ const EXP_MODE_LABEL_Y: u16 = 7;
 const EXP_MODE_VALUE_Y: u16 = 8;
 const EXP_ERROR_Y: u16 = 10;
 
+const HELP_ROWS: &[(&str, &str)] = &[
+    ("?", "Show / hide help"),
+    ("j / Down", "Move selection down"),
+    ("k / Up", "Move selection up"),
+    ("h / Left", "Previous status filter"),
+    ("l / Right", "Next status filter"),
+    ("Tab", "Cycle status filter"),
+    ("Shift+Tab", "Switch Activity / Git"),
+    ("r", "Open repo filter"),
+    ("n", "Spawn worktree"),
+    ("x", "Remove spawned pane"),
+    ("Enter", "Jump to selected pane"),
+    ("Esc", "Return focus / close popup"),
+];
+
+pub(super) fn render_help_popup(frame: &mut Frame, state: &mut AppState, area: Rect) {
+    let theme = &state.theme;
+    let key_width = HELP_ROWS
+        .iter()
+        .map(|(key, _)| display_width(key))
+        .max()
+        .unwrap_or(1);
+    let widest = HELP_ROWS
+        .iter()
+        .map(|(_, action)| key_width + 3 + display_width(action))
+        .max()
+        .unwrap_or(10);
+    let popup_width = (widest + 4).min(area.width as usize).max(14) as u16;
+    let popup_height = (HELP_ROWS.len() as u16 + POPUP_BORDER_ROWS).min(area.height);
+    let popup_rect = center_popup(area, popup_width, popup_height);
+    state.popup.set_help_area(Some(popup_rect));
+
+    frame.render_widget(Clear, popup_rect);
+    let title = truncate_to_width(" Keybindings ", popup_rect.width.saturating_sub(2) as usize);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme.accent))
+        .title(Span::styled(
+            title,
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ));
+    let inner = block.inner(popup_rect);
+    frame.render_widget(block, popup_rect);
+
+    let inner_width = inner.width as usize;
+    for (i, (key, action)) in HELP_ROWS.iter().enumerate() {
+        if i >= inner.height as usize {
+            break;
+        }
+
+        let key_label = format!("{key:<key_width$}");
+        let key_display_width = display_width(&key_label);
+        let separator = " - ";
+        let action_width = inner_width
+            .saturating_sub(key_display_width)
+            .saturating_sub(display_width(separator));
+        let row = Rect::new(inner.x, inner.y + i as u16, inner.width, 1);
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(key_label, Style::default().fg(theme.text_active)),
+                Span::styled(separator, Style::default().fg(theme.text_inactive)),
+                Span::styled(
+                    truncate_to_width(action, action_width),
+                    Style::default().fg(theme.text_muted),
+                ),
+            ])),
+            row,
+        );
+    }
+}
+
 pub(super) fn render_spawn_input_popup(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let PopupState::SpawnInput {
         input,

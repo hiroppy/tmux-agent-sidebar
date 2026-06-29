@@ -61,6 +61,14 @@ pub(super) fn handle_key_event(
     state: &mut AppState,
     git_tab_active: &AtomicBool,
 ) -> bool {
+    if state.is_help_popup_open() {
+        match key.code {
+            KeyCode::Esc => state.close_help_popup(),
+            code if is_help_key(code, key.modifiers) => state.close_help_popup(),
+            _ => {}
+        }
+        return true;
+    }
     if state.is_notices_popup_open() {
         if key.code == KeyCode::Esc {
             state.close_notices_popup();
@@ -137,6 +145,7 @@ pub(super) fn handle_key_event(
                 state.toggle_repo_popup();
             }
         }
+        code if is_help_key(code, key.modifiers) => state.toggle_help_popup(),
         KeyCode::Char('n') => {
             if state.focus_state.focus == Focus::Panes {
                 state.open_spawn_input_from_selection();
@@ -164,6 +173,11 @@ pub(super) fn handle_key_event(
         _ => {}
     }
     true
+}
+
+fn is_help_key(code: KeyCode, modifiers: KeyModifiers) -> bool {
+    code == KeyCode::Char('?')
+        || (code == KeyCode::Char('/') && modifiers.contains(KeyModifiers::SHIFT))
 }
 
 fn pane_nav_down(state: &mut AppState) {
@@ -233,6 +247,10 @@ mod tests {
 
     fn ctrl_key(c: char) -> KeyEvent {
         KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+
+    fn shift_key(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::SHIFT)
     }
 
     /// Build an AppState with three navigable pane rows and Panes focus,
@@ -327,6 +345,36 @@ mod tests {
         let flag = AtomicBool::new(false);
         handle_key_event(key(KeyCode::Char('p')), &mut state, &flag);
         assert_eq!(state.global.selected_pane_row, 1);
+    }
+
+    #[test]
+    fn question_mark_toggles_help_popup() {
+        let mut state = state_with_three_panes();
+        let flag = AtomicBool::new(false);
+        handle_key_event(key(KeyCode::Char('?')), &mut state, &flag);
+        assert!(state.is_help_popup_open());
+        handle_key_event(key(KeyCode::Char('?')), &mut state, &flag);
+        assert!(!state.is_help_popup_open());
+    }
+
+    #[test]
+    fn esc_closes_help_popup() {
+        let mut state = state_with_three_panes();
+        let flag = AtomicBool::new(false);
+        handle_key_event(key(KeyCode::Char('?')), &mut state, &flag);
+        assert!(state.is_help_popup_open());
+        handle_key_event(key(KeyCode::Esc), &mut state, &flag);
+        assert!(!state.is_help_popup_open());
+    }
+
+    #[test]
+    fn shifted_slash_toggles_help_popup() {
+        let mut state = state_with_three_panes();
+        let flag = AtomicBool::new(false);
+        handle_key_event(shift_key('/'), &mut state, &flag);
+        assert!(state.is_help_popup_open());
+        handle_key_event(shift_key('/'), &mut state, &flag);
+        assert!(!state.is_help_popup_open());
     }
 
     #[test]
