@@ -134,6 +134,9 @@ pub struct AppState {
     /// Whether the pet animation is drawn and ticked. Loaded once at startup
     /// from the `@sidebar_pet` tmux option. Defaults to `false`.
     pub pet_enabled: bool,
+    /// How the agent list is ordered. Loaded once at startup from the
+    /// `@sidebar_sort` tmux option. Defaults to [`SortMode::Repo`].
+    pub sort_mode: crate::ui::SortMode,
 }
 
 impl AppState {
@@ -181,6 +184,7 @@ impl AppState {
             bottom_panel_height: crate::ui::BOTTOM_PANEL_HEIGHT,
             sessions: SessionNamesState::new(),
             pet_enabled: false,
+            sort_mode: crate::ui::SortMode::Repo,
         };
         crate::state::pet::reseed_pet_idle_motion(&mut state);
         state
@@ -229,6 +233,79 @@ mod tests {
         let path = crate::activity::log_file_path(pane_id);
         fs::write(&path, contents).unwrap();
         path.to_string_lossy().into_owned()
+    }
+
+    fn pane_started(id: &str, started_at: Option<u64>) -> PaneInfo {
+        PaneInfo {
+            started_at,
+            ..test_pane(id)
+        }
+    }
+
+    /// Two repo groups whose panes' start times interleave across groups,
+    /// plus one pane with no `started_at`.
+    fn two_groups_with_start_times() -> Vec<RepoGroup> {
+        vec![
+            RepoGroup {
+                name: "alpha".into(),
+                has_focus: false,
+                panes: vec![
+                    (pane_started("%5", Some(300)), PaneGitInfo::default()),
+                    (pane_started("%6", Some(100)), PaneGitInfo::default()),
+                ],
+            },
+            RepoGroup {
+                name: "beta".into(),
+                has_focus: false,
+                panes: vec![
+                    (pane_started("%7", Some(200)), PaneGitInfo::default()),
+                    (pane_started("%8", None), PaneGitInfo::default()),
+                ],
+            },
+        ]
+    }
+
+    #[test]
+    fn flat_started_order_sorts_oldest_first_across_groups() {
+        let mut state = AppState::new("%0".into());
+        state.repo_groups = two_groups_with_start_times();
+        let order: Vec<&str> = state
+            .flat_started_order()
+            .into_iter()
+            .map(|(gi, pi)| state.repo_groups[gi].panes[pi].0.pane_id.as_str())
+            .collect();
+        // 100, 200, 300, then the started_at-less pane last.
+        assert_eq!(order, vec!["%6", "%7", "%5", "%8"]);
+    }
+
+    #[test]
+    fn row_targets_follow_start_order_in_started_mode() {
+        let mut state = AppState::new("%0".into());
+        state.sort_mode = crate::ui::SortMode::Started;
+        state.repo_groups = two_groups_with_start_times();
+        state.rebuild_row_targets();
+        let ids: Vec<&str> = state
+            .layout
+            .pane_row_targets
+            .iter()
+            .map(|t| t.pane_id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["%6", "%7", "%5", "%8"]);
+    }
+
+    #[test]
+    fn row_targets_keep_group_order_in_repo_mode() {
+        let mut state = AppState::new("%0".into());
+        // Default sort mode is Repo.
+        state.repo_groups = two_groups_with_start_times();
+        state.rebuild_row_targets();
+        let ids: Vec<&str> = state
+            .layout
+            .pane_row_targets
+            .iter()
+            .map(|t| t.pane_id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["%5", "%6", "%7", "%8"]);
     }
 
     #[test]

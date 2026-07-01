@@ -67,7 +67,44 @@ pub(super) fn point_in_rect(row: u16, col: u16, rect: ratatui::layout::Rect) -> 
     rect.contains(ratatui::layout::Position { x: col, y: row })
 }
 
+/// Parse the numeric part of a tmux pane id like `%12` → 12. Used only as
+/// a deterministic tiebreak, so an unparseable id sorts last.
+pub(crate) fn pane_id_num(pane_id: &str) -> u64 {
+    pane_id.trim_start_matches('%').parse().unwrap_or(u64::MAX)
+}
+
 impl AppState {
+    /// `(group_index, pane_index)` of every pane that passes the repo +
+    /// status filters, ordered by session start time (oldest first) for the
+    /// flat [`SortMode::Started`](crate::ui::SortMode) list. Panes without a
+    /// reported `started_at` (e.g. some Codex sessions) sort last, tiebroken
+    /// by pane id so the order is always deterministic. Both
+    /// [`rebuild_row_targets`](Self::rebuild_row_targets) and the row
+    /// renderer consume this, so the drawn rows and the click/scroll row map
+    /// can never disagree.
+    pub fn flat_started_order(&self) -> Vec<(usize, usize)> {
+        let mut items: Vec<(usize, usize)> = Vec::new();
+        for (gi, group) in self.repo_groups.iter().enumerate() {
+            if !self.global.repo_filter.matches_group(&group.name) {
+                continue;
+            }
+            for (pi, (pane, _)) in group.panes.iter().enumerate() {
+                if self.global.status_filter.matches(&pane.status) {
+                    items.push((gi, pi));
+                }
+            }
+        }
+        // Stable sort: panes sharing a key keep repo-encounter order.
+        items.sort_by_key(|&(gi, pi)| {
+            let pane = &self.repo_groups[gi].panes[pi].0;
+            (
+                pane.started_at.unwrap_or(u64::MAX),
+                pane_id_num(&pane.pane_id),
+            )
+        });
+        items
+    }
+
     pub fn rebuild_row_targets(&mut self) {
         // Reset stale repo filter if the repo no longer exists, and
         // persist the reset back to tmux so fresh sidebar instances do
@@ -80,15 +117,25 @@ impl AppState {
         }
 
         self.layout.pane_row_targets.clear();
-        for group in &self.repo_groups {
-            if !self.global.repo_filter.matches_group(&group.name) {
-                continue;
+        if self.sort_mode == crate::ui::SortMode::Started {
+            // Flat list: one row per session in start order. Derived from
+            // the same helper the renderer uses so row indices line up.
+            for (gi, pi) in self.flat_started_order() {
+                self.layout.pane_row_targets.push(RowTarget {
+                    pane_id: self.repo_groups[gi].panes[pi].0.pane_id.clone(),
+                });
             }
-            for (pane, _) in &group.panes {
-                if self.global.status_filter.matches(&pane.status) {
-                    self.layout.pane_row_targets.push(RowTarget {
-                        pane_id: pane.pane_id.clone(),
-                    });
+        } else {
+            for group in &self.repo_groups {
+                if !self.global.repo_filter.matches_group(&group.name) {
+                    continue;
+                }
+                for (pane, _) in &group.panes {
+                    if self.global.status_filter.matches(&pane.status) {
+                        self.layout.pane_row_targets.push(RowTarget {
+                            pane_id: pane.pane_id.clone(),
+                        });
+                    }
                 }
             }
         }

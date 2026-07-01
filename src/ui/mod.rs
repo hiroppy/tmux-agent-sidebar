@@ -51,6 +51,36 @@ pub fn pet_enabled_from_tmux() -> bool {
     pet_enabled_from_options(&opts)
 }
 
+/// How the agent list is ordered top-to-bottom.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SortMode {
+    /// Group panes by git repository; groups sorted alphabetically by
+    /// name. The historical default.
+    #[default]
+    Repo,
+    /// A single flat list of every session ordered by start time, oldest
+    /// first. Repo group headers (and their spawn buttons) are suppressed.
+    Started,
+}
+
+/// Read `@sidebar_sort` from tmux global options, defaulting to `Repo`.
+/// Accepts `repo` (default) and `started`/`start`/`age`/`oldest` for the
+/// oldest-session-first flat list (case-insensitive).
+pub fn sort_mode_from_options(opts: &HashMap<String, String>) -> SortMode {
+    opts.get(tmux::SIDEBAR_SORT)
+        .map(|s| s.trim().to_ascii_lowercase())
+        .map(|s| match s.as_str() {
+            "started" | "start" | "age" | "oldest" => SortMode::Started,
+            _ => SortMode::Repo,
+        })
+        .unwrap_or(SortMode::Repo)
+}
+
+pub fn sort_mode_from_tmux() -> SortMode {
+    let opts = crate::tmux::get_all_global_options();
+    sort_mode_from_options(&opts)
+}
+
 // ── public entry point ──────────────────────────────────────────────
 
 pub fn draw(frame: &mut Frame, state: &mut AppState) {
@@ -158,6 +188,36 @@ mod tests {
             assert!(
                 !pet_enabled_from_options(&opts),
                 "expected {value} to disable"
+            );
+        }
+    }
+
+    #[test]
+    fn sort_mode_defaults_to_repo_when_missing() {
+        let opts = HashMap::new();
+        assert_eq!(sort_mode_from_options(&opts), SortMode::Repo);
+    }
+
+    #[test]
+    fn sort_mode_started_aliases() {
+        for value in ["started", "start", "age", "oldest", "  STARTED  "] {
+            let opts = opts_with(tmux::SIDEBAR_SORT, value);
+            assert_eq!(
+                sort_mode_from_options(&opts),
+                SortMode::Started,
+                "expected {value} to select Started"
+            );
+        }
+    }
+
+    #[test]
+    fn sort_mode_unknown_falls_back_to_repo() {
+        for value in ["repo", "", "alphabetical", "xyz"] {
+            let opts = opts_with(tmux::SIDEBAR_SORT, value);
+            assert_eq!(
+                sort_mode_from_options(&opts),
+                SortMode::Repo,
+                "expected {value} to fall back to Repo"
             );
         }
     }
