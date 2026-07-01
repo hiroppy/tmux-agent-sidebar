@@ -40,7 +40,7 @@ pub(super) fn init_state(tmux_pane: String) -> AppState {
     // Populate session names synchronously before the first draw so
     // `/rename`-assigned labels show up without waiting for the first
     // background scan tick.
-    state.sessions.names = session::scan_session_names();
+    state.sessions.names = session::scan_sessions();
     state.sessions.dirty = true;
     state.refresh();
 

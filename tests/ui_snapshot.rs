@@ -2419,12 +2419,15 @@ fn snapshot_background_long_command_truncates_with_ellipsis() {
 /// groups, so `repo` (grouped, alphabetical) and `started` (flat,
 /// oldest-first) produce visibly different orders.
 fn sorted_mode_state() -> tmux_agent_sidebar::state::AppState {
-    // `age_secs` before the fixed "now" so the rendered age column stays
-    // small and readable; a larger age means the session started earlier.
-    let mk = |id: &str, name: &str, age_secs: u64| {
+    // `age_secs` before the fixed "now" only feeds the rendered age column
+    // (that column reflects the per-run `started_at`, kept readable here). The
+    // sort key is the session start time in `sessions.names`, set below — a
+    // larger age means the session started earlier.
+    let mk = |id: &str, sid: &str, name: &str, age_secs: u64| {
         let mut p = make_pane(AgentType::Claude, PaneStatus::Idle);
         p.pane_id = id.into();
         p.pane_active = false;
+        p.session_id = Some(sid.into());
         p.session_name = name.into();
         p.started_at = Some(FIXED_NOW - age_secs);
         p
@@ -2434,12 +2437,23 @@ fn sorted_mode_state() -> tmux_agent_sidebar::state::AppState {
     // Hide the bottom panel so the whole frame is the agent list.
     state.bottom_panel_height = 0;
     state.repo_groups = vec![
-        make_repo_group("alpha", vec![mk("%5", "sess-late", 100)]),
+        make_repo_group("alpha", vec![mk("%5", "s5", "sess-late", 100)]),
         make_repo_group(
             "beta",
-            vec![mk("%6", "sess-early", 300), mk("%7", "sess-mid", 200)],
+            vec![
+                mk("%6", "s6", "sess-early", 300),
+                mk("%7", "s7", "sess-mid", 200),
+            ],
         ),
     ];
+    // Session start times (the real sort key): early < mid < late.
+    let started = |ms: u64| tmux_agent_sidebar::session::SessionMeta {
+        name: String::new(),
+        started_at_ms: Some(ms),
+    };
+    state.sessions.names.insert("s6".into(), started(1000)); // sess-early
+    state.sessions.names.insert("s7".into(), started(2000)); // sess-mid
+    state.sessions.names.insert("s5".into(), started(3000)); // sess-late
     state
 }
 

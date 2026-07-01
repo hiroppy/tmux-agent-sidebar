@@ -76,10 +76,18 @@ pub(crate) fn pane_id_num(pane_id: &str) -> u64 {
 impl AppState {
     /// `(group_index, pane_index)` of every pane that passes the repo +
     /// status filters, ordered by session start time (oldest first) for the
-    /// flat [`SortMode::Started`](crate::ui::SortMode) list. Panes without a
-    /// reported `started_at` (e.g. some Codex sessions) sort last, tiebroken
-    /// by pane id so the order is always deterministic. Both
-    /// [`rebuild_row_targets`](Self::rebuild_row_targets) and the row
+    /// flat [`SortMode::Started`](crate::ui::SortMode) list.
+    ///
+    /// The key is the session's `startedAt` (epoch ms) from
+    /// `~/.claude/sessions/*.json`, resolved via the pane's `session_id`. That
+    /// value is stable for the life of the session — unlike the per-pane
+    /// `@pane_started_at`, which is the *current LLM run* timer and resets to
+    /// "now" every time a new prompt is submitted (which would make a session
+    /// jump position mid-conversation). Sessions whose start time is unknown
+    /// (no session file yet, or non-Claude agents) sort last, tiebroken by
+    /// pane id so the order is always deterministic.
+    ///
+    /// Both [`rebuild_row_targets`](Self::rebuild_row_targets) and the row
     /// renderer consume this, so the drawn rows and the click/scroll row map
     /// can never disagree.
     pub fn flat_started_order(&self) -> Vec<(usize, usize)> {
@@ -97,10 +105,13 @@ impl AppState {
         // Stable sort: panes sharing a key keep repo-encounter order.
         items.sort_by_key(|&(gi, pi)| {
             let pane = &self.repo_groups[gi].panes[pi].0;
-            (
-                pane.started_at.unwrap_or(u64::MAX),
-                pane_id_num(&pane.pane_id),
-            )
+            let started_ms = pane
+                .session_id
+                .as_ref()
+                .and_then(|sid| self.sessions.names.get(sid))
+                .and_then(|meta| meta.started_at_ms)
+                .unwrap_or(u64::MAX);
+            (started_ms, pane_id_num(&pane.pane_id))
         });
         items
     }

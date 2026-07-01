@@ -235,54 +235,66 @@ mod tests {
         path.to_string_lossy().into_owned()
     }
 
-    fn pane_started(id: &str, started_at: Option<u64>) -> PaneInfo {
+    /// Pane whose `session_id` is derived from its id (`%5` → `s5`), so tests
+    /// can wire a matching `sessions.names` start-time entry.
+    fn pane_with_session(id: &str) -> PaneInfo {
         PaneInfo {
-            started_at,
+            session_id: Some(format!("s{}", id.trim_start_matches('%'))),
             ..test_pane(id)
         }
     }
 
-    /// Two repo groups whose panes' start times interleave across groups,
-    /// plus one pane with no `started_at`.
-    fn two_groups_with_start_times() -> Vec<RepoGroup> {
-        vec![
+    /// Two repo groups whose sessions' start times interleave across groups,
+    /// plus one session with no known start time (no `sessions.names` entry).
+    /// Start times live in `sessions.names`, matching how the real sort key is
+    /// resolved (session `startedAt`, not the per-pane run timer).
+    fn state_with_start_times() -> AppState {
+        let mut state = AppState::new("%0".into());
+        state.repo_groups = vec![
             RepoGroup {
                 name: "alpha".into(),
                 has_focus: false,
                 panes: vec![
-                    (pane_started("%5", Some(300)), PaneGitInfo::default()),
-                    (pane_started("%6", Some(100)), PaneGitInfo::default()),
+                    (pane_with_session("%5"), PaneGitInfo::default()),
+                    (pane_with_session("%6"), PaneGitInfo::default()),
                 ],
             },
             RepoGroup {
                 name: "beta".into(),
                 has_focus: false,
                 panes: vec![
-                    (pane_started("%7", Some(200)), PaneGitInfo::default()),
-                    (pane_started("%8", None), PaneGitInfo::default()),
+                    (pane_with_session("%7"), PaneGitInfo::default()),
+                    (pane_with_session("%8"), PaneGitInfo::default()),
                 ],
             },
-        ]
+        ];
+        let started = |ms: u64| crate::session::SessionMeta {
+            name: String::new(),
+            started_at_ms: Some(ms),
+        };
+        // %8 intentionally has no entry → unknown start time → sorts last.
+        state.sessions.names.insert("s5".into(), started(300));
+        state.sessions.names.insert("s6".into(), started(100));
+        state.sessions.names.insert("s7".into(), started(200));
+        state
     }
 
     #[test]
     fn flat_started_order_sorts_oldest_first_across_groups() {
-        let mut state = AppState::new("%0".into());
-        state.repo_groups = two_groups_with_start_times();
+        let state = state_with_start_times();
         let order: Vec<&str> = state
             .flat_started_order()
             .into_iter()
             .map(|(gi, pi)| state.repo_groups[gi].panes[pi].0.pane_id.as_str())
             .collect();
-        // 100, 200, 300, then the started_at-less pane last.
+        // 100, 200, 300, then the unknown-start-time session last.
         assert_eq!(order, vec!["%6", "%7", "%5", "%8"]);
     }
 
     #[test]
     fn row_targets_follow_start_order_in_started_mode() {
-        let mut state = AppState::new("%0".into());
+        let mut state = state_with_start_times();
         state.sort_mode = crate::ui::SortMode::Started;
-        state.repo_groups = two_groups_with_start_times();
         state.rebuild_row_targets();
         let ids: Vec<&str> = state
             .layout
@@ -295,9 +307,8 @@ mod tests {
 
     #[test]
     fn row_targets_keep_group_order_in_repo_mode() {
-        let mut state = AppState::new("%0".into());
+        let mut state = state_with_start_times();
         // Default sort mode is Repo.
-        state.repo_groups = two_groups_with_start_times();
         state.rebuild_row_targets();
         let ids: Vec<&str> = state
             .layout
