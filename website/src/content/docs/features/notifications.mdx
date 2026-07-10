@@ -36,11 +36,11 @@ An empty value disables every event without touching the master `@sidebar_notifi
 
 ## Platform support
 
-- **macOS** uses `osascript`
-- **Linux** uses `notify-send`
-- **Windows** is not supported yet
+- **macOS** prefers [`terminal-notifier`](https://github.com/julienXX/terminal-notifier) when it is executable on `PATH`; install it with `brew install terminal-notifier`. The sidebar falls back to `osascript` only when `terminal-notifier` is unavailable.
+- **Linux** uses `notify-send`.
+- **Windows** is not supported yet.
 
-If the required notification command is missing, the feature quietly disables itself.
+If no supported notification command is available, the feature quietly disables itself.
 
 ## Notification layout
 
