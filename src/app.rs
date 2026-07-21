@@ -30,6 +30,14 @@ pub fn run(
     tmux_pane: String,
     needs_refresh: &'static AtomicBool,
 ) -> io::Result<()> {
+    // Clamp bounds from `@sidebar_width` (e.g. `15%[20,40]`), re-enforced
+    // on terminal-driven resize events below: tmux rescales panes
+    // proportionally with no regard for the configured min/max. Manual
+    // pane-border drags are left alone (see `ClampEnforcer`). Read once
+    // at startup — toggling the sidebar recreates this process, which is
+    // also when a changed option takes effect for the initial width.
+    let mut clamp = crate::sidebar_width::ClampEnforcer::from_option(&tmux_pane);
+    let own_pane = tmux_pane.clone();
     let mut state = setup::init_state(tmux_pane);
     let mut window_inactive_count: u32 = 0;
 
@@ -65,6 +73,21 @@ pub fn run(
         if event::poll(timeout)? {
             loop {
                 let ev = event::read()?;
+                if let event::Event::Resize(width, _) = ev
+                    && clamp.is_active()
+                    && let Some(target) = clamp.correction(
+                        u32::from(width),
+                        crate::sidebar_width::window_width_of(&own_pane),
+                    )
+                {
+                    let _ = crate::tmux::run_tmux(&[
+                        "resize-pane",
+                        "-t",
+                        &own_pane,
+                        "-x",
+                        &target.to_string(),
+                    ]);
+                }
                 if input::handle_event(ev, &mut state, &git_tab_active, terminal) {
                     needs_redraw = true;
                 }
