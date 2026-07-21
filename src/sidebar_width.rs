@@ -120,13 +120,18 @@ pub fn resolve_percent_width(
         .to_string()
 }
 
-/// Read the clamp bounds configured on `@sidebar_width`, if any. Only a
+/// Read the clamp bounds configured on `@sidebar_width`, if any. The
+/// option is resolved from `target`'s scope (pane → window → session →
+/// global inheritance) via format expansion, matching how the toggle
+/// path reads it at pane creation — a `show -gv` lookup would see only
+/// the global value and miss window/session-local overrides. Only a
 /// percentage width carries bounds; absolute columns and malformed
 /// settings yield none (warnings are the toggle path's job).
-pub fn configured_clamp_bounds() -> (Option<u32>, Option<u32>) {
-    let Some(setting) = tmux::get_option(tmux::SIDEBAR_WIDTH) else {
+pub fn configured_clamp_bounds(target: &str) -> (Option<u32>, Option<u32>) {
+    let setting = tmux::display_message(target, &format!("#{{{}}}", tmux::SIDEBAR_WIDTH));
+    if setting.is_empty() {
         return (None, None);
-    };
+    }
     match parse_sidebar_width(&setting).0 {
         SidebarWidth::Percent { min, max, .. } => (min, max),
         SidebarWidth::Columns(_) => (None, None),
@@ -170,7 +175,7 @@ impl ClampEnforcer {
     /// window-width baseline via `target`. Unbounded widths skip the
     /// baseline query and disable enforcement entirely.
     pub fn from_option(target: &str) -> Self {
-        let (min, max) = configured_clamp_bounds();
+        let (min, max) = configured_clamp_bounds(target);
         let last_window_width = if min.is_some() || max.is_some() {
             window_width_of(target)
         } else {
