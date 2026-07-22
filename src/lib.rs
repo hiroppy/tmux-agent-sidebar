@@ -10,6 +10,7 @@ pub mod group;
 pub mod port;
 pub(crate) mod process;
 pub mod session;
+pub mod sidebar_width;
 pub mod state;
 pub mod time;
 pub mod tmux;
