@@ -86,6 +86,11 @@ pub fn draw(frame: &mut Frame, state: &mut AppState) {
             pet::draw_pet(frame, state, chunks[1], running_count);
         }
     }
+
+    if state.is_ask_popup_open() {
+        state.layout.hyperlink_overlays.clear();
+        panes::render_ask_popup(frame, state, area);
+    }
 }
 
 #[cfg(test)]

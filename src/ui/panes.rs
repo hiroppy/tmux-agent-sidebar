@@ -108,6 +108,96 @@ const EXP_MODE_LABEL_Y: u16 = 7;
 const EXP_MODE_VALUE_Y: u16 = 8;
 const EXP_ERROR_Y: u16 = 10;
 
+pub(super) fn render_ask_popup(frame: &mut Frame, state: &mut AppState, area: Rect) {
+    let PopupState::Ask(ask) = &state.popup else {
+        return;
+    };
+    let question = ask.question.clone();
+    let scope = ask.scope;
+    let theme = &state.theme;
+
+    let popup_rect = center_popup(area, area.width.min(40), 11);
+    let compact = popup_rect.height < 11;
+    state.popup.set_ask_area(Some(popup_rect));
+    frame.render_widget(Clear, popup_rect);
+
+    let title = truncate_to_width(" Ask agents ", popup_rect.width.saturating_sub(2) as usize);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme.accent))
+        .title(Span::styled(
+            title,
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ));
+    let inner = block.inner(popup_rect);
+    frame.render_widget(block, popup_rect);
+
+    let content_width = inner.width.saturating_sub(2) as usize;
+    let render_row = |frame: &mut Frame, y: u16, spans: Vec<Span<'_>>| {
+        if y < inner.height {
+            frame.render_widget(
+                Paragraph::new(Line::from(spans)),
+                Rect::new(inner.x + 1, inner.y + y, inner.width.saturating_sub(2), 1),
+            );
+        }
+    };
+    let label = Style::default()
+        .fg(theme.text_muted)
+        .add_modifier(Modifier::BOLD);
+
+    let render_scope = |frame: &mut Frame, y: u16| {
+        render_row(
+            frame,
+            y,
+            vec![Span::styled(
+                truncate_to_width(scope.label(), content_width),
+                Style::default().fg(theme.text_active),
+            )],
+        );
+    };
+    let render_question = |frame: &mut Frame, y: u16| {
+        render_row(
+            frame,
+            y,
+            vec![
+                Span::styled(
+                    tail_fit(&question, content_width.saturating_sub(1)),
+                    Style::default().fg(theme.text_active),
+                ),
+                Span::styled("█", Style::default().fg(theme.accent)),
+            ],
+        );
+    };
+    let render_hint = |frame: &mut Frame, y: u16, key: &'static str, action: &'static str| {
+        render_row(
+            frame,
+            y,
+            vec![
+                Span::styled(key, Style::default().fg(theme.accent)),
+                Span::styled(action, Style::default().fg(theme.text_muted)),
+            ],
+        );
+    };
+
+    if compact {
+        render_scope(frame, 0);
+        render_row(frame, 1, vec![Span::styled("QUESTION", label)]);
+        render_question(frame, 2);
+        render_hint(frame, 3, "Enter", " submit");
+        render_hint(frame, 4, "Ctrl+Enter", " force send");
+    } else {
+        render_row(frame, 0, vec![Span::styled("SCOPE (Tab to change)", label)]);
+        render_scope(frame, 1);
+        render_row(frame, 3, vec![Span::styled("QUESTION", label)]);
+        render_question(frame, 4);
+        render_hint(frame, 6, "Enter", " submit");
+        render_hint(frame, 7, "Ctrl+Enter", " force send");
+    }
+}
+
 pub(super) fn render_spawn_input_popup(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let PopupState::SpawnInput {
         input,

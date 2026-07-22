@@ -1,6 +1,6 @@
 ---
 title: Keybindings
-description: Every shortcut in the sidebar, the worktree spawn modal, and the close-pane modal.
+description: Every shortcut in the sidebar, ask popup, worktree spawn modal, and close-pane modal.
 ---
 
 ## Sidebar
@@ -14,6 +14,7 @@ description: Every shortcut in the sidebar, the worktree spawn modal, and the cl
 | `h` / `Left`   | Previous status filter                                        |
 | `l` / `Right`  | Next status filter                                            |
 | `r`            | Open repo filter popup                                        |
+| `a`            | Open ask popup for agent questions                            |
 | `Enter`        | Jump to the selected pane                                     |
 | `Tab`          | Cycle status filter                                           |
 | `Shift+Tab`    | Switch bottom panel tab (Activity ⇄ Git)                      |
@@ -37,6 +38,20 @@ Opened by clicking the `ⓘ` badge shown when hooks or plugin setup are missing.
 | Key   | Action          |
 | ----- | --------------- |
 | `Esc` | Close the popup |
+
+## Ask popup
+
+Opened with `a` while the agent list has focus.
+
+| Key            | Action                                      |
+| -------------- | ------------------------------------------- |
+| Text keys      | Edit the question                           |
+| `Backspace`    | Delete the last character                   |
+| `Tab`          | Cycle scope: Selected → Repo → All          |
+| `Shift+Tab`    | Cycle scope in reverse                      |
+| `Enter`        | Submit to idle or waiting targets           |
+| `Ctrl+Enter`   | Force-send, including running targets       |
+| `Esc`          | Cancel and close the popup                  |
 
 ## Worktree
 

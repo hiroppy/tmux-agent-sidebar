@@ -21,6 +21,9 @@ pub(super) fn handle_event(
     match ev {
         Event::Key(key) => handle_key_event(key, state, git_tab_active),
         Event::Mouse(mouse) => {
+            if handle_ask_mouse_event(mouse, state) {
+                return true;
+            }
             let term_height = terminal.size().map(|s| s.height).unwrap_or(0);
             let bottom_h = state.bottom_panel_height;
             match mouse.kind {
@@ -52,6 +55,16 @@ pub(super) fn handle_event(
     }
 }
 
+fn handle_ask_mouse_event(mouse: crossterm::event::MouseEvent, state: &mut AppState) -> bool {
+    if !state.is_ask_popup_open() {
+        return false;
+    }
+    if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+        state.handle_mouse_click(mouse.row, mouse.column);
+    }
+    true
+}
+
 /// Dispatch a single [`KeyEvent`]. Split out from [`handle_event`] so that
 /// unit tests can drive the keyboard path without constructing a real
 /// terminal handle (the [`Terminal`] argument is only needed for mouse
@@ -61,6 +74,17 @@ pub(super) fn handle_key_event(
     state: &mut AppState,
     git_tab_active: &AtomicBool,
 ) -> bool {
+    if state.is_ask_popup_open() {
+        match key.code {
+            KeyCode::Esc => state.close_ask_popup(),
+            KeyCode::Tab => state.ask_scope_next(),
+            KeyCode::BackTab => state.ask_scope_prev(),
+            KeyCode::Backspace => state.ask_input_pop_char(),
+            KeyCode::Char(c) => state.ask_input_push_char(c),
+            _ => {}
+        }
+        return true;
+    }
     if state.is_notices_popup_open() {
         if key.code == KeyCode::Esc {
             state.close_notices_popup();
@@ -145,6 +169,11 @@ pub(super) fn handle_key_event(
         KeyCode::Char('x') => {
             if state.focus_state.focus == Focus::Panes {
                 state.open_remove_confirm();
+            }
+        }
+        KeyCode::Char('a') => {
+            if state.focus_state.focus == Focus::Panes {
+                state.open_ask_popup();
             }
         }
         KeyCode::Enter => {
@@ -327,6 +356,84 @@ mod tests {
         let flag = AtomicBool::new(false);
         handle_key_event(key(KeyCode::Char('p')), &mut state, &flag);
         assert_eq!(state.global.selected_pane_row, 1);
+    }
+
+    #[test]
+    fn bare_a_opens_ask_popup_from_panes() {
+        let mut state = state_with_three_panes();
+        let flag = AtomicBool::new(false);
+
+        handle_key_event(key(KeyCode::Char('a')), &mut state, &flag);
+
+        assert!(state.is_ask_popup_open());
+    }
+
+    #[test]
+    fn ask_popup_handles_editing_before_pane_navigation() {
+        let mut state = state_with_three_panes();
+        let flag = AtomicBool::new(false);
+        state.open_ask_popup();
+
+        handle_key_event(key(KeyCode::Char('j')), &mut state, &flag);
+        handle_key_event(key(KeyCode::Backspace), &mut state, &flag);
+
+        assert_eq!(state.global.selected_pane_row, 0);
+        let crate::state::PopupState::Ask(ask) = &state.popup else {
+            panic!("ask popup should remain open");
+        };
+        assert_eq!(ask.question, crate::state::DEFAULT_ASK_PROMPT);
+    }
+
+    #[test]
+    fn escape_closes_ask_popup_without_changing_selection() {
+        let mut state = state_with_three_panes();
+        let flag = AtomicBool::new(false);
+        state.global.selected_pane_row = 1;
+        state.open_ask_popup();
+
+        handle_key_event(key(KeyCode::Esc), &mut state, &flag);
+
+        assert!(!state.is_ask_popup_open());
+        assert_eq!(state.global.selected_pane_row, 1);
+    }
+
+    #[test]
+    fn tab_cycles_ask_scope_without_editing_question() {
+        let mut state = state_with_three_panes();
+        let flag = AtomicBool::new(false);
+        state.open_ask_popup();
+
+        handle_key_event(key(KeyCode::Tab), &mut state, &flag);
+        let crate::state::PopupState::Ask(ask) = &state.popup else {
+            panic!("ask popup should remain open");
+        };
+        assert_eq!(ask.scope, crate::state::AskScope::Repo);
+        assert_eq!(ask.question, crate::state::DEFAULT_ASK_PROMPT);
+
+        handle_key_event(key(KeyCode::BackTab), &mut state, &flag);
+        let crate::state::PopupState::Ask(ask) = &state.popup else {
+            panic!("ask popup should remain open");
+        };
+        assert_eq!(ask.scope, crate::state::AskScope::Selected);
+    }
+
+    #[test]
+    fn ask_popup_consumes_bottom_panel_mouse_events_before_tab_routing() {
+        let mut state = state_with_three_panes();
+        state.open_ask_popup();
+        state
+            .popup
+            .set_ask_area(Some(ratatui::layout::Rect::new(5, 5, 20, 8)));
+        let mouse = crossterm::event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 2,
+            row: 20,
+            modifiers: KeyModifiers::NONE,
+        };
+
+        assert!(handle_ask_mouse_event(mouse, &mut state));
+        assert!(!state.is_ask_popup_open());
+        assert_eq!(state.bottom_tab, BottomTab::Activity);
     }
 
     #[test]
