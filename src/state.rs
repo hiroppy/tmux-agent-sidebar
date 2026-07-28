@@ -122,6 +122,24 @@ pub struct AppState {
     /// Height of the bottom panel in lines. Loaded once at startup from
     /// the `@sidebar_bottom_height` tmux option. A value of 0 hides the panel.
     pub bottom_panel_height: u16,
+    /// Explicit user override for bottom-panel visibility while the window is
+    /// in *compact* mode (too short to show the list and a fixed panel at the
+    /// same time). `None` means "auto-hidden"; `Some(true)` peeks the panel in
+    /// as a full-height accordion; `Some(false)` hides it again. The override
+    /// is meaningful only in compact mode — a tall window always shows the
+    /// panel — and is reset whenever the window crosses the compact/tall
+    /// threshold. See [`AppState::bottom_visibility`].
+    pub bottom_override: Option<bool>,
+    /// Compact state observed on the last render, used to detect crossings of
+    /// the compact/tall threshold so [`bottom_override`](Self::bottom_override)
+    /// can be reset (a resize back to a tall window re-shows the panel; a
+    /// resize down to a short window re-hides it). `None` until the first draw.
+    pub last_compact: Option<bool>,
+    /// Viewport height (rows) captured on the last render. Read by keyboard
+    /// handlers — which have no terminal handle — so toggles and focus moves
+    /// can resolve the current bottom-panel visibility. See
+    /// [`AppState::bottom_panel_visible`].
+    pub last_viewport_height: u16,
     /// Maps session_id → session name, refreshed periodically from
     /// `~/.claude/sessions/*.json` files. The `dirty` flag is `true` when
     /// the map has changed since the last `refresh_session_names`
@@ -179,6 +197,9 @@ impl AppState {
             version_notice: None,
             global: GlobalState::new(),
             bottom_panel_height: crate::ui::BOTTOM_PANEL_HEIGHT,
+            bottom_override: None,
+            last_compact: None,
+            last_viewport_height: 0,
             sessions: SessionNamesState::new(),
             pet_enabled: false,
         };
