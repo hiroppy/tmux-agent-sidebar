@@ -18,12 +18,21 @@ pub(super) struct RowCtx<'a> {
     pub(super) inner_width: usize,
     pub(super) theme: &'a ColorTheme,
     pub(super) bg: Option<Color>,
+    /// When true, highlighted spans on this row are drawn as a reverse-video
+    /// bar (uniform, theme-adaptive) instead of a `bg` fill. Only set on the
+    /// rows that carry the selection highlight.
+    pub(super) reversed: bool,
     pub(super) active: bool,
 }
 
 impl RowCtx<'_> {
     #[inline]
     pub(super) fn apply_bg(&self, style: Style) -> Style {
+        if self.reversed {
+            // Uniform reverse-video bar: drop the per-token fg so every cell
+            // inverts to the same band, legible on any terminal theme.
+            return Style::default().add_modifier(ratatui::style::Modifier::REVERSED);
+        }
         match self.bg {
             Some(c) => style.bg(c),
             None => style,

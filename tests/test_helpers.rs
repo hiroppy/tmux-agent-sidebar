@@ -45,6 +45,20 @@ pub fn buffer_to_string(buf: &Buffer) -> String {
 /// Convert buffer to string WITH style annotations for color/modifier verification
 /// Format: each cell's symbol is followed by style info if non-default
 /// e.g., "○[fg:250]" or " [rev]" or "c[fg:174,bold]"
+/// Render a cell color as a snapshot tag. `Reset` (the terminal's default
+/// foreground/background) produces no tag, so it reads as "unstyled" — which
+/// is exactly its meaning. Indexed colors stay numeric (`153`); the 16 ANSI
+/// named colors render by name (`Green`, `DarkGray`, …) so theme-adaptive
+/// defaults remain visible and assertable in snapshots.
+fn color_tag(color: Color) -> Option<String> {
+    match color {
+        Color::Reset => None,
+        Color::Indexed(n) => Some(n.to_string()),
+        Color::Rgb(r, g, b) => Some(format!("#{r:02x}{g:02x}{b:02x}")),
+        other => Some(format!("{other:?}")),
+    }
+}
+
 pub fn buffer_to_styled_string(buf: &Buffer) -> String {
     let area = buf.area;
     let mut lines = Vec::new();
@@ -55,14 +69,14 @@ pub fn buffer_to_styled_string(buf: &Buffer) -> String {
             line.push_str(cell.symbol());
 
             let mut attrs = Vec::new();
-            if let Color::Indexed(n) = cell.fg {
-                attrs.push(format!("fg:{n}"));
+            if let Some(tag) = color_tag(cell.fg) {
+                attrs.push(format!("fg:{tag}"));
             }
-            if let Color::Indexed(n) = cell.bg {
-                attrs.push(format!("bg:{n}"));
+            if let Some(tag) = color_tag(cell.bg) {
+                attrs.push(format!("bg:{tag}"));
             }
-            if let Color::Indexed(n) = cell.underline_color {
-                attrs.push(format!("ul:{n}"));
+            if let Some(tag) = color_tag(cell.underline_color) {
+                attrs.push(format!("ul:{tag}"));
             }
             if cell.modifier.contains(Modifier::BOLD) {
                 attrs.push("bold".into());

@@ -46,6 +46,12 @@ pub struct ColorTheme {
     pub section_title: Color,
     pub activity_timestamp: Color,
     pub response_arrow: Color,
+    /// When true the selected row is drawn with a reversed-video bar (swapping
+    /// the terminal's fg/bg) instead of a fixed [`selection_bg`](Self::selection_bg)
+    /// fill. Reverse video keeps the selection legible on both light and dark
+    /// terminals, so it is the default under the theme-adaptive ANSI palette;
+    /// the classic 256-color palette keeps the fixed-background fill.
+    pub selection_reversed: bool,
 }
 
 impl Default for ColorTheme {
@@ -86,11 +92,79 @@ impl Default for ColorTheme {
             section_title: Color::Indexed(109),
             activity_timestamp: Color::Indexed(109),
             response_arrow: Color::Indexed(81),
+            selection_reversed: false,
         }
     }
 }
 
 impl ColorTheme {
+    /// Theme-adaptive palette built from the terminal's own 16-color ANSI
+    /// palette (plus `Reset` = the terminal's default foreground). Unlike the
+    /// fixed xterm-256 [`default`](Self::default), this follows the active
+    /// terminal theme, so body text stays legible on both light and dark
+    /// backgrounds. Enabled via `@sidebar_ansi_theme`. The ~35 semantic roles
+    /// are grouped onto the ANSI hues (normal + bright), so some
+    /// distinct-but-same-family roles share a hue.
+    pub fn ansi() -> Self {
+        Self {
+            // Neutrals: body text follows the terminal default; muted /
+            // inactive / chrome use bright-black (mid gray), readable on both.
+            text_active: Color::Reset,
+            text_muted: Color::DarkGray,
+            text_inactive: Color::DarkGray,
+            border_inactive: Color::DarkGray,
+            status_unknown: Color::DarkGray,
+            filter_inactive: Color::DarkGray,
+            port: Color::DarkGray,
+            activity_timestamp: Color::DarkGray,
+            // Selection is drawn as a reverse-video bar (see selection_reversed);
+            // this fallback fill is only used if the user pins
+            // @sidebar_color_selection.
+            selection_bg: Color::DarkGray,
+            selection_reversed: true,
+
+            // Focus / accent / links.
+            accent: Color::Cyan,
+            branch: Color::Cyan,
+            subagent: Color::Cyan,
+            section_title: Color::Cyan,
+            badge_plan: Color::LightCyan,
+            pr_link: Color::LightCyan,
+            response_arrow: Color::LightCyan,
+
+            // Blues.
+            status_all: Color::LightBlue,
+            session_header: Color::LightBlue,
+            status_idle: Color::Blue,
+
+            // Greens: running / additions.
+            status_running: Color::Green,
+            diff_added: Color::Green,
+            pet_eye: Color::Green,
+
+            // Yellows: attention / pending / changes.
+            status_waiting: Color::Yellow,
+            wait_reason: Color::Yellow,
+            badge_auto: Color::Yellow,
+            commit_hash: Color::Yellow,
+            file_change: Color::Yellow,
+            task_progress: Color::LightYellow,
+
+            // Reds: errors / danger / deletions.
+            status_error: Color::Red,
+            badge_danger: Color::Red,
+            diff_deleted: Color::Red,
+
+            // Magentas: agents.
+            agent_codex: Color::Magenta,
+            agent_claude: Color::LightMagenta,
+            agent_opencode: Color::LightCyan,
+
+            // Pet body has no ANSI orange; light-red is the closest.
+            pet_body: Color::LightRed,
+        }
+    }
+
     /// Load colors from tmux @sidebar_color_* variables, falling back to defaults.
     /// Fetches all global options in a single tmux call to avoid N subprocess forks.
     pub fn from_tmux() -> Self {
@@ -99,7 +173,13 @@ impl ColorTheme {
     }
 
     fn from_options(all_opts: &std::collections::HashMap<String, String>) -> Self {
-        let mut theme = Self::default();
+        // Pick the base palette: theme-adaptive ANSI when @sidebar_ansi_theme
+        // is on, otherwise the classic fixed 256-color defaults.
+        let mut theme = if ansi_theme_enabled(all_opts) {
+            Self::ansi()
+        } else {
+            Self::default()
+        };
 
         let read = |var: &str, fallback: Color| -> Color {
             all_opts
@@ -128,6 +208,11 @@ impl ColorTheme {
         theme.port = read(tmux::SIDEBAR_COLOR_PORT, theme.port);
         theme.wait_reason = read(tmux::SIDEBAR_COLOR_WAIT_REASON, theme.wait_reason);
         theme.selection_bg = read(tmux::SIDEBAR_COLOR_SELECTION, theme.selection_bg);
+        // An explicit selection color is a request for a fixed-background fill,
+        // so honor it instead of the reverse-video bar.
+        if all_opts.contains_key(tmux::SIDEBAR_COLOR_SELECTION) {
+            theme.selection_reversed = false;
+        }
         theme.branch = read(tmux::SIDEBAR_COLOR_BRANCH, theme.branch);
         theme.task_progress = read(tmux::SIDEBAR_COLOR_TASK_PROGRESS, theme.task_progress);
         theme.subagent = read(tmux::SIDEBAR_COLOR_SUBAGENT, theme.subagent);
@@ -170,6 +255,15 @@ impl ColorTheme {
     }
 }
 
+/// Whether `@sidebar_ansi_theme` is enabled. Accepts `on`/`true`/`1`/`yes`
+/// (case-insensitive); anything else (including unset) is off.
+fn ansi_theme_enabled(all_opts: &std::collections::HashMap<String, String>) -> bool {
+    all_opts
+        .get(tmux::SIDEBAR_ANSI_THEME)
+        .map(|s| s.trim().to_ascii_lowercase())
+        .is_some_and(|s| matches!(s.as_str(), "on" | "true" | "1" | "yes"))
+}
+
 fn parse_tmux_color(value: &str) -> Option<Color> {
     let value = value.trim();
     if let Ok(index) = value.parse::<u8>() {
@@ -193,6 +287,48 @@ fn parse_tmux_color(value: &str) -> Option<Color> {
 mod tests {
     use super::*;
     use ratatui::style::Color;
+    use std::collections::HashMap;
+
+    #[test]
+    fn ansi_palette_is_theme_adaptive() {
+        let theme = ColorTheme::ansi();
+        // Body text follows the terminal default; selection reverses.
+        assert_eq!(theme.text_active, Color::Reset);
+        assert!(theme.selection_reversed);
+        // A spread of the ANSI hues.
+        assert_eq!(theme.status_running, Color::Green);
+        assert_eq!(theme.status_error, Color::Red);
+        assert_eq!(theme.status_waiting, Color::Yellow);
+        assert_eq!(theme.accent, Color::Cyan);
+        assert_eq!(theme.text_muted, Color::DarkGray);
+        // The default palette stays fixed-index with a bg-fill selection.
+        assert!(!ColorTheme::default().selection_reversed);
+    }
+
+    #[test]
+    fn ansi_theme_opt_in_selects_the_adaptive_palette() {
+        let off = ColorTheme::from_options(&HashMap::new());
+        assert_eq!(off.text_active, Color::Indexed(255));
+        assert!(!off.selection_reversed);
+
+        for on in ["on", "true", "1", "yes", "ON"] {
+            let opts = HashMap::from([(tmux::SIDEBAR_ANSI_THEME.to_string(), on.to_string())]);
+            let theme = ColorTheme::from_options(&opts);
+            assert_eq!(theme.text_active, Color::Reset, "ansi on via {on:?}");
+            assert!(theme.selection_reversed);
+        }
+    }
+
+    #[test]
+    fn explicit_selection_color_overrides_reverse_video() {
+        let opts = HashMap::from([
+            (tmux::SIDEBAR_ANSI_THEME.to_string(), "on".to_string()),
+            (tmux::SIDEBAR_COLOR_SELECTION.to_string(), "236".to_string()),
+        ]);
+        let theme = ColorTheme::from_options(&opts);
+        assert!(!theme.selection_reversed);
+        assert_eq!(theme.selection_bg, Color::Indexed(236));
+    }
 
     #[test]
     fn status_color_attention_overrides() {
