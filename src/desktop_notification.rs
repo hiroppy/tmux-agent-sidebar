@@ -9,6 +9,7 @@ use crate::tmux;
 
 pub(crate) const DESKTOP_NOTIFICATION_COOLDOWN_SECS: u64 = 120;
 const DESKTOP_NOTIFICATION_TIMEOUT: Duration = Duration::from_secs(3);
+#[cfg(target_os = "linux")]
 const DESKTOP_NOTIFICATION_PROBE_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -232,20 +233,88 @@ fn normalize_fingerprint(value: &str) -> String {
     value.replace(['|', '\n', '\r'], " ")
 }
 
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MacOsNotificationBackend {
+    TerminalNotifier,
+    AppleScript,
+}
+
+#[cfg(target_os = "macos")]
+fn select_macos_notification_backend(
+    mut available: impl FnMut(MacOsNotificationBackend) -> bool,
+) -> Option<MacOsNotificationBackend> {
+    [
+        MacOsNotificationBackend::TerminalNotifier,
+        MacOsNotificationBackend::AppleScript,
+    ]
+    .into_iter()
+    .find(|backend| available(*backend))
+}
+
+#[cfg(target_os = "macos")]
+fn build_macos_notification_command(
+    backend: MacOsNotificationBackend,
+    title: &str,
+    body: &str,
+) -> Command {
+    match backend {
+        MacOsNotificationBackend::TerminalNotifier => {
+            let mut command = Command::new("terminal-notifier");
+            command.args(["-title", title, "-message", body]);
+            command
+        }
+        MacOsNotificationBackend::AppleScript => {
+            let script = format!(
+                "display notification \"{}\" with title \"{}\"",
+                escape_applescript(body),
+                escape_applescript(title)
+            );
+            let mut command = Command::new("osascript");
+            command.args(["-e", &script]);
+            command
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn command_available(command: &str) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&path).any(|directory| {
+        std::fs::metadata(directory.join(command))
+            .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn macos_notification_backend_available(backend: MacOsNotificationBackend) -> bool {
+    command_available(match backend {
+        MacOsNotificationBackend::TerminalNotifier => "terminal-notifier",
+        MacOsNotificationBackend::AppleScript => "osascript",
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn macos_notification_backend() -> Option<MacOsNotificationBackend> {
+    select_macos_notification_backend(macos_notification_backend_available)
+}
+
 fn send_desktop_notification(title: &str, body: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        let script = format!(
-            "display notification \"{}\" with title \"{}\"",
-            escape_applescript(body),
-            escape_applescript(title)
-        );
-        let mut command = Command::new("osascript");
-        command
-            .args(["-e", &script])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        run_notification_command(&mut command, "osascript", DESKTOP_NOTIFICATION_TIMEOUT)
+        let backend = macos_notification_backend()
+            .ok_or_else(|| "no macOS notification backend is available".to_string())?;
+        let mut command = build_macos_notification_command(backend, title, body);
+        command.stdout(Stdio::null()).stderr(Stdio::null());
+        run_notification_command(
+            &mut command,
+            "macOS notification backend",
+            DESKTOP_NOTIFICATION_TIMEOUT,
+        )
     }
 
     #[cfg(target_os = "linux")]
@@ -279,17 +348,7 @@ fn send_desktop_notification(title: &str, body: &str) -> Result<(), String> {
 fn notification_backend_available() -> bool {
     #[cfg(target_os = "macos")]
     {
-        let mut command = Command::new("osascript");
-        command
-            .args(["-e", "return 0"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        run_notification_command(
-            &mut command,
-            "osascript",
-            DESKTOP_NOTIFICATION_PROBE_TIMEOUT,
-        )
-        .is_ok()
+        macos_notification_backend().is_some()
     }
 
     #[cfg(target_os = "linux")]
@@ -361,6 +420,77 @@ fn run_notification_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_terminal_notifier_is_preferred_when_both_backends_are_available() {
+        let mut probes = Vec::new();
+
+        let selected = select_macos_notification_backend(|backend| {
+            probes.push(backend);
+            true
+        });
+
+        assert_eq!(selected, Some(MacOsNotificationBackend::TerminalNotifier));
+        assert_eq!(probes, [MacOsNotificationBackend::TerminalNotifier]);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_terminal_notifier_arguments_preserve_shell_metacharacters_literally() {
+        let title = r#"repo $(touch /tmp/title) ; 'quoted' \"double\""#;
+        let body = "line one\n`touch /tmp/body` && $HOME | <input> \\ tail";
+
+        let command = build_macos_notification_command(
+            MacOsNotificationBackend::TerminalNotifier,
+            title,
+            body,
+        );
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+
+        assert_eq!(command.get_program(), "terminal-notifier");
+        assert_eq!(args, ["-title", title, "-message", body]);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_applescript_is_only_selected_after_terminal_notifier_is_unavailable() {
+        let mut probes = Vec::new();
+
+        let selected = select_macos_notification_backend(|backend| {
+            probes.push(backend);
+            backend == MacOsNotificationBackend::AppleScript
+        });
+
+        assert_eq!(selected, Some(MacOsNotificationBackend::AppleScript));
+        assert_eq!(
+            probes,
+            [
+                MacOsNotificationBackend::TerminalNotifier,
+                MacOsNotificationBackend::AppleScript,
+            ]
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_backend_is_available_when_either_implementation_is_available() {
+        for available_backend in [
+            MacOsNotificationBackend::TerminalNotifier,
+            MacOsNotificationBackend::AppleScript,
+        ] {
+            let selected =
+                select_macos_notification_backend(|backend| backend == available_backend);
+
+            assert!(
+                selected.is_some(),
+                "expected {available_backend:?} to provide an available backend"
+            );
+        }
+    }
 
     #[test]
     fn settings_parse_bool_and_numbers() {
