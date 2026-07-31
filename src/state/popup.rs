@@ -42,6 +42,9 @@ pub enum PopupState {
     Notices {
         area: Option<ratatui::layout::Rect>,
     },
+    Help {
+        area: Option<ratatui::layout::Rect>,
+    },
     /// Modal text input shown when the user presses `n` (or clicks `+`)
     /// to spawn a new worktree. `target_repo` / `target_repo_root` pin
     /// the spawn target; `agent_idx` / `mode_idx` index into
@@ -84,6 +87,12 @@ impl PopupState {
 
     pub fn set_notices_area(&mut self, rect: Option<ratatui::layout::Rect>) {
         if let Self::Notices { area } = self {
+            *area = rect;
+        }
+    }
+
+    pub fn set_help_area(&mut self, rect: Option<ratatui::layout::Rect>) {
+        if let Self::Help { area } = self {
             *area = rect;
         }
     }
@@ -189,6 +198,33 @@ impl AppState {
         self.popup = PopupState::None;
         self.notices.copy_targets.clear();
         self.notices.copied_at = None;
+    }
+
+    // ─── Help popup ──────────────────────────────────────────────────────
+
+    pub fn is_help_popup_open(&self) -> bool {
+        matches!(self.popup, PopupState::Help { .. })
+    }
+
+    pub fn help_popup_area(&self) -> Option<ratatui::layout::Rect> {
+        match &self.popup {
+            PopupState::Help { area } => *area,
+            _ => None,
+        }
+    }
+
+    pub fn toggle_help_popup(&mut self) {
+        if self.is_help_popup_open() {
+            self.close_help_popup();
+        } else {
+            self.popup = PopupState::Help { area: None };
+        }
+    }
+
+    pub fn close_help_popup(&mut self) {
+        if matches!(self.popup, PopupState::Help { .. }) {
+            self.popup = PopupState::None;
+        }
     }
 
     // ─── Spawn input popup (n key / + click) ─────────────────────────────
@@ -521,6 +557,7 @@ mod tests {
         let rect = ratatui::layout::Rect::new(1, 2, 3, 4);
         popup.set_repo_area(Some(rect));
         popup.set_notices_area(Some(rect));
+        popup.set_help_area(Some(rect));
         popup.set_spawn_input_area(Some(rect));
         popup.set_remove_confirm_area(Some(rect));
         match popup {
@@ -665,6 +702,29 @@ mod tests {
     fn notices_popup_area_none_when_closed() {
         let state = AppState::new("%99".into());
         assert!(state.notices_popup_area().is_none());
+    }
+
+    // ─── Help popup ──────────────────────────────────────────────────
+
+    #[test]
+    fn toggle_help_popup_opens_then_closes() {
+        let mut state = AppState::new("%99".into());
+        state.toggle_help_popup();
+        assert!(state.is_help_popup_open());
+        state.toggle_help_popup();
+        assert!(!state.is_help_popup_open());
+    }
+
+    #[test]
+    fn close_help_popup_resets_popup_state() {
+        let mut state = AppState::new("%99".into());
+        state.popup = PopupState::Help {
+            area: Some(ratatui::layout::Rect::new(0, 0, 10, 5)),
+        };
+        assert!(state.is_help_popup_open());
+        state.close_help_popup();
+        assert!(matches!(state.popup, PopupState::None));
+        assert!(state.help_popup_area().is_none());
     }
 
     // ─── Spawn input popup ───────────────────────────────────────────

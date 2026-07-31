@@ -1287,6 +1287,40 @@ mod tests {
     }
 
     #[test]
+    fn mouse_click_inside_help_popup_is_consumed() {
+        let mut state = AppState::new("%99".into());
+        state.popup = PopupState::Help {
+            area: Some(ratatui::layout::Rect::new(2, 2, 20, 8)),
+        };
+        state.layout.line_to_row = vec![None, Some(0)];
+        state.layout.pane_row_targets = vec![RowTarget {
+            pane_id: "%1".into(),
+        }];
+
+        state.handle_mouse_click(3, 3);
+
+        assert!(state.is_help_popup_open());
+        assert_eq!(state.global.selected_pane_row, 0);
+    }
+
+    #[test]
+    fn mouse_click_outside_help_popup_closes_without_underlying_action() {
+        let mut state = AppState::new("%99".into());
+        state.popup = PopupState::Help {
+            area: Some(ratatui::layout::Rect::new(2, 2, 20, 8)),
+        };
+        state.global.status_filter = StatusFilter::All;
+
+        // Row 0 would normally route to the status filter bar. With the
+        // help popup open, it should only close the modal.
+        reset_filter_debounce(&mut state);
+        state.handle_mouse_click(0, 6);
+
+        assert!(!state.is_help_popup_open());
+        assert_eq!(state.global.status_filter, StatusFilter::All);
+    }
+
+    #[test]
     fn mouse_click_on_repo_popup_title_row_does_not_confirm() {
         // Regression: clicking the popup's top border/title row used
         // to collapse to `item_index == 0` via `saturating_sub(1)` and
