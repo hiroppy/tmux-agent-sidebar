@@ -2,7 +2,25 @@
 
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-if [[ -x "$PLUGIN_DIR/bin/tmux-agent-sidebar" ]]; then
+# Detect current platform
+detect_platform() {
+    local os arch
+    os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+    arch="$(uname -m)"
+    case "$arch" in
+        x86_64|amd64)  arch="x86_64" ;;
+        arm64|aarch64) arch="aarch64" ;;
+        *) echo "unknown" >&2 && return 1 ;;
+    esac
+    echo "${os}-${arch}"
+}
+
+PLATFORM="$(detect_platform 2>/dev/null || echo "")"
+
+# Prefer arch-suffixed binary, fallback to unsuffixed, dev build, or PATH
+if [[ -n "$PLATFORM" && -x "$PLUGIN_DIR/bin/tmux-agent-sidebar-${PLATFORM}" ]]; then
+    SIDEBAR_BINARY="$PLUGIN_DIR/bin/tmux-agent-sidebar-${PLATFORM}"
+elif [[ -x "$PLUGIN_DIR/bin/tmux-agent-sidebar" ]]; then
     SIDEBAR_BINARY="$PLUGIN_DIR/bin/tmux-agent-sidebar"
 elif [[ -x "$PLUGIN_DIR/target/release/tmux-agent-sidebar" ]]; then
     SIDEBAR_BINARY="$PLUGIN_DIR/target/release/tmux-agent-sidebar"
