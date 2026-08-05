@@ -1,6 +1,7 @@
 pub const CLAUDE_AGENT: &str = "claude";
 pub const CODEX_AGENT: &str = "codex";
 pub const OPENCODE_AGENT: &str = "opencode";
+pub const DEVIN_AGENT: &str = "devin";
 
 #[derive(Debug, Clone)]
 pub struct PaneInfo {
@@ -92,6 +93,7 @@ pub enum AgentType {
     Claude,
     Codex,
     OpenCode,
+    Devin,
     #[allow(dead_code)]
     Unknown,
 }
@@ -119,6 +121,7 @@ impl AgentType {
             CLAUDE_AGENT => Some(Self::Claude),
             CODEX_AGENT => Some(Self::Codex),
             OPENCODE_AGENT => Some(Self::OpenCode),
+            DEVIN_AGENT => Some(Self::Devin),
             _ => None,
         }
     }
@@ -128,6 +131,7 @@ impl AgentType {
             Self::Claude => CLAUDE_AGENT,
             Self::Codex => CODEX_AGENT,
             Self::OpenCode => OPENCODE_AGENT,
+            Self::Devin => DEVIN_AGENT,
             Self::Unknown => "unknown",
         }
     }
@@ -200,6 +204,7 @@ mod tests {
         assert_eq!(AgentType::from_label("claude"), Some(AgentType::Claude));
         assert_eq!(AgentType::from_label("codex"), Some(AgentType::Codex));
         assert_eq!(AgentType::from_label("opencode"), Some(AgentType::OpenCode));
+        assert_eq!(AgentType::from_label("devin"), Some(AgentType::Devin));
         assert_eq!(AgentType::from_label("unknown"), None);
         assert_eq!(AgentType::from_label(""), None);
     }
@@ -209,6 +214,7 @@ mod tests {
         assert_eq!(AgentType::Claude.label(), "claude");
         assert_eq!(AgentType::Codex.label(), "codex");
         assert_eq!(AgentType::OpenCode.label(), "opencode");
+        assert_eq!(AgentType::Devin.label(), "devin");
         assert_eq!(AgentType::Unknown.label(), "unknown");
     }
 
@@ -217,6 +223,7 @@ mod tests {
         assert_eq!(AgentType::Claude.as_str(), CLAUDE_AGENT);
         assert_eq!(AgentType::Codex.as_str(), CODEX_AGENT);
         assert_eq!(AgentType::OpenCode.as_str(), OPENCODE_AGENT);
+        assert_eq!(AgentType::Devin.as_str(), DEVIN_AGENT);
     }
 
     #[test]
