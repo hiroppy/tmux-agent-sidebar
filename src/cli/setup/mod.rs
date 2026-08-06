@@ -1,18 +1,69 @@
 //! `setup` subcommand — prints required hooks and ready-to-paste config
-//! snippets for Claude Code and Codex as JSON on stdout. Pure generator:
-//! reads only the adapter `HOOK_REGISTRATIONS` tables, never the user's
-//! config files.
+//! snippets for Claude Code, Codex, and Cursor as JSON on stdout. Pure
+//! generator: reads only the adapter `HOOK_REGISTRATIONS` tables, never the
+//! user's config files.
 
 use std::path::PathBuf;
 
 use crate::adapter::HookRegistration;
 use crate::adapter::claude::ClaudeAdapter;
 use crate::adapter::codex::CodexAdapter;
+use crate::adapter::cursor::CursorAdapter;
 
 #[allow(dead_code)]
 const _CLAUDE_TABLE_REACHABLE: &[HookRegistration] = ClaudeAdapter::HOOK_REGISTRATIONS;
 #[allow(dead_code)]
 const _CODEX_TABLE_REACHABLE: &[HookRegistration] = CodexAdapter::HOOK_REGISTRATIONS;
+#[allow(dead_code)]
+const _CURSOR_TABLE_REACHABLE: &[HookRegistration] = CursorAdapter::HOOK_REGISTRATIONS;
+
+/// Shape of the agent's hook config file. Claude Code and Codex share one
+/// schema; Cursor uses a flatter one, so the snippet generator and the
+/// `missing_hooks` comparator both have to branch on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HookConfigStyle {
+    /// `{"hooks": {Trigger: [{"matcher": …, "hooks": [{"type": "command",
+    /// "command": …}]}]}}` — Claude Code and Codex.
+    Nested,
+    /// `{"version": 1, "hooks": {trigger: [{"type": "command", "command":
+    /// …}]}}` — Cursor. Commands sit directly in the trigger array with no
+    /// matcher wrapper, and the file carries a schema `version`.
+    Flat,
+}
+
+/// Per-agent wiring the generator needs: which registration table to read,
+/// where the config file lives, and which schema to emit.
+struct AgentSpec {
+    config_path: &'static str,
+    table: &'static [HookRegistration],
+    style: HookConfigStyle,
+}
+
+fn agent_spec(agent: &str) -> Option<AgentSpec> {
+    match agent {
+        "claude" => Some(AgentSpec {
+            config_path: "~/.claude/settings.json",
+            table: ClaudeAdapter::HOOK_REGISTRATIONS,
+            style: HookConfigStyle::Nested,
+        }),
+        "codex" => Some(AgentSpec {
+            config_path: "~/.codex/hooks.json",
+            table: CodexAdapter::HOOK_REGISTRATIONS,
+            style: HookConfigStyle::Nested,
+        }),
+        "cursor" => Some(AgentSpec {
+            config_path: "~/.cursor/hooks.json",
+            table: CursorAdapter::HOOK_REGISTRATIONS,
+            style: HookConfigStyle::Flat,
+        }),
+        _ => None,
+    }
+}
+
+/// Agents the setup generator knows how to wire, in the order they appear in
+/// `setup` output. OpenCode is intentionally absent — it uses the bundled JS
+/// plugin bridge instead of a hook config file.
+const SETUP_AGENTS: &[&str] = &["claude", "codex", "cursor"];
 
 /// POSIX-quote a string for safe use as a single shell argument.
 ///
@@ -59,25 +110,34 @@ fn format_hook_command(hook_script: &str, agent: &str, event: &str) -> String {
 ///
 /// Reads **only** from the adapter's `HOOK_REGISTRATIONS` table and
 /// `AgentEventKind::external_name()` — no hook identity is duplicated here.
-/// When `HookRegistration.matcher` is `None`, the snippet uses the empty
-/// string `""` (matching Claude/Codex's "any tool" convention).
+/// When `HookRegistration.matcher` is `None`, the nested (Claude/Codex)
+/// schema uses the empty string `""` — their "any tool" convention — while
+/// the flat (Cursor) schema omits the key entirely, since Cursor treats an
+/// absent matcher as "match everything" and only accepts one on a subset of
+/// its triggers.
 pub(crate) fn build_agent_snippet(agent: &str, hook_script: &str) -> Option<serde_json::Value> {
-    let table: &[HookRegistration] = match agent {
-        "claude" => ClaudeAdapter::HOOK_REGISTRATIONS,
-        "codex" => CodexAdapter::HOOK_REGISTRATIONS,
-        _ => return None,
-    };
+    let spec = agent_spec(agent)?;
 
     let mut hooks = serde_json::Map::new();
-    for reg in table {
-        let matcher = reg.matcher.unwrap_or("");
+    for reg in spec.table {
         let command = format_hook_command(hook_script, agent, reg.kind.external_name());
-        let entry = serde_json::json!({
-            "matcher": matcher,
-            "hooks": [
-                { "type": "command", "command": command }
-            ],
-        });
+        let entry = match spec.style {
+            HookConfigStyle::Nested => serde_json::json!({
+                "matcher": reg.matcher.unwrap_or(""),
+                "hooks": [
+                    { "type": "command", "command": command }
+                ],
+            }),
+            HookConfigStyle::Flat => {
+                let mut entry = serde_json::Map::new();
+                entry.insert("type".into(), serde_json::json!("command"));
+                entry.insert("command".into(), serde_json::json!(command));
+                if let Some(matcher) = reg.matcher {
+                    entry.insert("matcher".into(), serde_json::json!(matcher));
+                }
+                serde_json::Value::Object(entry)
+            }
+        };
         let arr = hooks
             .entry(reg.trigger.to_string())
             .or_insert_with(|| serde_json::Value::Array(Vec::new()))
@@ -86,7 +146,12 @@ pub(crate) fn build_agent_snippet(agent: &str, hook_script: &str) -> Option<serd
         arr.push(entry);
     }
 
-    Some(serde_json::json!({ "hooks": serde_json::Value::Object(hooks) }))
+    let hooks = serde_json::Value::Object(hooks);
+    Some(match spec.style {
+        HookConfigStyle::Nested => serde_json::json!({ "hooks": hooks }),
+        // Cursor rejects a hooks.json without a schema `version`.
+        HookConfigStyle::Flat => serde_json::json!({ "version": 1, "hooks": hooks }),
+    })
 }
 
 #[allow(dead_code)]
@@ -103,7 +168,7 @@ fn normalize_matcher(value: Option<&serde_json::Value>) -> String {
 }
 
 #[allow(dead_code)]
-fn collect_hook_specs(config: &serde_json::Value) -> Vec<HookSpec> {
+fn collect_hook_specs(config: &serde_json::Value, style: HookConfigStyle) -> Vec<HookSpec> {
     let Some(hooks) = config.get("hooks").and_then(serde_json::Value::as_object) else {
         return Vec::new();
     };
@@ -115,28 +180,58 @@ fn collect_hook_specs(config: &serde_json::Value) -> Vec<HookSpec> {
         };
         for entry in entries {
             let matcher = normalize_matcher(entry.get("matcher"));
-            let Some(actions) = entry.get("hooks").and_then(serde_json::Value::as_array) else {
-                continue;
-            };
-            for action in actions {
-                if action.get("type").and_then(serde_json::Value::as_str) != Some("command") {
-                    continue;
+            match style {
+                HookConfigStyle::Nested => {
+                    let Some(actions) = entry.get("hooks").and_then(serde_json::Value::as_array)
+                    else {
+                        continue;
+                    };
+                    for action in actions {
+                        if let Some(command) = command_of(action, false) {
+                            specs.push(HookSpec {
+                                trigger: trigger.clone(),
+                                matcher: matcher.clone(),
+                                command,
+                            });
+                        }
+                    }
                 }
-                let command = action
-                    .get("command")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("")
-                    .to_string();
-                specs.push(HookSpec {
-                    trigger: trigger.clone(),
-                    matcher: matcher.clone(),
-                    command,
-                });
+                // Flat entries *are* the action, so there is no inner array
+                // to walk.
+                HookConfigStyle::Flat => {
+                    if let Some(command) = command_of(entry, true) {
+                        specs.push(HookSpec {
+                            trigger: trigger.clone(),
+                            matcher,
+                            command,
+                        });
+                    }
+                }
             }
         }
     }
 
     specs
+}
+
+/// Extract the `command` from a hook action, skipping non-command actions.
+/// `type_optional` is `true` only for Cursor, whose schema documents `type`
+/// as defaulting to `"command"`; Claude and Codex always spell it out, so a
+/// missing key there means the entry is not one of ours.
+#[allow(dead_code)]
+fn command_of(action: &serde_json::Value, type_optional: bool) -> Option<String> {
+    match action.get("type").and_then(serde_json::Value::as_str) {
+        Some("command") => {}
+        None if type_optional => {}
+        _ => return None,
+    }
+    Some(
+        action
+            .get("command")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+    )
 }
 
 /// Return the trigger names that are required by `agent` but missing from
@@ -155,15 +250,19 @@ pub(crate) fn missing_hooks(
     current_config: &serde_json::Value,
     hook_script: &str,
 ) -> Vec<String> {
+    let Some(spec) = agent_spec(agent) else {
+        return Vec::new();
+    };
     let Some(expected) = build_agent_snippet(agent, hook_script) else {
         return Vec::new();
     };
 
-    let expected = collect_hook_specs(&expected);
-    let actual: std::collections::HashSet<HookSpec> = collect_hook_specs(current_config)
-        .into_iter()
-        .map(normalize_hook_spec)
-        .collect();
+    let expected = collect_hook_specs(&expected, spec.style);
+    let actual: std::collections::HashSet<HookSpec> =
+        collect_hook_specs(current_config, spec.style)
+            .into_iter()
+            .map(normalize_hook_spec)
+            .collect();
 
     let mut missing = Vec::new();
     let mut seen_triggers = std::collections::BTreeSet::new();
@@ -271,36 +370,22 @@ pub(crate) fn has_missing_hooks(
 ///
 /// Pure function. `hook_script` is passed in so tests can pin it.
 pub(crate) fn build_setup_output(hook_script: &str) -> serde_json::Value {
-    let claude = build_agent_entry(
-        "claude",
-        "~/.claude/settings.json",
-        ClaudeAdapter::HOOK_REGISTRATIONS,
-        hook_script,
-    );
-    let codex = build_agent_entry(
-        "codex",
-        "~/.codex/hooks.json",
-        CodexAdapter::HOOK_REGISTRATIONS,
-        hook_script,
-    );
+    let agents: serde_json::Map<String, serde_json::Value> = SETUP_AGENTS
+        .iter()
+        .map(|agent| ((*agent).to_string(), build_agent_entry(agent, hook_script)))
+        .collect();
 
     serde_json::json!({
         "version": crate::VERSION,
         "hook_script": hook_script,
-        "agents": {
-            "claude": claude,
-            "codex": codex,
-        },
+        "agents": serde_json::Value::Object(agents),
     })
 }
 
-fn build_agent_entry(
-    agent: &str,
-    config_path: &str,
-    table: &[HookRegistration],
-    hook_script: &str,
-) -> serde_json::Value {
-    let hooks: Vec<serde_json::Value> = table
+fn build_agent_entry(agent: &str, hook_script: &str) -> serde_json::Value {
+    let spec = agent_spec(agent).expect("SETUP_AGENTS entries must all resolve through agent_spec");
+    let hooks: Vec<serde_json::Value> = spec
+        .table
         .iter()
         .map(|reg| {
             let command = format_hook_command(hook_script, agent, reg.kind.external_name());
@@ -317,10 +402,10 @@ fn build_agent_entry(
         .collect();
 
     let snippet = build_agent_snippet(agent, hook_script)
-        .expect("agent name hardcoded above, must match build_agent_snippet");
+        .expect("agent_spec resolved above, so build_agent_snippet must too");
 
     serde_json::json!({
-        "config_path": config_path,
+        "config_path": spec.config_path,
         "hooks": hooks,
         "snippet": snippet,
     })
@@ -397,12 +482,8 @@ where
 #[allow(dead_code)]
 pub(crate) fn config_path_for_agent(agent: &str) -> Option<PathBuf> {
     let home = std::env::var_os("HOME")?;
-    let home = PathBuf::from(home);
-    match agent {
-        "claude" => Some(home.join(".claude/settings.json")),
-        "codex" => Some(home.join(".codex/hooks.json")),
-        _ => None,
-    }
+    let relative = agent_spec(agent)?.config_path.strip_prefix("~/")?;
+    Some(PathBuf::from(home).join(relative))
 }
 
 /// Load the current config for `agent`.
@@ -431,14 +512,18 @@ fn run_setup(args: &[String], hook_script: &str) -> (i32, Option<serde_json::Val
             Some(snippet) => (0, Some(snippet)),
             None => {
                 eprintln!(
-                    "error: unknown agent '{}' (expected 'claude' or 'codex')",
-                    args[0]
+                    "error: unknown agent '{}' (expected one of: {})",
+                    args[0],
+                    SETUP_AGENTS.join(", ")
                 );
                 (2, None)
             }
         },
         _ => {
-            eprintln!("usage: tmux-agent-sidebar setup [claude|codex]");
+            eprintln!(
+                "usage: tmux-agent-sidebar setup [{}]",
+                SETUP_AGENTS.join("|")
+            );
             (2, None)
         }
     }

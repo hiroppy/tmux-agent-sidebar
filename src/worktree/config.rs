@@ -7,7 +7,7 @@ pub const AGENT_OPTION: &str = "@agent-sidebar-default-agent";
 pub const BRANCH_PREFIX_OPTION: &str = "@agent-sidebar-branch-prefix";
 pub const WORKTREE_DIR_OPTION: &str = "@agent-sidebar-worktree-dir";
 
-pub const AGENTS: &[&str] = &["claude", "codex", "opencode"];
+pub const AGENTS: &[&str] = &["claude", "codex", "opencode", "cursor"];
 pub const CLAUDE_MODES: &[&str] = &[
     "default",
     "plan",
@@ -17,11 +17,15 @@ pub const CLAUDE_MODES: &[&str] = &[
 ];
 pub const CODEX_MODES: &[&str] = &["default", "auto", "bypassPermissions"];
 pub const OPENCODE_MODES: &[&str] = &["default"];
+/// Cursor CLI's `--force` skips every confirmation prompt; there is no
+/// intermediate plan/accept-edits tier to expose.
+pub const CURSOR_MODES: &[&str] = &["default", "bypassPermissions"];
 
 pub fn modes_for(agent: &str) -> &'static [&'static str] {
     match agent {
         "codex" => CODEX_MODES,
         "opencode" => OPENCODE_MODES,
+        "cursor" => CURSOR_MODES,
         _ => CLAUDE_MODES,
     }
 }
@@ -44,6 +48,10 @@ pub fn agent_command(agent: &str, mode: &str) -> String {
         ("codex", "bypassPermissions") => "codex --dangerously-bypass-approvals-and-sandbox".into(),
         ("codex", _) => "codex".into(),
         ("opencode", _) => "opencode".into(),
+        // Cursor CLI installs its binary as `agent`, not `cursor`. `--force`
+        // is its only prompt-bypassing switch.
+        ("cursor", "bypassPermissions") => "agent --force".into(),
+        ("cursor", _) => "agent".into(),
         (a, _) => a.to_string(),
     }
 }
@@ -114,6 +122,25 @@ mod tests {
         assert_eq!(agent_command("opencode", "default"), "opencode");
         assert_eq!(agent_command("opencode", "plan"), "opencode");
         assert_eq!(agent_command("opencode", ""), "opencode");
+    }
+
+    #[test]
+    fn modes_for_cursor_returns_cursor_modes() {
+        assert_eq!(modes_for("cursor"), CURSOR_MODES);
+    }
+
+    #[test]
+    fn agent_command_cursor_uses_agent_binary() {
+        // The spawn command must be the installed executable (`agent`), not
+        // the `cursor` label the sidebar uses everywhere else.
+        assert_eq!(agent_command("cursor", "default"), "agent");
+        assert_eq!(agent_command("cursor", ""), "agent");
+        assert_eq!(
+            agent_command("cursor", "bypassPermissions"),
+            "agent --force"
+        );
+        // Stale modes from an older build fall back to the bare binary.
+        assert_eq!(agent_command("cursor", "plan"), "agent");
     }
 
     #[test]

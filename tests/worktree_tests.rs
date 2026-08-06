@@ -167,6 +167,17 @@ fn agent_command_unknown_agent_is_echoed_raw() {
 }
 
 #[test]
+fn agent_command_cursor_spawns_the_agent_binary() {
+    // Cursor is the one agent whose executable name differs from its label,
+    // so spawning `cursor` would fail with "command not found".
+    assert_eq!(agent_command("cursor", "default"), "agent");
+    assert_eq!(
+        agent_command("cursor", "bypassPermissions"),
+        "agent --force"
+    );
+}
+
+#[test]
 fn modes_for_claude_returns_claude_modes() {
     assert_eq!(modes_for("claude"), CLAUDE_MODES);
 }
@@ -193,6 +204,13 @@ fn agents_list_is_non_empty_and_unique() {
 
 #[test]
 fn mode_lists_start_with_default() {
+    for agent in AGENTS {
+        assert_eq!(
+            modes_for(agent).first().copied(),
+            Some("default"),
+            "{agent} mode list must start with `default`"
+        );
+    }
     assert_eq!(CLAUDE_MODES.first().copied(), Some("default"));
     assert_eq!(CODEX_MODES.first().copied(), Some("default"));
 }
