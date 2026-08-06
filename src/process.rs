@@ -111,8 +111,8 @@ impl ProcessSnapshot {
     /// unlabelled pane — so a plain `agent` match would happily claim any
     /// unrelated tool that happens to install under that very generic name.
     /// Require either the unambiguous `cursor-agent` binary (older installs)
-    /// or an `agent` process whose command line still mentions Cursor, which
-    /// the current installer's node wrapper always does: it runs
+    /// or an `agent` process whose command line contains Cursor's bundle
+    /// path, which the current installer's node wrapper always does: it runs
     /// `~/.local/bin/agent … ~/.local/share/cursor-agent/versions/…/index.js`.
     pub(crate) fn tree_has_cursor_agent(&self, seed_pids: &[u32]) -> bool {
         self.descendants(seed_pids).into_iter().any(|pid| {
@@ -122,7 +122,8 @@ impl ProcessSnapshot {
                     if process_matches_agent(info, "cursor-agent") {
                         return true;
                     }
-                    process_matches_agent(info, "agent") && info.args.contains("cursor")
+                    process_matches_agent(info, "agent")
+                        && info.args.contains("/cursor-agent/versions/")
                 })
                 .unwrap_or(false)
         })
@@ -257,6 +258,15 @@ mod tests {
         // The loose keep-alive probe still matches it — that one is only ever
         // seeded from a pane already labelled `cursor`.
         assert!(snapshot.tree_has_agent(&[100], &AgentType::Cursor));
+    }
+
+    #[test]
+    fn tree_has_cursor_agent_requires_cursor_bundle_path() {
+        let snapshot = ProcessSnapshot::from_ps_output(
+            "100 1 zsh -zsh\n101 100 agent /usr/local/bin/agent --workspace cursor\n",
+        );
+
+        assert!(!snapshot.tree_has_cursor_agent(&[100]));
     }
 
     #[test]

@@ -163,6 +163,19 @@ pub fn set_pane_option(pane: &str, key: &str, value: &str) {
     let _ = run_tmux(&["set", "-t", pane, "-p", key, value]);
 }
 
+/// Set a pane option only when it is currently unset. The conditional runs
+/// inside tmux's command queue, so another hook cannot replace a newer value
+/// between a separate read and write.
+pub fn set_pane_option_if_unset(pane: &str, key: &str, value: &str) {
+    #[cfg(test)]
+    if test_mock::intercept_set_if_unset(pane, key, value) {
+        return;
+    }
+    let condition = format!("#{{==:#{{{key}}},}}");
+    let command = format!("set -p {key} {value}");
+    let _ = run_tmux(&["if-shell", "-t", pane, "-F", &condition, &command]);
+}
+
 pub fn unset_pane_option(pane: &str, key: &str) {
     #[cfg(test)]
     if test_mock::intercept_unset(pane, key) {
@@ -249,6 +262,19 @@ pub mod test_mock {
         MOCK.with(|m| {
             if let Some(store) = m.borrow_mut().as_mut() {
                 store.insert((pane.to_string(), key.to_string()), value.to_string());
+                true
+            } else {
+                false
+            }
+        })
+    }
+
+    pub(super) fn intercept_set_if_unset(pane: &str, key: &str, value: &str) -> bool {
+        MOCK.with(|m| {
+            if let Some(store) = m.borrow_mut().as_mut() {
+                store
+                    .entry((pane.to_string(), key.to_string()))
+                    .or_insert_with(|| value.to_string());
                 true
             } else {
                 false

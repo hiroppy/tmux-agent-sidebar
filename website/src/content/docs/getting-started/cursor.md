@@ -8,7 +8,7 @@ the sidebar itself.
 
 ## Steps
 
-1. Open a Cursor CLI pane in tmux (`agent`) and focus it.
+1. Open a Cursor CLI pane in tmux (`agent`, or `cursor-agent` on older installations) and focus it.
 2. Press `prefix + e` to toggle the sidebar. A yellow `ⓘ` badge appears in the top row when required hooks are missing.
 3. Click `ⓘ`, then click `[copy]` next to `cursor` in the Notices popup.
 4. Switch back to the Cursor pane and paste. Cursor runs `tmux-agent-sidebar setup cursor` and merges the hooks into `~/.cursor/hooks.json`.
@@ -21,6 +21,10 @@ If you would rather edit the file yourself, run:
 ```sh
 ~/.tmux/plugins/tmux-agent-sidebar/target/release/tmux-agent-sidebar setup cursor
 ```
+
+If you installed a pre-built release, use
+`~/.tmux/plugins/tmux-agent-sidebar/bin/tmux-agent-sidebar` in place of the
+`target/release` path above.
 
 and merge the printed block into `~/.cursor/hooks.json`. Keep any `version`
 value already in the file, and append to the per-trigger arrays rather than
