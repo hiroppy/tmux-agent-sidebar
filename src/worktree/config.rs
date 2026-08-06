@@ -48,12 +48,20 @@ pub fn agent_command(agent: &str, mode: &str) -> String {
         ("codex", "bypassPermissions") => "codex --dangerously-bypass-approvals-and-sandbox".into(),
         ("codex", _) => "codex".into(),
         ("opencode", _) => "opencode".into(),
-        // Cursor CLI installs its binary as `agent`, not `cursor`. `--force`
-        // is its only prompt-bypassing switch.
-        ("cursor", "bypassPermissions") => "agent --force".into(),
-        ("cursor", _) => "agent".into(),
+        // Cursor CLI now installs as `agent`, while older installations use
+        // `cursor-agent`. Prefer the current executable and fall back so a
+        // worktree spawn still works after an older installation is detected.
+        // `--force` is its only prompt-bypassing switch.
+        ("cursor", "bypassPermissions") => cursor_command(" --force"),
+        ("cursor", _) => cursor_command(""),
         (a, _) => a.to_string(),
     }
+}
+
+fn cursor_command(flags: &str) -> String {
+    format!(
+        "if command -v agent >/dev/null 2>&1; then agent{flags}; else cursor-agent{flags}; fi"
+    )
 }
 
 /// How much to clean up when the user presses `x` on a spawn-created pane.
@@ -130,17 +138,24 @@ mod tests {
     }
 
     #[test]
-    fn agent_command_cursor_uses_agent_binary() {
-        // The spawn command must be the installed executable (`agent`), not
-        // the `cursor` label the sidebar uses everywhere else.
-        assert_eq!(agent_command("cursor", "default"), "agent");
-        assert_eq!(agent_command("cursor", ""), "agent");
+    fn agent_command_cursor_prefers_agent_with_fallback() {
+        assert_eq!(
+            agent_command("cursor", "default"),
+            "if command -v agent >/dev/null 2>&1; then agent; else cursor-agent; fi"
+        );
+        assert_eq!(
+            agent_command("cursor", ""),
+            "if command -v agent >/dev/null 2>&1; then agent; else cursor-agent; fi"
+        );
         assert_eq!(
             agent_command("cursor", "bypassPermissions"),
-            "agent --force"
+            "if command -v agent >/dev/null 2>&1; then agent --force; else cursor-agent --force; fi"
         );
-        // Stale modes from an older build fall back to the bare binary.
-        assert_eq!(agent_command("cursor", "plan"), "agent");
+        // Stale modes from an older build use the same executable fallback.
+        assert_eq!(
+            agent_command("cursor", "plan"),
+            "if command -v agent >/dev/null 2>&1; then agent; else cursor-agent; fi"
+        );
     }
 
     #[test]

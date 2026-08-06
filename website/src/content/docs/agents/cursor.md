@@ -3,9 +3,10 @@ title: Cursor
 description: What the sidebar shows for Cursor CLI panes, and what the CLI's hook gaps leave out.
 ---
 
-Cursor CLI (`agent`) exposes the smallest usable hook set of the four supported
-agents — not because Cursor documents few hooks, but because most of the
-documented ones do not fire in the terminal client yet.
+Cursor CLI (`agent`, or `cursor-agent` on older installations) exposes the
+smallest usable hook set of the four supported agents — not because Cursor
+documents few hooks, but because most of the documented ones do not fire in
+the terminal client yet.
 
 ## What you get
 
@@ -43,8 +44,8 @@ documented ones do not fire in the terminal client yet.
 
 ## Teardown
 
-Cursor's `sessionEnd` is wired, but it is not confirmed to fire in the CLI, so
-the sidebar also sweeps Cursor panes the way it does Codex and OpenCode: when
+Cursor's `sessionEnd` is confirmed to fire in the CLI. The sidebar also sweeps
+Cursor panes as a fallback, the way it does Codex and OpenCode: when
 tmux reports a plain shell as the pane command and no `agent` process is left in
 the pane's process tree, the pane's metadata and activity log are cleared on the
 next poll.
@@ -53,7 +54,8 @@ next poll.
 
 `n` in the sidebar can launch Cursor into a fresh worktree. Two modes are
 offered: `default`, and `bypassPermissions` which adds `--force`. The spawn
-command is `agent` — the executable Cursor installs — not `cursor`.
+command is `agent` — the executable Cursor installs — not `cursor`. Older
+installations use `cursor-agent`.
 
 ## Setup
 

@@ -72,11 +72,11 @@ fn cwd(input: &Value) -> String {
         .to_string()
 }
 
-/// `session_id` is only present on the session lifecycle hooks. Every other
-/// hook identifies the run through `conversation_id`, which is stable for
-/// the whole chat, so it is the right fallback for correlating panes.
+/// `conversation_id` identifies the run throughout Cursor's hooks. Lifecycle
+/// payloads can also include `session_id`, but stop events use
+/// `conversation_id`, so it is the stable value for correlating panes.
 fn session_id(input: &Value) -> Option<String> {
-    optional_str(input, "session_id").or_else(|| optional_str(input, "conversation_id"))
+    optional_str(input, "conversation_id").or_else(|| optional_str(input, "session_id"))
 }
 
 /// Map Cursor's tool vocabulary onto [`CanonicalTool`] so the activity log
@@ -250,7 +250,7 @@ mod tests {
                 source: "".into(),
                 worktree: None,
                 agent_id: None,
-                session_id: Some("ses-1".into()),
+                session_id: Some("conv-1".into()),
             }
         );
     }

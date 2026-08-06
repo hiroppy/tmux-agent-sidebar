@@ -167,13 +167,18 @@ fn agent_command_unknown_agent_is_echoed_raw() {
 }
 
 #[test]
-fn agent_command_cursor_spawns_the_agent_binary() {
-    // Cursor is the one agent whose executable name differs from its label,
-    // so spawning `cursor` would fail with "command not found".
-    assert_eq!(agent_command("cursor", "default"), "agent");
+fn agent_command_cursor_prefers_agent_with_cursor_agent_fallback() {
+    assert_eq!(
+        agent_command("cursor", "default"),
+        "if command -v agent >/dev/null 2>&1; then agent; else cursor-agent; fi"
+    );
+}
+
+#[test]
+fn agent_command_cursor_fallback_preserves_force() {
     assert_eq!(
         agent_command("cursor", "bypassPermissions"),
-        "agent --force"
+        "if command -v agent >/dev/null 2>&1; then agent --force; else cursor-agent --force; fi"
     );
 }
 

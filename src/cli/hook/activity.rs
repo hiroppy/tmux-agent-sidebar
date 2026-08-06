@@ -52,8 +52,8 @@ pub(super) fn handle_activity_log(
     // an existing value: a subagent shares its parent's `$TMUX_PANE`, and
     // rewriting the label there is exactly the clobbering `set_agent_meta`
     // guards against.
-    if !agent_name.is_empty() && tmux::get_pane_option_value(pane, tmux::PANE_AGENT).is_empty() {
-        tmux::set_pane_option(pane, tmux::PANE_AGENT, agent_name);
+    if !agent_name.is_empty() {
+        tmux::set_pane_option_if_unset(pane, tmux::PANE_AGENT, agent_name);
     }
 
     let label = extract_tool_label(tool_name, tool_input, tool_response);

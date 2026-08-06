@@ -163,6 +163,27 @@ pub fn set_pane_option(pane: &str, key: &str, value: &str) {
     let _ = run_tmux(&["set", "-t", pane, "-p", key, value]);
 }
 
+/// Set a pane option only when it is currently unset. The conditional runs
+/// inside tmux's command queue, so another hook cannot replace a newer value
+/// between a separate read and write.
+pub fn set_pane_option_if_unset(pane: &str, key: &str, value: &str) {
+    #[cfg(test)]
+    if test_mock::intercept_set_if_unset(pane, key, value) {
+        return;
+    }
+    let condition = format!("#{{==:#{{{key}}},}}");
+    let command = format!("set -p {key} {}", tmux_command_quote(value));
+    let _ = run_tmux(&["if-shell", "-t", pane, "-F", &condition, &command]);
+}
+
+/// Quote one argument for tmux's command parser. `if-shell` parses its
+/// command argument a second time, so this must keep the option value as a
+/// single literal argument rather than allowing it to become syntax or a
+/// format expression.
+fn tmux_command_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
 pub fn unset_pane_option(pane: &str, key: &str) {
     #[cfg(test)]
     if test_mock::intercept_unset(pane, key) {
@@ -256,6 +277,19 @@ pub mod test_mock {
         })
     }
 
+    pub(super) fn intercept_set_if_unset(pane: &str, key: &str, value: &str) -> bool {
+        MOCK.with(|m| {
+            if let Some(store) = m.borrow_mut().as_mut() {
+                store
+                    .entry((pane.to_string(), key.to_string()))
+                    .or_insert_with(|| value.to_string());
+                true
+            } else {
+                false
+            }
+        })
+    }
+
     pub(super) fn intercept_unset(pane: &str, key: &str) -> bool {
         MOCK.with(|m| {
             if let Some(store) = m.borrow_mut().as_mut() {
@@ -282,6 +316,14 @@ pub mod test_mock {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tmux_command_quote_preserves_special_characters_as_data() {
+        assert_eq!(
+            tmux_command_quote("value with spaces; #{pane_id} and 'quotes'"),
+            "'value with spaces; #{pane_id} and '\\''quotes'\\'''"
+        );
+    }
 
     #[test]
     fn mock_install_round_trips_pane_option() {

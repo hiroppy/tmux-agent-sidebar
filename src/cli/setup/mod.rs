@@ -218,7 +218,6 @@ fn collect_hook_specs(config: &serde_json::Value, style: HookConfigStyle) -> Vec
 /// `type_optional` is `true` only for Cursor, whose schema documents `type`
 /// as defaulting to `"command"`; Claude and Codex always spell it out, so a
 /// missing key there means the entry is not one of ours.
-#[allow(dead_code)]
 fn command_of(action: &serde_json::Value, type_optional: bool) -> Option<String> {
     match action.get("type").and_then(serde_json::Value::as_str) {
         Some("command") => {}
