@@ -8,11 +8,11 @@ use super::options::{
     PANE_AGENT, PANE_ATTENTION, PANE_BG_CMD, PANE_CWD, PANE_NAME, PANE_PENDING_SESSION_END,
     PANE_PENDING_WORKTREE_REMOVE, PANE_PERMISSION_MODE, PANE_PROMPT, PANE_PROMPT_SOURCE, PANE_ROLE,
     PANE_SESSION_ID, PANE_STARTED_AT, PANE_STATUS, PANE_SUBAGENTS, PANE_WAIT_REASON,
-    PANE_WORKTREE_BRANCH, PANE_WORKTREE_NAME, unset_pane_option,
+    PANE_WORKTREE_BRANCH, PANE_WORKTREE_NAME, set_pane_option, unset_pane_option,
 };
 use super::types::{
-    AgentType, CODEX_AGENT, PaneInfo, PaneStatus, PermissionMode, SessionInfo, WindowInfo,
-    WorktreeMetadata,
+    AgentType, CODEX_AGENT, CURSOR_AGENT, PaneInfo, PaneStatus, PermissionMode, SessionInfo,
+    WindowInfo, WorktreeMetadata,
 };
 use crate::worktree::SPAWNED_OPTION;
 
@@ -263,9 +263,13 @@ fn parse_pane_fields_with_processes(
         return None;
     }
 
-    let agent = AgentType::from_label(&parts[pane_line_field::AGENT])?;
     let current_command = parts[pane_line_field::PANE_CURRENT_COMMAND].as_str();
     let pane_pid: Option<u32> = parts[pane_line_field::PANE_PID].parse().ok();
+
+    let agent = match AgentType::from_label(&parts[pane_line_field::AGENT]) {
+        Some(agent) => agent,
+        None => adopt_cursor_pane(&parts[pane_line_field::PANE_ID], pane_pid, process_snapshot)?,
+    };
 
     // Codex / OpenCode / Cursor panes can leave stale tmux metadata behind
     // after the agent exits and the pane falls back to the user's shell.
@@ -283,11 +287,15 @@ fn parse_pane_fields_with_processes(
         AgentType::Codex | AgentType::OpenCode | AgentType::Cursor
     ) && is_shell_command(current_command)
     {
-        let agent_still_alive = pane_pid
-            .and_then(|pid| {
-                process_snapshot.map(|snapshot| snapshot.tree_has_agent(&[pid], &agent))
-            })
-            .unwrap_or(false);
+        // Fail closed: only a snapshot that positively lacks the agent proves
+        // it exited. A missing pid or a failed `ps` (fork pressure, sandbox)
+        // is inconclusive, and wiping on inconclusive evidence permanently
+        // unregisters a pane whose agent is still running — the hook stream
+        // never re-registers it until the next turn ends.
+        let agent_still_alive = match (pane_pid, process_snapshot) {
+            (Some(pid), Some(snapshot)) => snapshot.tree_has_agent(&[pid], &agent),
+            _ => true,
+        };
         if !agent_still_alive {
             clear_agent_pane_state(&parts[pane_line_field::PANE_ID]);
             return None;
@@ -353,6 +361,36 @@ fn parse_pane_fields_with_processes(
             }
         },
     })
+}
+
+/// Claim an unlabelled pane whose process tree is running Cursor CLI, and
+/// write the `@pane_agent` label the hooks failed to leave behind.
+///
+/// Every other agent is discovered purely through `@pane_agent`, which its
+/// hooks set on session start and re-assert on each Stop. Cursor cannot rely
+/// on that: `sessionStart` fires once per *composer conversation* rather than
+/// per CLI process, its hooks are documented fire-and-forget (so a stale
+/// `sessionEnd` can land after a newer `sessionStart` and tear the label
+/// down), and the CLI has been observed to stop firing hooks entirely part
+/// way through a conversation. Once the label is gone nothing restores it and
+/// the pane vanishes from the sidebar for the rest of the session, even
+/// though the agent is still working.
+///
+/// Adoption closes that hole: the pane is re-registered from the process tree
+/// on the next poll, no matter what dropped the label. Persisting it back to
+/// tmux keeps every other consumer (hooks, `set-status`, notifications) in
+/// agreement with what the sidebar renders.
+fn adopt_cursor_pane(
+    pane_id: &str,
+    pane_pid: Option<u32>,
+    process_snapshot: Option<&ProcessSnapshot>,
+) -> Option<AgentType> {
+    let pid = pane_pid?;
+    if !process_snapshot?.tree_has_cursor_agent(&[pid]) {
+        return None;
+    }
+    set_pane_option(pane_id, PANE_AGENT, CURSOR_AGENT);
+    Some(AgentType::Cursor)
 }
 
 /// Wipe all agent-tracked tmux pane options and the activity log file for
@@ -450,12 +488,18 @@ fn pane_output_needs_process_snapshot(all_panes_output: &str) -> bool {
             return false;
         }
         let pane_fields = &parts[session_line_field::PANE_LINE_OFFSET..];
-        AgentType::from_label(&pane_fields[pane_line_field::AGENT]).is_some_and(|agent| {
-            matches!(
+        if pane_fields[pane_line_field::PANE_ROLE] == "sidebar" {
+            return false;
+        }
+        match AgentType::from_label(&pane_fields[pane_line_field::AGENT]) {
+            // Labelled pane: the snapshot backs the shell-fallback teardown.
+            Some(agent) => matches!(
                 agent,
                 AgentType::Codex | AgentType::OpenCode | AgentType::Cursor
-            )
-        })
+            ),
+            // Unlabelled pane: the snapshot backs Cursor adoption.
+            None => true,
+        }
     })
 }
 
@@ -962,16 +1006,42 @@ mod tests {
         );
     }
 
+    /// Snapshot for a pane whose agent has exited: `full_fields()`'s pane pid
+    /// (12345) is still there as a bare shell, and nothing else. Teardown
+    /// requires this positive evidence — a missing snapshot is inconclusive
+    /// and must leave the pane alone.
+    fn dead_agent_snapshot() -> ProcessSnapshot {
+        ProcessSnapshot::from_ps_output("12345 1 zsh -zsh\n")
+    }
+
     #[test]
     fn parse_pane_line_rejects_stale_codex_shell_pane() {
         let mut fields = full_fields();
         fields[3] = "codex";
         fields[6] = "zsh";
-        let line = make_pane_line(&fields);
         assert!(
-            parse_pane_line(&line).is_none(),
+            parse_pane_fields_with_processes(&field_strings(&fields), Some(&dead_agent_snapshot()))
+                .is_none(),
             "codex metadata on a shell pane should be treated as stale"
         );
+    }
+
+    #[test]
+    fn parse_pane_line_keeps_stale_codex_shell_pane_without_a_snapshot() {
+        // A failed `ps` proves nothing. Wiping on inconclusive evidence
+        // unregisters a live agent for good, so the pane must survive.
+        let _guard = test_mock::install();
+        let mut fields = full_fields();
+        fields[pane_line_field::PANE_ID] = "%CODEX_NO_SNAPSHOT";
+        fields[3] = "codex";
+        fields[6] = "zsh";
+        test_mock::set("%CODEX_NO_SNAPSHOT", PANE_AGENT, "codex");
+
+        let pane = parse_pane_fields_with_processes(&field_strings(&fields), None)
+            .expect("inconclusive probe must not drop the pane");
+
+        assert_eq!(pane.agent, AgentType::Codex);
+        assert!(test_mock::contains("%CODEX_NO_SNAPSHOT", PANE_AGENT));
     }
 
     #[test]
@@ -979,11 +1049,68 @@ mod tests {
         let mut fields = full_fields();
         fields[3] = "codex";
         fields[6] = "/usr/local/bin/PwSh -l";
-        let line = make_pane_line(&fields);
         assert!(
-            parse_pane_line(&line).is_none(),
+            parse_pane_fields_with_processes(&field_strings(&fields), Some(&dead_agent_snapshot()))
+                .is_none(),
             "shell detection should handle paths, args, and case differences"
         );
+    }
+
+    #[test]
+    fn parse_pane_fields_adopts_unlabelled_pane_running_cursor() {
+        // The reported bug: Cursor's hooks drop the `@pane_agent` label mid
+        // session (a racing `sessionEnd`, or the CLI going quiet) and nothing
+        // ever re-registers the pane. Discovery from the process tree makes
+        // the sidebar self-healing.
+        let _guard = test_mock::install();
+        let pane = "%CURSOR_ADOPT";
+        let mut fields = full_fields();
+        fields[pane_line_field::PANE_ID] = pane;
+        fields[pane_line_field::AGENT] = "";
+        fields[pane_line_field::PANE_CURRENT_COMMAND] = "node";
+        fields[pane_line_field::PANE_PID] = "100";
+        let snapshot = process_snapshot(
+            "100 1 zsh -zsh\n101 100 /Users/me/.l /Users/me/.local/bin/agent --use-system-ca /Users/me/.local/share/cursor-agent/versions/1/index.js\n",
+        );
+
+        let pane_info = parse_pane_fields_with_processes(&field_strings(&fields), Some(&snapshot))
+            .expect("a pane running cursor-agent should be adopted");
+
+        assert_eq!(pane_info.agent, AgentType::Cursor);
+        assert_eq!(
+            test_mock::get(pane, PANE_AGENT).as_deref(),
+            Some("cursor"),
+            "adoption must persist the label so hooks and the UI agree"
+        );
+    }
+
+    #[test]
+    fn parse_pane_fields_does_not_adopt_pane_without_cursor_process() {
+        let _guard = test_mock::install();
+        let pane = "%NOT_CURSOR";
+        let mut fields = full_fields();
+        fields[pane_line_field::PANE_ID] = pane;
+        fields[pane_line_field::AGENT] = "";
+        fields[pane_line_field::PANE_CURRENT_COMMAND] = "nvim";
+        fields[pane_line_field::PANE_PID] = "100";
+        let snapshot = process_snapshot("100 1 zsh -zsh\n101 100 nvim nvim src/main.rs\n");
+
+        assert!(
+            parse_pane_fields_with_processes(&field_strings(&fields), Some(&snapshot)).is_none(),
+            "an ordinary editor pane must stay out of the sidebar"
+        );
+        assert!(!test_mock::contains(pane, PANE_AGENT));
+    }
+
+    #[test]
+    fn parse_pane_fields_does_not_adopt_unlabelled_pane_without_a_snapshot() {
+        let _guard = test_mock::install();
+        let mut fields = full_fields();
+        fields[pane_line_field::PANE_ID] = "%NO_SNAPSHOT_ADOPT";
+        fields[pane_line_field::AGENT] = "";
+
+        assert!(parse_pane_fields_with_processes(&field_strings(&fields), None).is_none());
+        assert!(!test_mock::contains("%NO_SNAPSHOT_ADOPT", PANE_AGENT));
     }
 
     #[test]
@@ -1091,9 +1218,11 @@ mod tests {
         fields[pane_line_field::PANE_ID] = pane;
         fields[pane_line_field::AGENT] = "codex";
         fields[pane_line_field::PANE_CURRENT_COMMAND] = "zsh";
-        let line = make_pane_line(&fields);
 
-        assert!(parse_pane_line(&line).is_none());
+        assert!(
+            parse_pane_fields_with_processes(&field_strings(&fields), Some(&dead_agent_snapshot()))
+                .is_none()
+        );
         for key in &[
             PANE_AGENT,
             PANE_PROMPT,
@@ -1138,9 +1267,11 @@ mod tests {
         fields[pane_line_field::PANE_ID] = pane;
         fields[pane_line_field::AGENT] = "opencode";
         fields[pane_line_field::PANE_CURRENT_COMMAND] = "fish";
-        let line = make_pane_line(&fields);
 
-        assert!(parse_pane_line(&line).is_none());
+        assert!(
+            parse_pane_fields_with_processes(&field_strings(&fields), Some(&dead_agent_snapshot()))
+                .is_none()
+        );
         for key in &[
             PANE_AGENT,
             PANE_PROMPT,

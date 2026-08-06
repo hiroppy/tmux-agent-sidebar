@@ -39,10 +39,23 @@ pub(super) fn trim_log_file(path: &std::path::Path, keep: usize, threshold: usiz
 /// Activity-log handler, called from `hook <agent> activity-log` event.
 pub(super) fn handle_activity_log(
     pane: &str,
+    agent_name: &str,
     tool_name: &str,
     tool_input: &serde_json::Value,
     tool_response: &serde_json::Value,
 ) -> i32 {
+    // Re-register a pane that lost its `@pane_agent` label mid-session — a
+    // teardown racing a live session, or a `ps` probe that came back
+    // inconclusive. Otherwise the pane stays invisible in the sidebar until
+    // the *next* Stop, because tool events are the only hooks that fire
+    // during a turn and they used to leave the label alone. Never overwrite
+    // an existing value: a subagent shares its parent's `$TMUX_PANE`, and
+    // rewriting the label there is exactly the clobbering `set_agent_meta`
+    // guards against.
+    if !agent_name.is_empty() && tmux::get_pane_option_value(pane, tmux::PANE_AGENT).is_empty() {
+        tmux::set_pane_option(pane, tmux::PANE_AGENT, agent_name);
+    }
+
     let label = extract_tool_label(tool_name, tool_input, tool_response);
     if is_background_bash(tool_name, tool_input) {
         let stored = if label.is_empty() {
@@ -214,6 +227,38 @@ mod tests {
     // ─── handle_activity_log tests ──────────────────────────────────
 
     #[test]
+    fn handle_activity_log_reregisters_agent_when_label_is_missing() {
+        // A pane whose `@pane_agent` was torn down mid-session is invisible
+        // in the sidebar. Tool events are the only hooks that fire during a
+        // turn, so they have to be able to put the label back.
+        let _guard = tmux::test_mock::install();
+        let pane = "%CLI_REREGISTER";
+
+        handle_activity_log(pane, "cursor", "Read", &Value::Null, &Value::Null);
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_AGENT).as_deref(),
+            Some("cursor")
+        );
+    }
+
+    #[test]
+    fn handle_activity_log_never_overwrites_an_existing_agent_label() {
+        // Subagents share the parent's `$TMUX_PANE`; rewriting the label from
+        // a child event is the clobbering `set_agent_meta` already guards.
+        let _guard = tmux::test_mock::install();
+        let pane = "%CLI_KEEP_LABEL";
+        tmux::test_mock::set(pane, tmux::PANE_AGENT, "claude");
+
+        handle_activity_log(pane, "cursor", "Read", &Value::Null, &Value::Null);
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_AGENT).as_deref(),
+            Some("claude")
+        );
+    }
+
+    #[test]
     fn handle_activity_log_writes_entry() {
         let pane_id = "%CLI_HANDLE_TEST";
         let path = crate::activity::log_file_path(pane_id);
@@ -221,6 +266,7 @@ mod tests {
 
         handle_activity_log(
             pane_id,
+            "claude",
             "Read",
             &json!({"file_path": "/home/user/src/main.rs"}),
             &Value::Null,
@@ -240,6 +286,7 @@ mod tests {
 
         handle_activity_log(
             pane_id,
+            "claude",
             "Bash",
             &json!({"command": "npm run dev", "run_in_background": true}),
             &Value::Null,
@@ -262,6 +309,7 @@ mod tests {
 
         handle_activity_log(
             pane_id,
+            "claude",
             "Bash",
             &json!({"run_in_background": true}),
             &Value::Null,
@@ -283,6 +331,7 @@ mod tests {
 
         handle_activity_log(
             pane_id,
+            "claude",
             "Bash",
             &json!({"command": "cat a.log | grep foo\nbar", "run_in_background": true}),
             &Value::Null,
@@ -307,6 +356,7 @@ mod tests {
 
         handle_activity_log(
             pane_id,
+            "claude",
             "Read",
             &json!({"file_path": "/home/user/src/main.rs"}),
             &Value::Null,
@@ -335,6 +385,7 @@ mod tests {
 
         handle_activity_log(
             pane_id,
+            "claude",
             "Read",
             &json!({"file_path": "/home/user/src/main.rs"}),
             &Value::Null,
@@ -358,7 +409,7 @@ mod tests {
         // With the adapter pattern, empty tool_name is filtered by the adapter
         // before reaching handle_activity_log. We still test that handle_activity_log
         // writes an entry even with empty tool_name (label extraction handles it).
-        let result = handle_activity_log(pane_id, "", &Value::Null, &Value::Null);
+        let result = handle_activity_log(pane_id, "claude", "", &Value::Null, &Value::Null);
         assert_eq!(result, 0);
         // Empty tool_name still writes an entry now (adapter filters upstream)
     }
@@ -371,6 +422,7 @@ mod tests {
 
         handle_activity_log(
             pane_id,
+            "claude",
             "Edit",
             &json!({"file_path": "/a/b/test.rs"}),
             &Value::Null,
@@ -387,7 +439,7 @@ mod tests {
         let path = crate::activity::log_file_path(pane_id);
         let _ = fs::remove_file(&path);
 
-        handle_activity_log(pane_id, "UnknownTool", &Value::Null, &Value::Null);
+        handle_activity_log(pane_id, "claude", "UnknownTool", &Value::Null, &Value::Null);
 
         let content = fs::read_to_string(&path).unwrap();
         assert!(content.contains("|UnknownTool|"));
@@ -402,6 +454,7 @@ mod tests {
 
         handle_activity_log(
             pane_id,
+            "claude",
             "TaskCreate",
             &json!({"subject": "Fix bug"}),
             &json!({"task": {"id": "42"}}),
@@ -421,7 +474,7 @@ mod tests {
 
         // A subagent's EnterPlanMode tool use must not flip the parent
         // badge to "plan".
-        handle_activity_log(pane, "EnterPlanMode", &Value::Null, &Value::Null);
+        handle_activity_log(pane, "claude", "EnterPlanMode", &Value::Null, &Value::Null);
 
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_PERMISSION_MODE).as_deref(),

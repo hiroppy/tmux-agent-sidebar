@@ -102,6 +102,32 @@ impl ProcessSnapshot {
         })
     }
 
+    /// Stricter sibling of [`Self::tree_has_agent`] used to *discover* a
+    /// Cursor pane rather than confirm one.
+    ///
+    /// [`AgentType::process_names`] accepts the bare `agent` binary name
+    /// because the keep-alive probe is always seeded from a pane already
+    /// labelled `cursor`. Discovery has no such seed — it runs against every
+    /// unlabelled pane — so a plain `agent` match would happily claim any
+    /// unrelated tool that happens to install under that very generic name.
+    /// Require either the unambiguous `cursor-agent` binary (older installs)
+    /// or an `agent` process whose command line still mentions Cursor, which
+    /// the current installer's node wrapper always does: it runs
+    /// `~/.local/bin/agent … ~/.local/share/cursor-agent/versions/…/index.js`.
+    pub(crate) fn tree_has_cursor_agent(&self, seed_pids: &[u32]) -> bool {
+        self.descendants(seed_pids).into_iter().any(|pid| {
+            self.info_by_pid
+                .get(&pid)
+                .map(|info| {
+                    if process_matches_agent(info, "cursor-agent") {
+                        return true;
+                    }
+                    process_matches_agent(info, "agent") && info.args.contains("cursor")
+                })
+                .unwrap_or(false)
+        })
+    }
+
     pub(crate) fn command_lines_for_tree(&self, seed_pids: &[u32]) -> Vec<String> {
         self.descendants(seed_pids)
             .into_iter()
@@ -196,6 +222,40 @@ mod tests {
             "100 1 zsh -zsh\n101 100 cursor-agent /opt/homebrew/bin/cursor-agent\n",
         );
 
+        assert!(snapshot.tree_has_agent(&[100], &AgentType::Cursor));
+    }
+
+    #[test]
+    fn tree_has_cursor_agent_matches_node_wrapper_launch() {
+        // What the current installer actually produces: a `agent` binary
+        // whose args carry the cursor-agent bundle path.
+        let snapshot = ProcessSnapshot::from_ps_output(
+            "100 1 zsh -zsh\n101 100 /Users/me/.l /Users/me/.local/bin/agent --use-system-ca /Users/me/.local/share/cursor-agent/versions/2026.08.04/index.js\n",
+        );
+
+        assert!(snapshot.tree_has_cursor_agent(&[100]));
+    }
+
+    #[test]
+    fn tree_has_cursor_agent_matches_legacy_binary_name() {
+        let snapshot = ProcessSnapshot::from_ps_output(
+            "100 1 zsh -zsh\n101 100 cursor-agent /opt/homebrew/bin/cursor-agent\n",
+        );
+
+        assert!(snapshot.tree_has_cursor_agent(&[100]));
+    }
+
+    #[test]
+    fn tree_has_cursor_agent_ignores_unrelated_agent_binary() {
+        // Discovery runs against every unlabelled pane, so a generic `agent`
+        // executable with no Cursor fingerprint must not claim the pane.
+        let snapshot = ProcessSnapshot::from_ps_output(
+            "100 1 zsh -zsh\n101 100 agent /usr/local/bin/agent --serve\n",
+        );
+
+        assert!(!snapshot.tree_has_cursor_agent(&[100]));
+        // The loose keep-alive probe still matches it — that one is only ever
+        // seeded from a pane already labelled `cursor`.
         assert!(snapshot.tree_has_agent(&[100], &AgentType::Cursor));
     }
 

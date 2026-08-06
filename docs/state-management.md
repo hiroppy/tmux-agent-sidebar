@@ -33,7 +33,7 @@ Pane options written to tmux:
 
 | Tmux Option | Update Trigger | Description |
 |-------------|----------------|-------------|
-| `@pane_agent` | SessionStart | Agent type ("claude" / "codex" / "opencode" / "cursor") |
+| `@pane_agent` | SessionStart; ActivityLog (only when unset); Cursor adoption in the refresh loop | Agent type ("claude" / "codex" / "opencode" / "cursor"). Presence of this option is what makes a pane visible in the sidebar, so the two extra writers exist to recover a pane that lost it mid-session. Cursor needs both: `sessionStart` fires per *composer conversation* rather than per CLI process, its hooks are fire-and-forget (a late `sessionEnd` can tear down a newer session), and the CLI has been seen to stop firing hooks part way through a conversation. When an unlabelled pane's process tree is running Cursor CLI, `adopt_cursor_pane` claims it and writes the label back. |
 | `@pane_status` | Every event | Status ("running" / "background" / "waiting" / "idle" / "error") |
 | `@pane_cwd` | SessionStart, CwdChanged | Working directory |
 | `@pane_permission_mode` | SessionStart, hook event | Permission mode |
@@ -334,3 +334,4 @@ struct NoticesState {
 9. Pane runtime state is pruned when the pane disappears — prevents stale per-pane ports, task progress, and tab preferences from surviving after the agent is gone
 10. At most one popup is open at a time — enforced structurally by the `PopupState` enum, not by parallel boolean flags
 10. Hook-based cleanup wins when available; pid-based cleanup is a slower fallback that removes panes when the agent process is gone but the hook did not fire
+11. Every pid-based teardown fails *closed*: only a process snapshot that positively lacks the agent counts as proof it exited. A failed `ps` or a pane with no pid is inconclusive, and clearing on inconclusive evidence permanently unregisters a live agent — hooks only re-assert `@pane_agent` at the end of a turn (and Cursor may not do it at all)
