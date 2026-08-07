@@ -14,7 +14,7 @@ use crate::SPINNER_PULSE;
 use crate::state::BottomTab;
 
 const FOREGROUND_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
-const BACKGROUND_REFRESH_INTERVAL: Duration = Duration::from_secs(10);
+const BACKGROUND_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 const FOREGROUND_SIGNAL_POLL_INTERVAL: Duration = Duration::from_millis(16);
 const BACKGROUND_SIGNAL_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn background_sidebars_poll_and_refresh_less_often() {
         assert_eq!(refresh_interval(true), Duration::from_secs(1));
-        assert_eq!(refresh_interval(false), Duration::from_secs(10));
+        assert_eq!(refresh_interval(false), Duration::from_secs(60));
         assert_eq!(signal_poll_interval(true), Duration::from_millis(16));
         assert_eq!(signal_poll_interval(false), Duration::from_secs(1));
     }

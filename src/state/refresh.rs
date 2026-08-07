@@ -159,7 +159,20 @@ impl AppState {
         // residual when the user returns to that session.
         let sidebar_focused = pane_active && window_active && session_attached;
         let sidebar_visible = window_active && session_attached;
-        let (mut sessions, mut process_snapshot) = tmux::query_sessions_with_process_snapshot();
+        // Process discovery shells out to `ps -eo` and walks the entire
+        // machine's process tree. Pane metadata still refreshes every UI tick,
+        // but process discovery is slow-changing and does not need to multiply
+        // by every sidebar instance every second.
+        const PROCESS_REFRESH_INTERVAL: Duration = Duration::from_secs(10);
+        let (mut sessions, mut process_snapshot) = if !self.timers.process_scan_initialized
+            || self.timers.last_process_refresh.elapsed() >= PROCESS_REFRESH_INTERVAL
+        {
+            self.timers.process_scan_initialized = true;
+            self.timers.last_process_refresh = std::time::Instant::now();
+            tmux::query_sessions_with_process_snapshot()
+        } else {
+            (tmux::query_sessions_without_process_snapshot(), None)
+        };
         self.sweep_dead_bg_shells_if_due(&mut sessions, &mut process_snapshot);
         if let Some(process_snapshot) = self.refresh_port_data(&sessions, process_snapshot.as_ref())
         {
