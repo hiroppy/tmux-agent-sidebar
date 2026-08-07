@@ -143,7 +143,8 @@ impl AppState {
     }
 
     /// Fast refresh: tmux state + activity log (called every 1s).
-    /// Returns whether the sidebar's window is the active tmux window.
+    /// Returns whether this sidebar belongs to the active window of an
+    /// attached tmux session, i.e. whether a user can currently see it.
     pub fn refresh(&mut self) -> bool {
         self.refresh_now();
         let (pane_active, window_active, session_attached, _, _) =
@@ -157,6 +158,7 @@ impl AppState {
         // hidden buffers, which flashes back as a stale "background focus"
         // residual when the user returns to that session.
         let sidebar_focused = pane_active && window_active && session_attached;
+        let sidebar_visible = window_active && session_attached;
         let (mut sessions, mut process_snapshot) = tmux::query_sessions_with_process_snapshot();
         self.sweep_dead_bg_shells_if_due(&mut sessions, &mut process_snapshot);
         if let Some(process_snapshot) = self.refresh_port_data(&sessions, process_snapshot.as_ref())
@@ -174,7 +176,7 @@ impl AppState {
             self.sessions.dirty = false;
         }
         self.refresh_activity_data();
-        window_active
+        sidebar_visible
     }
 
     /// Apply the current `session_id → name` map to each pane so the
