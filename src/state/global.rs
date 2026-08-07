@@ -19,6 +19,11 @@ pub struct GlobalState {
     last_saved_repo_filter: RepoFilter,
     /// When the selected cursor was last changed and still needs persisting.
     pending_cursor_save_since: Option<Instant>,
+    /// When a shared-state write last queued a peer broadcast that still needs
+    /// sending. Debounced so rapid changes (e.g. cycling the filter back and
+    /// forth) collapse into a single SIGUSR1 fan-out instead of flooding every
+    /// other instance on each keystroke.
+    pending_broadcast_since: Option<Instant>,
 }
 
 impl Default for GlobalState {
@@ -37,6 +42,32 @@ impl GlobalState {
             last_saved_cursor: 0,
             last_saved_repo_filter: RepoFilter::All,
             pending_cursor_save_since: None,
+            pending_broadcast_since: None,
+        }
+    }
+
+    /// Queue a debounced SIGUSR1 fan-out to peer sidebars. Called after writing
+    /// a shared tmux option; the actual broadcast is sent by
+    /// [`flush_pending_broadcast`] once writes go quiet.
+    fn queue_broadcast(&mut self) {
+        self.pending_broadcast_since = Some(Instant::now());
+    }
+
+    /// Send the queued peer broadcast once it has been idle for at least
+    /// `debounce`. Peers reload the latest value straight from tmux, so
+    /// collapsing a burst of changes into one fan-out loses nothing.
+    pub fn flush_pending_broadcast(&mut self, debounce: std::time::Duration) {
+        let Some(queued_at) = self.pending_broadcast_since else {
+            return;
+        };
+        if queued_at.elapsed() < debounce {
+            return;
+        }
+        // Only clear the queued broadcast once tmux actually accepted the pane
+        // enumeration — otherwise a transient failure would silently drop the
+        // fan-out instead of retrying on the next flush tick.
+        if tmux::notify_other_sidebars() {
+            self.pending_broadcast_since = None;
         }
     }
 
@@ -53,6 +84,7 @@ impl GlobalState {
         .is_some()
         {
             self.last_saved_filter = self.status_filter;
+            self.queue_broadcast();
         }
     }
 
@@ -69,6 +101,7 @@ impl GlobalState {
         .is_some()
         {
             self.last_saved_cursor = self.selected_pane_row;
+            self.queue_broadcast();
             true
         } else {
             false
@@ -112,6 +145,7 @@ impl GlobalState {
         .is_some()
         {
             self.last_saved_repo_filter = self.repo_filter.clone();
+            self.queue_broadcast();
         }
     }
 
