@@ -8,7 +8,7 @@ use super::options::{
     PANE_AGENT, PANE_ATTENTION, PANE_BG_CMD, PANE_CWD, PANE_NAME, PANE_PENDING_SESSION_END,
     PANE_PENDING_WORKTREE_REMOVE, PANE_PERMISSION_MODE, PANE_PROMPT, PANE_PROMPT_SOURCE, PANE_ROLE,
     PANE_SESSION_ID, PANE_STARTED_AT, PANE_STATUS, PANE_SUBAGENTS, PANE_WAIT_REASON,
-    PANE_WORKTREE_BRANCH, PANE_WORKTREE_NAME, unset_pane_option,
+    PANE_WORKTREE_BRANCH, PANE_WORKTREE_NAME, set_pane_option, unset_pane_option,
 };
 use super::types::{
     AgentType, CODEX_AGENT, PaneInfo, PaneStatus, PermissionMode, SessionInfo, WindowInfo,
@@ -263,9 +263,24 @@ fn parse_pane_fields_with_processes(
         return None;
     }
 
-    let agent = AgentType::from_label(&parts[pane_line_field::AGENT])?;
-    let current_command = parts[pane_line_field::PANE_CURRENT_COMMAND].as_str();
     let pane_pid: Option<u32> = parts[pane_line_field::PANE_PID].parse().ok();
+    let mut agent = AgentType::from_label(&parts[pane_line_field::AGENT]);
+    if agent.is_none()
+        && let (Some(pid), Some(snapshot)) = (pane_pid, process_snapshot)
+        && let Some(detected) = snapshot.detect_agent_in_tree(&[pid])
+    {
+        register_discovered_agent_pane(
+            &parts[pane_line_field::PANE_ID],
+            &detected,
+            &parts[pane_line_field::PANE_CURRENT_PATH],
+            &parts[pane_line_field::PANE_STATUS],
+            &parts[pane_line_field::PANE_CWD],
+        );
+        agent = Some(detected);
+    }
+
+    let agent = agent?;
+    let current_command = parts[pane_line_field::PANE_CURRENT_COMMAND].as_str();
 
     // Codex / OpenCode panes can leave stale tmux metadata behind after the
     // agent exits and the pane falls back to the user's shell. Neither
@@ -276,7 +291,7 @@ fn parse_pane_fields_with_processes(
     // is gone. Subsequent polls short-circuit at the `AgentType::from_label`
     // check above once `@pane_agent` has been cleared. Claude is excluded
     // because its SessionEnd hook drives cleanup instead.
-    if matches!(agent, AgentType::Codex | AgentType::OpenCode) && is_shell_command(current_command)
+    if matches!(agent, AgentType::Codex | AgentType::OpenCode | AgentType::Pi) && is_shell_command(current_command)
     {
         let agent_still_alive = pane_pid
             .and_then(|pid| {
@@ -444,9 +459,34 @@ fn pane_output_needs_process_snapshot(all_panes_output: &str) -> bool {
             return false;
         }
         let pane_fields = &parts[session_line_field::PANE_LINE_OFFSET..];
+        if pane_fields[pane_line_field::PANE_ROLE] == "sidebar" {
+            return false;
+        }
+        if pane_fields[pane_line_field::AGENT].is_empty() {
+            return true;
+        }
         AgentType::from_label(&pane_fields[pane_line_field::AGENT])
-            .is_some_and(|agent| matches!(agent, AgentType::Codex | AgentType::OpenCode))
+            .is_some_and(|agent| matches!(agent, AgentType::Codex | AgentType::OpenCode | AgentType::Pi))
     })
+}
+
+/// Seed tmux pane options for a pane whose agent was discovered via `ps`
+/// rather than a lifecycle hook. Runs at most once per pane: subsequent
+/// polls read `@pane_agent` from tmux and skip this path.
+fn register_discovered_agent_pane(
+    pane_id: &str,
+    agent: &AgentType,
+    pane_current_path: &str,
+    pane_status: &str,
+    pane_cwd: &str,
+) {
+    set_pane_option(pane_id, PANE_AGENT, agent.as_str());
+    if pane_status.is_empty() {
+        set_pane_option(pane_id, PANE_STATUS, "idle");
+    }
+    if pane_cwd.is_empty() && !pane_current_path.is_empty() {
+        set_pane_option(pane_id, PANE_CWD, pane_current_path);
+    }
 }
 
 fn apply_codex_permission_modes(
@@ -1148,6 +1188,38 @@ mod tests {
         assert!(
             !log.exists(),
             "activity log must be removed when the agent process is gone"
+        );
+    }
+
+    #[test]
+    fn parse_pane_line_registers_unhooked_pi_pane_from_process_tree() {
+        let _guard = test_mock::install();
+        let pane = "%PI_DISCOVER";
+        let mut fields = full_fields();
+        fields[pane_line_field::PANE_ID] = pane;
+        fields[pane_line_field::AGENT] = "";
+        fields[pane_line_field::PANE_STATUS] = "";
+        fields[pane_line_field::PANE_CWD] = "";
+        fields[pane_line_field::PANE_CURRENT_PATH] = "/repo/pi";
+        fields[pane_line_field::PANE_CURRENT_COMMAND] = "zsh";
+        fields[pane_line_field::PANE_PID] = "200";
+        let parts = field_strings(&fields);
+        let snapshot = process_snapshot("200 1 zsh zsh -c pi\n201 200 pi pi\n");
+
+        let pane_info =
+            parse_pane_fields_with_processes(&parts, Some(&snapshot)).expect("pi pane");
+        assert_eq!(pane_info.agent, AgentType::Pi);
+        assert_eq!(
+            test_mock::get(pane, PANE_AGENT).as_deref(),
+            Some("pi")
+        );
+        assert_eq!(
+            test_mock::get(pane, PANE_STATUS).as_deref(),
+            Some("idle")
+        );
+        assert_eq!(
+            test_mock::get(pane, PANE_CWD).as_deref(),
+            Some("/repo/pi")
         );
     }
 
