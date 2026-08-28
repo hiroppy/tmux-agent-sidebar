@@ -94,11 +94,47 @@ pub fn kill_window(window_id: &str) -> Result<(), String> {
     run_tmux_capture(&["kill-window", "-t", window_id]).map(|_| ())
 }
 
-pub fn select_pane(pane_id: &str) {
+/// Resolve the client that should follow a jump: the most recently active
+/// client attached to the session containing `own_pane_id` (the sidebar's own
+/// pane). The keypress that triggered the jump bumps that client's activity,
+/// so it identifies the terminal the user is typing in. Without an explicit
+/// `-c`, `switch-client` falls back to tmux's guess of the current client,
+/// which can yank a client attached to a *different* session onto the target.
+fn jump_client(own_pane_id: &str) -> Option<String> {
+    let session_id = display_message(own_pane_id, "#{session_id}");
+    if session_id.is_empty() {
+        return None;
+    }
+    let output = run_tmux(&[
+        "list-clients",
+        "-t",
+        &session_id,
+        "-F",
+        "#{client_activity} #{client_name}",
+    ])?;
+    most_recent_client(&output)
+}
+
+fn most_recent_client(list_clients_output: &str) -> Option<String> {
+    list_clients_output
+        .lines()
+        .filter_map(|line| {
+            let (activity, name) = line.trim().split_once(' ')?;
+            Some((activity.parse::<u64>().ok()?, name.to_string()))
+        })
+        .max_by_key(|(activity, _)| *activity)
+        .map(|(_, name)| name)
+}
+
+pub fn select_pane(pane_id: &str, own_pane_id: &str) {
     // Find the session containing this pane and switch to it first
     let session_id = display_message(pane_id, "#{session_id}");
     if !session_id.is_empty() {
-        let _ = run_tmux(&["switch-client", "-t", &session_id]);
+        if let Some(client) = jump_client(own_pane_id) {
+            let _ = run_tmux(&["switch-client", "-c", &client, "-t", &session_id]);
+        } else {
+            let _ = run_tmux(&["switch-client", "-t", &session_id]);
+        }
     }
     // Then switch to the correct window
     let window_id = display_message(pane_id, "#{window_id}");
@@ -106,4 +142,26 @@ pub fn select_pane(pane_id: &str) {
         let _ = run_tmux(&["select-window", "-t", &window_id]);
     }
     let _ = run_tmux(&["select-pane", "-t", pane_id]);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::most_recent_client;
+
+    #[test]
+    fn most_recent_client_picks_highest_activity() {
+        let output = "1787899131 /dev/pts/0\n1787899155 /dev/pts/107\n";
+        assert_eq!(most_recent_client(output), Some("/dev/pts/107".to_string()));
+    }
+
+    #[test]
+    fn most_recent_client_skips_malformed_lines() {
+        let output = "garbage\n1787899131 /dev/pts/0\nnot-a-number /dev/pts/9\n";
+        assert_eq!(most_recent_client(output), Some("/dev/pts/0".to_string()));
+    }
+
+    #[test]
+    fn most_recent_client_empty_output_is_none() {
+        assert_eq!(most_recent_client(""), None);
+    }
 }
