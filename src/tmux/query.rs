@@ -268,15 +268,18 @@ fn parse_pane_fields_with_processes(
     let pane_pid: Option<u32> = parts[pane_line_field::PANE_PID].parse().ok();
 
     // Codex / OpenCode panes can leave stale tmux metadata behind after the
-    // agent exits and the pane falls back to the user's shell. Neither
-    // agent exposes a reliable "process exit" hook (Codex has no such
-    // hook, OpenCode runs under Bun where `process.on("exit")` does not
-    // fire our handlers), so the Rust polling side must own teardown:
-    // wipe pane options + activity log the first poll after the agent
-    // is gone. Subsequent polls short-circuit at the `AgentType::from_label`
-    // check above once `@pane_agent` has been cleared. Claude is excluded
-    // because its SessionEnd hook drives cleanup instead.
-    if matches!(agent, AgentType::Codex | AgentType::OpenCode) && is_shell_command(current_command)
+    // agent exits and the pane falls back to the user's shell. OMP normally
+    // clears its state through SessionEnd, but the process check remains a
+    // fail-open fallback when shutdown is abrupt or the extension hook cannot
+    // run. The Rust polling side owns teardown in those cases: wipe pane
+    // options + activity log the first poll after the agent is gone.
+    // Subsequent polls short-circuit at the `AgentType::from_label` check above
+    // once `@pane_agent` has been cleared. Claude is excluded because its
+    // SessionEnd hook is the sole cleanup path.
+    if matches!(
+        agent,
+        AgentType::Codex | AgentType::OpenCode | AgentType::Omp
+    ) && is_shell_command(current_command)
     {
         let agent_still_alive = pane_pid
             .and_then(|pid| {
@@ -298,7 +301,7 @@ fn parse_pane_fields_with_processes(
     };
 
     // Claude: read permission_mode from hook-set tmux variable.
-    // Codex / OpenCode: no permission_mode in hooks, keep the default.
+    // Codex / OpenCode / OMP: no permission_mode in hooks, keep the default.
     let permission_mode = if agent == AgentType::Claude {
         PermissionMode::from_label(&parts[pane_line_field::PERMISSION_MODE])
     } else {
@@ -351,10 +354,11 @@ fn parse_pane_fields_with_processes(
 }
 
 /// Wipe all agent-tracked tmux pane options and the activity log file for
-/// `pane_id`. Triggered by `parse_pane_fields` when it detects a Codex or
-/// OpenCode pane that has dropped back to the user's shell, since neither
-/// CLI fires a reliable process-exit hook. Claude panes are never routed
-/// here because Claude has its own SessionEnd hook. The set of keys
+/// `pane_id`. Triggered by `parse_pane_fields` when it detects a Codex,
+/// OpenCode, or OMP pane that has dropped back to the user's shell. OMP also
+/// has a SessionEnd teardown path; this sweep is its abrupt-exit fallback.
+/// Claude panes are never routed here because Claude has its own SessionEnd
+/// hook. The set of keys
 /// mirrors `clear_all_meta` + `clear_run_state` + status/attention clears
 /// in `src/cli/hook/context.rs`; keep them in sync when a new `@pane_*`
 /// key is added.
@@ -444,8 +448,12 @@ fn pane_output_needs_process_snapshot(all_panes_output: &str) -> bool {
             return false;
         }
         let pane_fields = &parts[session_line_field::PANE_LINE_OFFSET..];
-        AgentType::from_label(&pane_fields[pane_line_field::AGENT])
-            .is_some_and(|agent| matches!(agent, AgentType::Codex | AgentType::OpenCode))
+        AgentType::from_label(&pane_fields[pane_line_field::AGENT]).is_some_and(|agent| {
+            matches!(
+                agent,
+                AgentType::Codex | AgentType::OpenCode | AgentType::Omp
+            )
+        })
     })
 }
 
