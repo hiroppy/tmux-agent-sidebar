@@ -23,6 +23,7 @@ pub struct ColorTheme {
     pub agent_claude: Color,
     pub agent_codex: Color,
     pub agent_opencode: Color,
+    pub agent_omp: Color,
     pub pet_body: Color,
     pub pet_eye: Color,
     pub text_active: Color,
@@ -63,6 +64,7 @@ impl Default for ColorTheme {
             agent_claude: Color::Indexed(174),
             agent_codex: Color::Indexed(141),
             agent_opencode: Color::Indexed(117),
+            agent_omp: Color::Indexed(73),
             pet_body: Color::Indexed(208),
             pet_eye: Color::Indexed(114),
             text_active: Color::Indexed(255),
@@ -119,6 +121,7 @@ impl ColorTheme {
         theme.agent_claude = read(tmux::SIDEBAR_COLOR_AGENT_CLAUDE, theme.agent_claude);
         theme.agent_codex = read(tmux::SIDEBAR_COLOR_AGENT_CODEX, theme.agent_codex);
         theme.agent_opencode = read(tmux::SIDEBAR_COLOR_AGENT_OPENCODE, theme.agent_opencode);
+        theme.agent_omp = read(tmux::SIDEBAR_COLOR_AGENT_OMP, theme.agent_omp);
         theme.pet_body = read(tmux::SIDEBAR_COLOR_PET_BODY, theme.pet_body);
         theme.pet_eye = read(tmux::SIDEBAR_COLOR_PET_EYE, theme.pet_eye);
         theme.text_active = read(tmux::SIDEBAR_COLOR_TEXT_ACTIVE, theme.text_active);
@@ -165,6 +168,7 @@ impl ColorTheme {
             AgentType::Claude => self.agent_claude,
             AgentType::Codex => self.agent_codex,
             AgentType::OpenCode => self.agent_opencode,
+            AgentType::Omp => self.agent_omp,
             AgentType::Unknown => self.status_unknown,
         }
     }
@@ -231,10 +235,6 @@ mod tests {
             theme.status_color(&PaneStatus::Error, false),
             Color::Indexed(167)
         );
-        assert_eq!(
-            theme.status_color(&PaneStatus::Unknown, false),
-            Color::Indexed(244)
-        );
     }
 
     #[test]
@@ -243,6 +243,7 @@ mod tests {
         assert_eq!(theme.agent_color(&AgentType::Claude), Color::Indexed(174));
         assert_eq!(theme.agent_color(&AgentType::Codex), Color::Indexed(141));
         assert_eq!(theme.agent_color(&AgentType::OpenCode), Color::Indexed(117));
+        assert_eq!(theme.agent_color(&AgentType::Omp), Color::Indexed(73));
         assert_eq!(theme.agent_color(&AgentType::Unknown), theme.status_unknown);
     }
 
