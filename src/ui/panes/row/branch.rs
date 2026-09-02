@@ -9,29 +9,11 @@ use crate::ui::text::{display_width, truncate_to_width};
 /// Left indent before the branch label inside [`branch_ports_row`].
 const BRANCH_ROW_LEFT_PREFIX: &str = "  ";
 
-/// Whether the branch label is rendered at all, controlled by the
-/// `@sidebar_show_branch` tmux option (default: on). `off`/`false`/`0`/`no`
-/// hide the branch text; ports and the rest of the row logic are unaffected.
-/// Read once per sidebar process, like the other sidebar options.
-fn show_branch() -> bool {
-    static SHOW_BRANCH: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *SHOW_BRANCH.get_or_init(|| {
-        crate::tmux::get_all_global_options()
-            .get(crate::tmux::SIDEBAR_SHOW_BRANCH)
-            .map(|s| {
-                !matches!(
-                    s.trim().to_ascii_lowercase().as_str(),
-                    "off" | "false" | "0" | "no"
-                )
-            })
-            .unwrap_or(true)
-    })
-}
-
 /// The branch label for rendering: empty when hidden via
-/// `@sidebar_show_branch off`.
-fn effective_branch_label(git_info: &crate::group::PaneGitInfo) -> String {
-    if show_branch() {
+/// `@sidebar_show_branch off` (carried in `AppState::show_branch` and passed
+/// down explicitly so rendering never reads tmux state itself).
+fn effective_branch_label(git_info: &crate::group::PaneGitInfo, show_branch: bool) -> String {
+    if show_branch {
         crate::ui::text::branch_label(git_info)
     } else {
         String::new()
@@ -60,8 +42,12 @@ fn port_display_text(ports: Option<&[u16]>) -> Option<String> {
 /// Whether the trailing `×` remove marker should even be considered
 /// for this pane. Gated on sidebar-spawn + a visible worktree `+`
 /// prefix so plain branches never get a spurious action affordance.
-fn should_emit_remove_marker(git_info: &crate::group::PaneGitInfo, sidebar_spawned: bool) -> bool {
-    sidebar_spawned && effective_branch_label(git_info).starts_with("+ ")
+fn should_emit_remove_marker(
+    git_info: &crate::group::PaneGitInfo,
+    sidebar_spawned: bool,
+    show_branch: bool,
+) -> bool {
+    sidebar_spawned && effective_branch_label(git_info, show_branch).starts_with("+ ")
 }
 
 /// Compute the column offset (within the full pane row) where the
@@ -75,8 +61,9 @@ pub fn sidebar_remove_marker_col(
     _ports: Option<&[u16]>,
     sidebar_spawned: bool,
     inner_width: usize,
+    show_branch: bool,
 ) -> Option<u16> {
-    if !should_emit_remove_marker(git_info, sidebar_spawned) {
+    if !should_emit_remove_marker(git_info, sidebar_spawned, show_branch) {
         return None;
     }
     // Row total width = marker(1) + space(1) + inner_width, so the
@@ -88,9 +75,10 @@ pub(super) fn branch_ports_row(
     git_info: &crate::group::PaneGitInfo,
     ports: Option<&[u16]>,
     sidebar_spawned: bool,
+    show_branch: bool,
     ctx: &RowCtx,
 ) -> Option<Line<'static>> {
-    let branch = effective_branch_label(git_info);
+    let branch = effective_branch_label(git_info, show_branch);
     let port_text = port_display_text(ports);
 
     if branch.is_empty() && port_text.is_none() {
@@ -151,4 +139,49 @@ pub(super) fn branch_ports_row(
     };
 
     Some(ctx.row_line_split(left_spans, left_width, right_spans, right_width))
+}
+
+#[cfg(test)]
+mod show_branch_tests {
+    use crate::ui::show_branch_from_options;
+    use std::collections::HashMap;
+
+    fn opts(value: Option<&str>) -> HashMap<String, String> {
+        let mut m = HashMap::new();
+        if let Some(v) = value {
+            m.insert(crate::tmux::SIDEBAR_SHOW_BRANCH.to_string(), v.to_string());
+        }
+        m
+    }
+
+    #[test]
+    fn unset_means_on() {
+        assert!(show_branch_from_options(&opts(None)));
+    }
+
+    #[test]
+    fn off_values_hide() {
+        for v in ["off", "false", "0", "no", " OFF ", "No"] {
+            assert!(!show_branch_from_options(&opts(Some(v))), "{v} should hide");
+        }
+    }
+
+    #[test]
+    fn other_values_show() {
+        for v in ["on", "true", "1", "yes", "anything"] {
+            assert!(show_branch_from_options(&opts(Some(v))), "{v} should show");
+        }
+    }
+
+    #[test]
+    fn hidden_branch_suppresses_label_but_keeps_ports_row_logic() {
+        let git = crate::group::PaneGitInfo {
+            repo_root: Some("/tmp/repo".into()),
+            branch: Some("main".into()),
+            is_worktree: false,
+            worktree_name: None,
+        };
+        assert_eq!(super::effective_branch_label(&git, true), "main");
+        assert_eq!(super::effective_branch_label(&git, false), "");
+    }
 }

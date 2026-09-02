@@ -122,6 +122,9 @@ pub struct AppState {
     /// Height of the bottom panel in lines. Loaded once at startup from
     /// the `@sidebar_bottom_height` tmux option. A value of 0 hides the panel.
     pub bottom_panel_height: u16,
+    /// Whether agent rows render the git branch line. Loaded once at startup
+    /// from the `@sidebar_show_branch` tmux option (default: on).
+    pub show_branch: bool,
     /// Maps session_id → session name, refreshed periodically from
     /// `~/.claude/sessions/*.json` files. The `dirty` flag is `true` when
     /// the map has changed since the last `refresh_session_names`
@@ -179,6 +182,7 @@ impl AppState {
             version_notice: None,
             global: GlobalState::new(),
             bottom_panel_height: crate::ui::BOTTOM_PANEL_HEIGHT,
+            show_branch: true,
             sessions: SessionNamesState::new(),
             pet_enabled: false,
         };
