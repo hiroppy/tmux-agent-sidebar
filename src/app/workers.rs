@@ -14,7 +14,7 @@ use crate::version::{self, UpdateNotice};
 /// drains every tick.
 pub(super) struct Workers {
     pub git_rx: Receiver<GitData>,
-    pub session_rx: Receiver<HashMap<String, String>>,
+    pub session_rx: Receiver<HashMap<String, session::SessionMeta>>,
     pub version_rx: Receiver<UpdateNotice>,
     pub git_tab_active: Arc<AtomicBool>,
 }
@@ -23,7 +23,7 @@ pub(super) struct Workers {
 /// notice fetch) that feed the event loop.
 pub(super) fn spawn(state: &AppState) -> Workers {
     let (git_tx, git_rx) = mpsc::channel::<GitData>();
-    let (session_tx, session_rx) = mpsc::channel::<HashMap<String, String>>();
+    let (session_tx, session_rx) = mpsc::channel::<HashMap<String, session::SessionMeta>>();
     let (version_tx, version_rx) = mpsc::channel::<UpdateNotice>();
     let tmux_pane_clone = state.tmux_pane.clone();
     let git_tab_active = Arc::new(AtomicBool::new(state.bottom_tab == BottomTab::GitStatus));
@@ -51,10 +51,10 @@ pub(super) fn spawn(state: &AppState) -> Workers {
 /// Session name polling thread. Scans `~/.claude/sessions/*.json` every 10
 /// seconds so the main TUI thread never performs blocking filesystem I/O
 /// to refresh `/rename`-assigned labels.
-pub(super) fn session_poll_loop(tx: &mpsc::Sender<HashMap<String, String>>) {
+pub(super) fn session_poll_loop(tx: &mpsc::Sender<HashMap<String, session::SessionMeta>>) {
     loop {
         std::thread::sleep(Duration::from_secs(10));
-        let names = session::scan_session_names();
+        let names = session::scan_sessions();
         if tx.send(names).is_err() {
             return;
         }

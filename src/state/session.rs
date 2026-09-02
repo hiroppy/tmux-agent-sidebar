@@ -1,8 +1,12 @@
 use std::collections::HashMap;
 
+use crate::session::SessionMeta;
+
 #[derive(Debug, Clone)]
 pub struct SessionNamesState {
-    pub names: HashMap<String, String>,
+    /// `sessionId → metadata` (name + start time), refreshed off-thread from
+    /// `~/.claude/sessions/*.json`.
+    pub names: HashMap<String, SessionMeta>,
     pub dirty: bool,
 }
 
