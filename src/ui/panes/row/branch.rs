@@ -9,6 +9,35 @@ use crate::ui::text::{display_width, truncate_to_width};
 /// Left indent before the branch label inside [`branch_ports_row`].
 const BRANCH_ROW_LEFT_PREFIX: &str = "  ";
 
+/// Whether the branch label is rendered at all, controlled by the
+/// `@sidebar_show_branch` tmux option (default: on). `off`/`false`/`0`/`no`
+/// hide the branch text; ports and the rest of the row logic are unaffected.
+/// Read once per sidebar process, like the other sidebar options.
+fn show_branch() -> bool {
+    static SHOW_BRANCH: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *SHOW_BRANCH.get_or_init(|| {
+        crate::tmux::get_all_global_options()
+            .get(crate::tmux::SIDEBAR_SHOW_BRANCH)
+            .map(|s| {
+                !matches!(
+                    s.trim().to_ascii_lowercase().as_str(),
+                    "off" | "false" | "0" | "no"
+                )
+            })
+            .unwrap_or(true)
+    })
+}
+
+/// The branch label for rendering: empty when hidden via
+/// `@sidebar_show_branch off`.
+fn effective_branch_label(git_info: &crate::group::PaneGitInfo) -> String {
+    if show_branch() {
+        crate::ui::text::branch_label(git_info)
+    } else {
+        String::new()
+    }
+}
+
 /// Port-info prefix placed between the branch text and the port list
 /// when both are shown on the same row.
 const BRANCH_ROW_PORT_PREFIX: &str = "  ";
@@ -32,7 +61,7 @@ fn port_display_text(ports: Option<&[u16]>) -> Option<String> {
 /// for this pane. Gated on sidebar-spawn + a visible worktree `+`
 /// prefix so plain branches never get a spurious action affordance.
 fn should_emit_remove_marker(git_info: &crate::group::PaneGitInfo, sidebar_spawned: bool) -> bool {
-    sidebar_spawned && crate::ui::text::branch_label(git_info).starts_with("+ ")
+    sidebar_spawned && effective_branch_label(git_info).starts_with("+ ")
 }
 
 /// Compute the column offset (within the full pane row) where the
@@ -61,7 +90,7 @@ pub(super) fn branch_ports_row(
     sidebar_spawned: bool,
     ctx: &RowCtx,
 ) -> Option<Line<'static>> {
-    let branch = crate::ui::text::branch_label(git_info);
+    let branch = effective_branch_label(git_info);
     let port_text = port_display_text(ports);
 
     if branch.is_empty() && port_text.is_none() {
