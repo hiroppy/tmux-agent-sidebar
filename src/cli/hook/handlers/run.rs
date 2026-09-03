@@ -1,4 +1,4 @@
-use crate::cli::{sanitize_tmux_value, set_attention, set_status};
+use crate::cli::{sanitize_tmux_query_value, sanitize_tmux_value, set_attention, set_status};
 use crate::desktop_notification;
 use crate::desktop_notification::DesktopNotificationKind;
 use crate::tmux;
@@ -106,7 +106,11 @@ pub(in crate::cli::hook) fn on_stop_failure(
     clear_run_state(pane);
     mark_task_reset(pane);
     if !error.is_empty() {
-        tmux::set_pane_option(pane, tmux::PANE_WAIT_REASON, error);
+        tmux::set_pane_option(
+            pane,
+            tmux::PANE_WAIT_REASON,
+            &sanitize_tmux_query_value(error),
+        );
     }
     set_status(pane, "error");
     let _ = notify_lifecycle(
@@ -220,6 +224,33 @@ mod tests {
             tmux::test_mock::get(pane, tmux::PANE_BG_CMD).as_deref(),
             Some("npm run dev"),
             "bg command must survive a new user turn — the shell is still running",
+        );
+    }
+
+    #[test]
+    fn on_stop_failure_sanitizes_wait_reason_for_raw_query_path() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%STOP_FAIL_RAW";
+        let ctx = AgentContext {
+            agent: "claude",
+            cwd: "/repo",
+            permission_mode: "default",
+            worktree: &None,
+            session_id: &None,
+        };
+        let exit = on_stop_failure(
+            pane,
+            &ctx,
+            "rate\x1flimit",
+            &desktop_notification::DesktopNotificationSettings {
+                enabled: false,
+                events: Default::default(),
+            },
+        );
+        assert_eq!(exit, 0);
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_WAIT_REASON).as_deref(),
+            Some("rate limit")
         );
     }
 

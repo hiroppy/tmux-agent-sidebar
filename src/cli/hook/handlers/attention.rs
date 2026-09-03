@@ -1,4 +1,4 @@
-use crate::cli::{set_attention, set_status};
+use crate::cli::{sanitize_tmux_query_value, set_attention, set_status};
 use crate::desktop_notification;
 use crate::desktop_notification::DesktopNotificationKind;
 use crate::tmux;
@@ -29,7 +29,11 @@ pub(in crate::cli::hook) fn on_notification(
     if wait_reason.is_empty() {
         tmux::unset_pane_option(pane, tmux::PANE_WAIT_REASON);
     } else {
-        tmux::set_pane_option(pane, tmux::PANE_WAIT_REASON, wait_reason);
+        tmux::set_pane_option(
+            pane,
+            tmux::PANE_WAIT_REASON,
+            &sanitize_tmux_query_value(wait_reason),
+        );
     }
     let _ = notify_lifecycle(
         pane,
@@ -54,7 +58,11 @@ pub(in crate::cli::hook) fn on_permission_denied(
     set_agent_meta(pane, ctx);
     set_status(pane, "waiting");
     set_attention(pane, "notification");
-    tmux::set_pane_option(pane, tmux::PANE_WAIT_REASON, "permission_denied");
+    tmux::set_pane_option(
+        pane,
+        tmux::PANE_WAIT_REASON,
+        &sanitize_tmux_query_value("permission_denied"),
+    );
     let _ = notify_lifecycle(
         pane,
         NotifyLabels::FromCtx(ctx),
@@ -81,7 +89,11 @@ pub(in crate::cli::hook) fn on_teammate_idle(
     } else {
         format!("teammate_idle:{teammate_name}:{idle_reason}")
     };
-    tmux::set_pane_option(pane, tmux::PANE_WAIT_REASON, &reason);
+    tmux::set_pane_option(
+        pane,
+        tmux::PANE_WAIT_REASON,
+        &sanitize_tmux_query_value(&reason),
+    );
     0
 }
 
@@ -113,6 +125,44 @@ mod tests {
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_WAIT_REASON).as_deref(),
             Some("teammate_idle:alice:tokens_exhausted")
+        );
+    }
+
+    #[test]
+    fn on_teammate_idle_sanitizes_raw_query_delimiter() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%TEAM_SANITIZE";
+        on_teammate_idle(pane, "alice\x1fone", "tokens\x1ftoo_low");
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_WAIT_REASON).as_deref(),
+            Some("teammate_idle:alice one:tokens too_low")
+        );
+    }
+
+    #[test]
+    fn on_notification_sanitizes_wait_reason_for_raw_query_path() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%NOTIF_RAW";
+        let ctx = AgentContext {
+            agent: "claude",
+            cwd: "/repo",
+            permission_mode: "default",
+            worktree: &None,
+            session_id: &None,
+        };
+        on_notification(
+            pane,
+            &ctx,
+            "permission\x1fprompt",
+            false,
+            &desktop_notification::DesktopNotificationSettings {
+                enabled: false,
+                events: Default::default(),
+            },
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_WAIT_REASON).as_deref(),
+            Some("permission prompt")
         );
     }
 
