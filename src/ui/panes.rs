@@ -390,9 +390,13 @@ pub(super) fn render_repo_popup(frame: &mut Frame, state: &mut AppState, area: R
         let padding = " ".repeat(inner_width.saturating_sub(text_dw));
 
         let style = if is_highlighted {
-            Style::default()
-                .fg(theme.text_active)
-                .bg(theme.selection_bg)
+            if theme.selection_reversed {
+                Style::default().add_modifier(Modifier::REVERSED)
+            } else {
+                Style::default()
+                    .fg(theme.text_active)
+                    .bg(theme.selection_bg)
+            }
         } else if is_current {
             Style::default().fg(theme.text_active)
         } else {
