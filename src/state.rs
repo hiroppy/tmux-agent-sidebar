@@ -22,7 +22,9 @@ pub use activity::ActivityState;
 pub use filter::{RepoFilter, StatusFilter};
 pub use focus::{Focus, FocusState};
 pub use global::GlobalState;
-pub use layout::{FrameLayout, HyperlinkOverlay, RepoSpawnTarget, RowTarget, SpawnRemoveTarget};
+pub use layout::{
+    FrameLayout, GitFileTarget, HyperlinkOverlay, RepoSpawnTarget, RowTarget, SpawnRemoveTarget,
+};
 pub(crate) use notices::debug_forced_display;
 pub use notices::{ClaudePluginNotice, NoticesCopyTarget, NoticesMissingHookGroup, NoticesState};
 pub use pane_runtime::{PaneRuntimeMap, PaneRuntimeState};
@@ -194,11 +196,33 @@ mod tests {
     use crate::group::{PaneGitInfo, RepoGroup};
     use crate::tmux::{AgentType, PaneInfo, PaneStatus, PermissionMode, WorktreeMetadata};
     use std::fs;
+    use std::path::Path;
+    use std::time::Duration;
 
     /// Reset filter click debounce so the next `handle_filter_click` is not ignored.
     fn reset_filter_debounce(state: &mut AppState) {
         state.timers.last_filter_click =
             std::time::Instant::now() - std::time::Duration::from_millis(200);
+    }
+
+    fn write_until_mtime_advances(
+        path: &Path,
+        previous_mtime: std::time::SystemTime,
+        contents: &str,
+    ) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+
+        loop {
+            fs::write(path, contents).unwrap();
+            let current_mtime = fs::metadata(path).unwrap().modified().unwrap();
+            if current_mtime > previous_mtime {
+                return;
+            }
+            if std::time::Instant::now() >= deadline {
+                panic!("log mtime did not advance before timeout");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     fn test_pane(id: &str) -> PaneInfo {
@@ -336,11 +360,14 @@ mod tests {
         state.refresh_task_progress();
         assert!(state.pane_task_progress(&pane_id).is_none());
 
+        let previous_mtime = fs::metadata(&log_path).unwrap().modified().unwrap();
+
         // Now add a new in-progress task → should re-show
-        fs::write(
+        write_until_mtime_advances(
             &log_path,
+            previous_mtime,
             "10:00|TaskCreate|#1 A\n10:01|TaskUpdate|completed #1\n10:02|TaskCreate|#2 B\n10:03|TaskUpdate|in_progress #2\n",
-        ).unwrap();
+        );
         state.refresh_task_progress();
         assert!(state.pane_task_progress(&pane_id).is_some());
 
@@ -870,6 +897,7 @@ mod tests {
     fn apply_git_data_copies_all_fields() {
         let mut state = AppState::new("%99".into());
         let data = crate::git::GitData {
+            repo_root: "/repo".into(),
             diff_stat: Some((10, 5)),
             branch: "feature/test".into(),
             ahead_behind: Some((2, 1)),
@@ -882,6 +910,7 @@ mod tests {
             }],
             unstaged_files: vec![],
             untracked_files: vec!["new.rs".into()],
+            untracked_paths: vec!["new.rs".into()],
             remote_url: "https://github.com/user/repo".into(),
             pr_number: Some("42".into()),
         };
@@ -895,6 +924,8 @@ mod tests {
         assert_eq!(state.git.staged_files[0].status, 'M');
         assert!(state.git.unstaged_files.is_empty());
         assert_eq!(state.git.untracked_files, vec!["new.rs"]);
+        assert_eq!(state.git.untracked_paths, vec!["new.rs"]);
+        assert_eq!(state.git.repo_root, "/repo");
         assert_eq!(state.git.changed_file_count(), 2);
         assert_eq!(state.git.remote_url, "https://github.com/user/repo");
         assert_eq!(state.git.pr_number, Some("42".into()));
