@@ -6,9 +6,10 @@ use crate::process::{ProcessSnapshot, command_basename};
 use super::commands::run_tmux;
 use super::options::{
     PANE_AGENT, PANE_ATTENTION, PANE_BG_CMD, PANE_CWD, PANE_NAME, PANE_PENDING_SESSION_END,
-    PANE_PENDING_WORKTREE_REMOVE, PANE_PERMISSION_MODE, PANE_PROMPT, PANE_PROMPT_SOURCE, PANE_ROLE,
-    PANE_SESSION_ID, PANE_STARTED_AT, PANE_STATUS, PANE_SUBAGENTS, PANE_WAIT_REASON,
-    PANE_WORKTREE_BRANCH, PANE_WORKTREE_NAME, unset_pane_option,
+    PANE_PENDING_STOP_NOTIFICATION_BODY, PANE_PENDING_WORKTREE_REMOVE, PANE_PERMISSION_MODE,
+    PANE_PROMPT, PANE_PROMPT_ID, PANE_PROMPT_SOURCE, PANE_ROLE, PANE_SESSION_ID, PANE_STARTED_AT,
+    PANE_STATUS, PANE_SUBAGENTS, PANE_TURN_ACTIVE, PANE_WAIT_REASON, PANE_WORKTREE_BRANCH,
+    PANE_WORKTREE_NAME, unset_pane_option,
 };
 use super::types::{
     AgentType, CODEX_AGENT, PaneInfo, PaneStatus, PermissionMode, SessionInfo, WindowInfo,
@@ -267,7 +268,7 @@ fn parse_pane_fields_with_processes(
     let current_command = parts[pane_line_field::PANE_CURRENT_COMMAND].as_str();
     let pane_pid: Option<u32> = parts[pane_line_field::PANE_PID].parse().ok();
 
-    // Codex / OpenCode panes can leave stale tmux metadata behind after the
+    // Codex / Grok / OpenCode panes can leave stale tmux metadata behind after the
     // agent exits and the pane falls back to the user's shell. Neither
     // agent exposes a reliable "process exit" hook (Codex has no such
     // hook, OpenCode runs under Bun where `process.on("exit")` does not
@@ -276,7 +277,10 @@ fn parse_pane_fields_with_processes(
     // is gone. Subsequent polls short-circuit at the `AgentType::from_label`
     // check above once `@pane_agent` has been cleared. Claude is excluded
     // because its SessionEnd hook drives cleanup instead.
-    if matches!(agent, AgentType::Codex | AgentType::OpenCode) && is_shell_command(current_command)
+    if matches!(
+        agent,
+        AgentType::Codex | AgentType::Grok | AgentType::OpenCode
+    ) && is_shell_command(current_command)
     {
         let agent_still_alive = pane_pid
             .and_then(|pid| {
@@ -299,7 +303,7 @@ fn parse_pane_fields_with_processes(
 
     // Claude: read permission_mode from hook-set tmux variable.
     // Codex / OpenCode: no permission_mode in hooks, keep the default.
-    let permission_mode = if agent == AgentType::Claude {
+    let permission_mode = if matches!(agent, AgentType::Claude | AgentType::Grok) {
         PermissionMode::from_label(&parts[pane_line_field::PERMISSION_MODE])
     } else {
         PermissionMode::Default
@@ -362,9 +366,12 @@ fn clear_agent_pane_state(pane_id: &str) {
     const KEYS: &[&str] = &[
         PANE_AGENT,
         PANE_PROMPT,
+        PANE_PROMPT_ID,
         PANE_PROMPT_SOURCE,
+        PANE_TURN_ACTIVE,
         PANE_BG_CMD,
         PANE_SUBAGENTS,
+        PANE_PENDING_STOP_NOTIFICATION_BODY,
         PANE_CWD,
         PANE_PERMISSION_MODE,
         PANE_WORKTREE_NAME,
@@ -444,8 +451,12 @@ fn pane_output_needs_process_snapshot(all_panes_output: &str) -> bool {
             return false;
         }
         let pane_fields = &parts[session_line_field::PANE_LINE_OFFSET..];
-        AgentType::from_label(&pane_fields[pane_line_field::AGENT])
-            .is_some_and(|agent| matches!(agent, AgentType::Codex | AgentType::OpenCode))
+        AgentType::from_label(&pane_fields[pane_line_field::AGENT]).is_some_and(|agent| {
+            matches!(
+                agent,
+                AgentType::Codex | AgentType::Grok | AgentType::OpenCode
+            )
+        })
     })
 }
 
@@ -498,14 +509,14 @@ fn sanitize_prompt(raw: &str) -> String {
 /// Format: comma-separated "type" entries, e.g. "Explore,Explore,Plan"
 /// Parse the comma-separated `@pane_subagents` value into display strings.
 ///
-/// Each entry is either `agent_type` (legacy) or `agent_type:agent_id`
+/// Each entry is either `agent_type` (legacy) or `display_label:agent_id`
 /// (current). When an `agent_id` is present, the entry is rendered as
-/// `"agent_type #<id-prefix>"` where `<id-prefix>` is the first 4 characters
-/// of the id — stable per instance, so the UI label does not shift when
-/// sibling subagents stop. The `#` embedding is recognized by the `#`-based
+/// `"display_label #<id-suffix>"` where `<id-suffix>` is the final 4
+/// characters of the id. This stays useful for UUIDv7 siblings that share a
+/// timestamp prefix. The `#` embedding is recognized by the `#`-based
 /// numbering branch in `subagent_rows`, which keeps it verbatim.
 fn parse_subagents(raw: &str) -> Vec<String> {
-    const ID_PREFIX_LEN: usize = 4;
+    const ID_TAG_LEN: usize = 4;
     if raw.is_empty() {
         return vec![];
     }
@@ -513,9 +524,10 @@ fn parse_subagents(raw: &str) -> Vec<String> {
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .map(|entry| match entry.split_once(':') {
-            Some((ty, id)) if !id.is_empty() => {
-                let prefix: String = id.chars().take(ID_PREFIX_LEN).collect();
-                format!("{} #{}", ty, prefix)
+            Some((label, id)) if !id.is_empty() => {
+                let reversed: String = id.chars().rev().take(ID_TAG_LEN).collect();
+                let suffix: String = reversed.chars().rev().collect();
+                format!("{} #{}", label, suffix)
             }
             _ => entry.to_string(),
         })
@@ -726,28 +738,31 @@ mod tests {
     }
 
     #[test]
-    fn parse_subagents_renders_id_prefix() {
-        // Current format: `type:id`. The id prefix is used as a stable
-        // `#<prefix>` label so surviving siblings do not renumber when
+    fn parse_subagents_renders_id_suffix() {
+        // Current format: `label:id`. The id suffix is used as a stable
+        // `#<suffix>` label so surviving siblings do not renumber when
         // another subagent stops.
         assert_eq!(
             parse_subagents("Explore:sub123456,Plan:abc987654"),
-            vec!["Explore #sub1", "Plan #abc9"]
+            vec!["Explore #3456", "Plan #7654"]
         );
     }
 
     #[test]
-    fn parse_subagents_id_prefix_distinguishes_parallel_same_type() {
-        // Two subagents of the same type get distinct labels from their ids,
-        // which is the whole point of id-based tagging.
+    fn parse_subagents_id_suffix_distinguishes_uuid_v7_siblings() {
+        // UUIDv7 siblings share a timestamp-heavy prefix, so the trailing
+        // characters provide the useful compact discriminator.
         assert_eq!(
-            parse_subagents("Explore:aaaa1111,Explore:bbbb2222"),
-            vec!["Explore #aaaa", "Explore #bbbb"]
+            parse_subagents(
+                "general-purpose:01a0380d-9cc4-7312-a767-351c89120226,\
+                 general-purpose:01a0380d-9cc4-7312-a767-352dc72648cb"
+            ),
+            vec!["general-purpose #0226", "general-purpose #48cb"]
         );
     }
 
     #[test]
-    fn parse_subagents_id_shorter_than_prefix_len_uses_full_id() {
+    fn parse_subagents_id_shorter_than_tag_len_uses_full_id() {
         // Short ids (e.g. test fixtures like "s1") render in full rather
         // than being padded or truncated to nothing.
         assert_eq!(parse_subagents("Plan:s1"), vec!["Plan #s1"]);
@@ -759,7 +774,7 @@ mod tests {
         // falls back to the bare type name.
         assert_eq!(
             parse_subagents("Explore,Plan:sub-999"),
-            vec!["Explore", "Plan #sub-"]
+            vec!["Explore", "Plan #-999"]
         );
     }
 
@@ -1056,6 +1071,77 @@ mod tests {
             Some("keep me"),
             "live Codex panes must not be swept just because tmux reports a shell"
         );
+    }
+
+    #[test]
+    fn parse_pane_fields_recognizes_grok_and_hook_permission_mode() {
+        let mut fields = full_fields();
+        fields[pane_line_field::AGENT] = "grok";
+        fields[pane_line_field::PANE_CURRENT_COMMAND] = "grok";
+        fields[pane_line_field::PERMISSION_MODE] = "auto";
+        let fields = field_strings(&fields);
+
+        let pane = parse_pane_fields_with_processes(&fields, None).expect("Grok pane");
+
+        assert_eq!(pane.agent, AgentType::Grok);
+        assert_eq!(pane.permission_mode, PermissionMode::Auto);
+    }
+
+    #[test]
+    fn parse_pane_fields_keeps_grok_shell_pane_when_process_is_alive() {
+        let _guard = test_mock::install();
+        let pane = "%GROK_LIVE";
+        test_mock::set(pane, PANE_AGENT, "grok");
+        test_mock::set(pane, PANE_PROMPT, "keep me");
+
+        let mut fields = full_fields();
+        fields[pane_line_field::PANE_ID] = pane;
+        fields[pane_line_field::AGENT] = "grok";
+        fields[pane_line_field::PANE_CURRENT_COMMAND] = "zsh";
+        fields[pane_line_field::PANE_PID] = "300";
+        let fields = field_strings(&fields);
+        let snapshot =
+            process_snapshot("300 1 zsh zsh -c grok\n301 300 grok /Users/alice/.grok/bin/grok\n");
+
+        let pane_info = parse_pane_fields_with_processes(&fields, Some(&snapshot))
+            .expect("live Grok child process should keep pane visible");
+
+        assert_eq!(pane_info.agent, AgentType::Grok);
+        assert_eq!(
+            test_mock::get(pane, PANE_PROMPT).as_deref(),
+            Some("keep me")
+        );
+    }
+
+    #[test]
+    fn parse_pane_line_wipes_stale_state_for_grok_shell_pane() {
+        let _guard = test_mock::install();
+        let pane = "%GROK_STALE";
+        test_mock::set(pane, PANE_AGENT, "grok");
+        test_mock::set(pane, PANE_PROMPT, "previous prompt");
+        test_mock::set(pane, PANE_PROMPT_ID, "prompt-old");
+        test_mock::set(pane, PANE_TURN_ACTIVE, "1");
+        test_mock::set(pane, PANE_STATUS, "running");
+
+        let mut fields = full_fields();
+        fields[pane_line_field::PANE_ID] = pane;
+        fields[pane_line_field::AGENT] = "grok";
+        fields[pane_line_field::PANE_CURRENT_COMMAND] = "zsh";
+        let line = make_pane_line(&fields);
+
+        assert!(parse_pane_line(&line).is_none());
+        for key in [
+            PANE_AGENT,
+            PANE_PROMPT,
+            PANE_PROMPT_ID,
+            PANE_TURN_ACTIVE,
+            PANE_STATUS,
+        ] {
+            assert!(
+                !test_mock::contains(pane, key),
+                "{key} must be cleared when a Grok pane falls back to shell"
+            );
+        }
     }
 
     #[test]

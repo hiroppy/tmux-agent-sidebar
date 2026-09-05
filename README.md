@@ -1,6 +1,6 @@
 <h1 align="center">tmux-agent-sidebar</h1>
 
-<p align="center">One tmux sidebar that tracks every Claude Code, Codex, and OpenCode pane across every session and window. See status, background shells, prompts, Git state, activity, and worktrees without switching windows.</p>
+<p align="center">One tmux sidebar that tracks every Claude Code, Codex, Grok Build, and OpenCode pane across every session and window. See status, background shells, prompts, Git state, activity, and worktrees without switching windows.</p>
 
 <p align="center"><img src="website/src/assets/captures/hero.png" alt="tmux-agent-sidebar hero" /></p>
 
@@ -13,7 +13,7 @@
 ## Features
 
 - **Every pane, one view** 
-  — tracks Claude Code, Codex, and OpenCode panes across all tmux sessions and windows
+  — tracks Claude Code, Codex, Grok Build, and OpenCode panes across all tmux sessions and windows
 - **Live metadata** 
   — prompts, tool calls, response previews, background shell state, wait reasons, task progress, and subagent trees refresh as the agents work
 - **Worktrees, included** 
@@ -22,6 +22,8 @@
   — native alerts when an agent finishes, needs permission, or errors out
 
 OpenCode uses a small local plugin bridge instead of per-event hook config. The plugin lives at `.opencode/plugins/tmux-agent-sidebar.js` and can be symlinked as a single file into `~/.config/opencode/plugins/` so it coexists with any existing plugins.
+
+Grok Build uses its native hook loader. The sidebar generates a dedicated `~/.grok/hooks/tmux-agent-sidebar.json` file and maps Grok's camelCase lifecycle, permission, subagent, and tool payloads into the shared sidebar event model.
 
 ## Requirements
 
@@ -51,6 +53,7 @@ Reload tmux (`tmux source ~/.tmux.conf`), then press `prefix + I`. The install w
   ```
 
 - **Codex** — open a Codex pane, press `prefix + e`, click the yellow `ⓘ` badge, copy the setup snippet, paste it into the Codex pane.
+- **Grok Build** — open a Grok pane and use the same `ⓘ` → `[copy]` flow next to `grok`. The generated hooks are saved to `~/.grok/hooks/tmux-agent-sidebar.json`; reload them from Grok's `/hooks` view or restart Grok.
 - **OpenCode** — symlink just the plugin file so your existing `~/.config/opencode/plugins/` contents stay untouched:
 
   ```sh
@@ -59,7 +62,7 @@ Reload tmux (`tmux source ~/.tmux.conf`), then press `prefix + I`. The install w
     ~/.config/opencode/plugins/tmux-agent-sidebar.js
   ```
 
-Full walkthroughs: [Claude Code setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/claude-code/) · [Codex setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/codex/) · [OpenCode setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/opencode/)
+Full walkthroughs: [Claude Code setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/claude-code/) · [Codex setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/codex/) · [Grok Build setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/grok/) · [OpenCode setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/opencode/)
 
 ### 3. Toggle the sidebar
 

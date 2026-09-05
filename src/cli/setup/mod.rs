@@ -1,5 +1,5 @@
 //! `setup` subcommand — prints required hooks and ready-to-paste config
-//! snippets for Claude Code and Codex as JSON on stdout. Pure generator:
+//! snippets for Claude Code, Codex, and Grok Build as JSON on stdout. Pure generator:
 //! reads only the adapter `HOOK_REGISTRATIONS` tables, never the user's
 //! config files.
 
@@ -8,11 +8,14 @@ use std::path::PathBuf;
 use crate::adapter::HookRegistration;
 use crate::adapter::claude::ClaudeAdapter;
 use crate::adapter::codex::CodexAdapter;
+use crate::adapter::grok::GrokAdapter;
 
 #[allow(dead_code)]
 const _CLAUDE_TABLE_REACHABLE: &[HookRegistration] = ClaudeAdapter::HOOK_REGISTRATIONS;
 #[allow(dead_code)]
 const _CODEX_TABLE_REACHABLE: &[HookRegistration] = CodexAdapter::HOOK_REGISTRATIONS;
+#[allow(dead_code)]
+const _GROK_TABLE_REACHABLE: &[HookRegistration] = GrokAdapter::HOOK_REGISTRATIONS;
 
 /// POSIX-quote a string for safe use as a single shell argument.
 ///
@@ -65,6 +68,7 @@ pub(crate) fn build_agent_snippet(agent: &str, hook_script: &str) -> Option<serd
     let table: &[HookRegistration] = match agent {
         "claude" => ClaudeAdapter::HOOK_REGISTRATIONS,
         "codex" => CodexAdapter::HOOK_REGISTRATIONS,
+        "grok" => GrokAdapter::HOOK_REGISTRATIONS,
         _ => return None,
     };
 
@@ -283,6 +287,12 @@ pub(crate) fn build_setup_output(hook_script: &str) -> serde_json::Value {
         CodexAdapter::HOOK_REGISTRATIONS,
         hook_script,
     );
+    let grok = build_agent_entry(
+        "grok",
+        "~/.grok/hooks/tmux-agent-sidebar.json",
+        GrokAdapter::HOOK_REGISTRATIONS,
+        hook_script,
+    );
 
     serde_json::json!({
         "version": crate::VERSION,
@@ -290,6 +300,7 @@ pub(crate) fn build_setup_output(hook_script: &str) -> serde_json::Value {
         "agents": {
             "claude": claude,
             "codex": codex,
+            "grok": grok,
         },
     })
 }
@@ -401,6 +412,7 @@ pub(crate) fn config_path_for_agent(agent: &str) -> Option<PathBuf> {
     match agent {
         "claude" => Some(home.join(".claude/settings.json")),
         "codex" => Some(home.join(".codex/hooks.json")),
+        "grok" => Some(home.join(".grok/hooks/tmux-agent-sidebar.json")),
         _ => None,
     }
 }
@@ -431,14 +443,14 @@ fn run_setup(args: &[String], hook_script: &str) -> (i32, Option<serde_json::Val
             Some(snippet) => (0, Some(snippet)),
             None => {
                 eprintln!(
-                    "error: unknown agent '{}' (expected 'claude' or 'codex')",
+                    "error: unknown agent '{}' (expected 'claude', 'codex', or 'grok')",
                     args[0]
                 );
                 (2, None)
             }
         },
         _ => {
-            eprintln!("usage: tmux-agent-sidebar setup [claude|codex]");
+            eprintln!("usage: tmux-agent-sidebar setup [claude|codex|grok]");
             (2, None)
         }
     }

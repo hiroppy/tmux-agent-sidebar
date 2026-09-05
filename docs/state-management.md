@@ -33,20 +33,22 @@ Pane options written to tmux:
 
 | Tmux Option | Update Trigger | Description |
 |-------------|----------------|-------------|
-| `@pane_agent` | SessionStart | Agent type ("claude" / "codex" / "opencode") |
+| `@pane_agent` | SessionStart | Agent type ("claude" / "codex" / "grok" / "opencode") |
 | `@pane_status` | Every event | Status ("running" / "background" / "waiting" / "idle" / "error") |
 | `@pane_cwd` | SessionStart, CwdChanged | Working directory |
 | `@pane_permission_mode` | SessionStart, hook event | Permission mode |
 | `@pane_prompt` | UserPromptSubmit, Stop | Latest prompt or response text |
+| `@pane_prompt_id` | UserPromptSubmit, Stop, TurnSettled, StopFailure | Losslessly encoded latest turn ID when exposed; retained after settlement so stale and duplicate turn-end hooks are ignored |
+| `@pane_turn_active` | UserPromptSubmit, Stop, TurnSettled, StopFailure | Parent-turn activity marker; keeps child tool events from reviving a settled background pane |
 | `@pane_prompt_source` | UserPromptSubmit, Stop | "user" or "response" |
-| `@pane_started_at` | UserPromptSubmit | Unix epoch when agent started |
-| `@pane_attention` | SessionStart, Stop, StopFailure (clear); Notification, PermissionDenied, TeammateIdle (set) | "notification" or "clear" |
+| `@pane_started_at` | UserPromptSubmit, ActivityLog (when unset), SubagentStart (late-child revival) | Unix epoch when agent started. Re-armed when a child registers after its parent turn already settled, so the revived background row still renders an elapsed label |
+| `@pane_attention` | SessionStart, Stop, TurnSettled, StopFailure (clear); Notification, PermissionDenied, TeammateIdle (set) | "notification" or "clear" |
 | `@pane_wait_reason` | StopFailure, PermissionDenied, TeammateIdle | Reason for waiting/error (`permission_denied`, `teammate_idle:<name>`, or error text) |
 | `@pane_bg_cmd` | ActivityLog (bg Bash), Refresh sweep (clear), SessionEnd (clear) | Latest sanitized command of a Bash tool started with `run_in_background`. Its presence is the single source of truth for "live bg shell" — Stop routes to `background` while it is set, and the row body renders the command. Persists across UserPromptSubmit so shells spanning turns stay visible; overwritten by the next bg Bash. The refresh loop runs a `ps`-based liveness sweep each tick and clears the marker (plus downgrades `background → idle`) when no process matches the stored command. Only the most recent bg Bash is tracked; older ones are not retained. |
-| `@pane_subagents` | SubagentStart/Stop | Comma-separated active subagent list |
+| `@pane_subagents` | SubagentStart/Stop | Comma-separated active subagent list; Grok background subagents survive parent-turn settlement. A registration that loses the race against its parent's `Stop` revives the pane's background lifecycle instead of leaving live work shown as completed |
 | `@pane_worktree_name` | SessionStart | Worktree name (if applicable) |
 | `@pane_worktree_branch` | SessionStart | Worktree branch (if applicable) |
-| `@pane_session_id` | SessionStart, UserPromptSubmit, Notification, Stop, StopFailure, PermissionDenied, CwdChanged | Agent-reported session id (skipped when subagents are active) |
+| `@pane_session_id` | SessionStart, UserPromptSubmit, Notification, Stop, TurnSettled, StopFailure, PermissionDenied, CwdChanged | Agent-reported session id (skipped when subagents are active) |
 
 In-memory per-pane runtime state. Every field lives inside
 `PaneRuntimeState` so the whole record is dropped together when its
@@ -160,6 +162,7 @@ Per-pane file-based state:
 Agent hooks (hook.sh)
   → CLI `hook` subcommand (cli/hook.rs)
     → resolve_adapter() (event.rs) → adapter.parse() → AgentEvent
+    → lock::acquire() (cli/hook/lock.rs) ← per-pane flock: hooks on one pane run one at a time
     → handle_event() writes @pane_* tmux options + /tmp activity log files
                         ↓
 TUI main loop (app::run in app.rs; submodules app/{setup,workers,input,render})
@@ -192,7 +195,7 @@ enum StatusFilter { All, Running, Background, Waiting, Idle, Error }
 enum RepoFilter { All, Repo(String) }
 enum BottomTab { Activity, GitStatus }
 enum PaneStatus { Running, Background, Waiting, Idle, Error, Unknown }
-enum AgentType { Claude, Codex, OpenCode, Unknown }
+enum AgentType { Claude, Codex, Grok, OpenCode, Unknown }
 enum PermissionMode { Default, Plan, AcceptEdits, Auto, DontAsk, BypassPermissions, Defer }
 
 /// At-most-one popup state. The enum encodes both which popup is open

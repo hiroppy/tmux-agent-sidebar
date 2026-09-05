@@ -113,6 +113,8 @@ fn test_agent_color_all_variants() {
 
     assert_eq!(theme.agent_color(&AgentType::Claude), Color::Indexed(174));
     assert_eq!(theme.agent_color(&AgentType::Codex), Color::Indexed(141));
+    assert_eq!(theme.agent_color(&AgentType::Grok), Color::Indexed(120));
+    assert_eq!(theme.agent_color(&AgentType::OpenCode), Color::Indexed(117));
     assert_eq!(theme.agent_color(&AgentType::Unknown), theme.status_unknown);
 }
 

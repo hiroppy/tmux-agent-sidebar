@@ -5,12 +5,13 @@ use super::commands::run_tmux;
 // Single source of truth for every `@pane_*` tmux option the sidebar
 // writes or reads. Hooks, the TUI refresh path, and the query layer
 // all go through these constants so a typo can't silently corrupt
-// pane state. Keep `clear_agent_pane_state` in `tmux/query.rs` and
-// `clear_all_meta` in `cli/hook/context/meta.rs` in sync with this
-// list — both sweep the full set on teardown.
+// pane state. Keep `clear_agent_pane_state` in `tmux/query.rs`,
+// `clear_all_meta` in `cli/hook/context/meta.rs`, and
+// `clear_dead_agent_metadata` in `state/refresh.rs` in sync with this
+// list — all three sweep the full set on teardown.
 
-/// Agent name the hooks identified for the pane (`claude` / `codex`
-/// / `opencode`). Drives the sidebar's per-row icon.
+/// Agent name the hooks identified for the pane (`claude` / `codex` /
+/// `grok` / `opencode`). Drives the sidebar's per-row icon.
 pub const PANE_AGENT: &str = "@pane_agent";
 /// Optional human-readable pane label. Currently queried to preserve
 /// the `list-panes` field layout, but not rendered.
@@ -40,6 +41,9 @@ pub const PANE_OS_NOTIFY_PERMISSION_REQUIRED: &str = "@pane_os_notify_permission
 pub const PANE_OS_NOTIFY_TASK_COMPLETED: &str = "@pane_os_notify_task_completed";
 /// Same dedup stamp for `TaskFailed` notifications.
 pub const PANE_OS_NOTIFY_TASK_FAILED: &str = "@pane_os_notify_task_failed";
+/// Completion body queued by a parent `Stop` while background subagents
+/// remain live. The final `SubagentStop` consumes it once no shell is live.
+pub const PANE_PENDING_STOP_NOTIFICATION_BODY: &str = "@pane_pending_stop_notification_body";
 /// Legacy marker — see
 /// `cli/hook/context/pending.rs::PENDING_SESSION_END` for the
 /// rationale for keeping it defined but never set.
@@ -53,6 +57,13 @@ pub const PANE_PERMISSION_MODE: &str = "@pane_permission_mode";
 /// Last user prompt the agent received. Shown in the bottom tab
 /// as activity context.
 pub const PANE_PROMPT: &str = "@pane_prompt";
+/// Opaque current-turn identifier reported by agents whose end events may
+/// arrive out of order. Retained after settlement to reject stale or duplicate
+/// lifecycle reports until the next user prompt starts.
+pub const PANE_PROMPT_ID: &str = "@pane_prompt_id";
+/// Marker showing that the pane's parent turn is still active. Child tool
+/// events must not revive a background pane after this marker is cleared.
+pub const PANE_TURN_ACTIVE: &str = "@pane_turn_active";
 /// Where the prompt came from (e.g. `UserPromptSubmit` vs
 /// resumed session) — drives rendering nuance.
 pub const PANE_PROMPT_SOURCE: &str = "@pane_prompt_source";
@@ -103,6 +114,7 @@ pub const SIDEBAR_COLOR_ERROR: &str = "@sidebar_color_error";
 pub const SIDEBAR_COLOR_FILTER_INACTIVE: &str = "@sidebar_color_filter_inactive";
 pub const SIDEBAR_COLOR_AGENT_CLAUDE: &str = "@sidebar_color_agent_claude";
 pub const SIDEBAR_COLOR_AGENT_CODEX: &str = "@sidebar_color_agent_codex";
+pub const SIDEBAR_COLOR_AGENT_GROK: &str = "@sidebar_color_agent_grok";
 pub const SIDEBAR_COLOR_AGENT_OPENCODE: &str = "@sidebar_color_agent_opencode";
 pub const SIDEBAR_COLOR_PET_BODY: &str = "@sidebar_color_pet_body";
 pub const SIDEBAR_COLOR_PET_EYE: &str = "@sidebar_color_pet_eye";
