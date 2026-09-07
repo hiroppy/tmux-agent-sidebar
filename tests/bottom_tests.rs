@@ -112,11 +112,12 @@ fn snapshot_git_status_tab_ui() {
     state.git.untracked_files = vec!["new_file.rs".into()];
     state.git.diff_stat = Some((42, 15));
 
-    let output = render_to_string(&mut state, 28, 24);
-    insta::assert_snapshot!(output, @r"
+    let output = render_to_string(&mut state, 28, 30);
+    insta::assert_snapshot!(output, @"
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
     ⓘ                        — ▾
     project
+    ┃ ● claude
     ╭ Activity │ Git ──────────╮
     │feature/sidebar       ↑2↓1│
     │+42/-15            3 files│
@@ -151,11 +152,12 @@ fn snapshot_git_clean_ui() {
     state.focus_state.sidebar_focused = true;
     // No git changes
 
-    let output = render_to_string(&mut state, 28, 24);
-    insta::assert_snapshot!(output, @r"
+    let output = render_to_string(&mut state, 28, 30);
+    insta::assert_snapshot!(output, @"
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
     ⓘ                        — ▾
     project
+    ┃ ● claude
     ╭ Activity │ Git ──────────╮
     │    Working tree clean    │
     ╰──────────────────────────╯
@@ -187,11 +189,12 @@ fn snapshot_activity_tab_active_ui() {
         label: "src/main.rs".into(),
     }];
 
-    let output = render_to_string(&mut state, 28, 24);
-    insta::assert_snapshot!(output, @r"
+    let output = render_to_string(&mut state, 28, 30);
+    insta::assert_snapshot!(output, @"
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
     ⓘ                        — ▾
     project
+    ┃ ● claude
     ╭ Activity │ Git ──────────╮
     │10:32                 Edit│
     │  src/main.rs             │
@@ -227,10 +230,11 @@ fn activity_tab_leaves_one_blank_row_above_entries() {
     // The inline snapshot locks in the blank-row spacer: after the `╭ Activity │ Git ╮`
     // title row, the first row must be empty and the timestamp/tool row must appear
     // one row further down.
-    insta::assert_snapshot!(render_to_string(&mut state, 28, 24), @r"
+    insta::assert_snapshot!(render_to_string(&mut state, 28, 30), @"
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
     ⓘ                        — ▾
     project
+    ┃ ● claude
     ╭ Activity │ Git ──────────╮
     │10:32                 Edit│
     │  src/main.rs             │
@@ -267,9 +271,12 @@ fn snapshot_activity_long_tool_keeps_one_space_gap() {
         label: "rust".into(),
     }];
 
-    let output = render_to_string(&mut state, 28, 14);
-    insta::assert_snapshot!(output, @r"
+    let output = render_to_string(&mut state, 28, 30);
+    insta::assert_snapshot!(output, @"
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
+    ⓘ                        — ▾
+    project
+    ┃ ● claude
     ╭ Activity │ Git ──────────╮
     │10:32 mcp__context7__query│
     │  rust                    │
@@ -299,9 +306,13 @@ fn snapshot_tab_bar_renders_both_labels() {
         label: "test".into(),
     }];
 
-    let output = render_to_string(&mut state, 28, 14);
-    insta::assert_snapshot!(output, @r"
+    let output = render_to_string(&mut state, 28, 30);
+    insta::assert_snapshot!(output, @"
      ≡1  ●0  ◎0  ◐0  ○1  ✕0
+    ⓘ                        — ▾
+    project
+    ┃ ○ claude
+        Waiting for prompt…
     ╭ Activity │ Git ──────────╮
     │10:32                 Edit│
     │  test                    │
@@ -352,11 +363,12 @@ fn snapshot_git_full_info_ui() {
     state.git.untracked_files = vec!["new_file.rs".into()];
 
     // Use plain render since elapsed time varies
-    let output = render_to_string(&mut state, 28, 24);
-    insta::assert_snapshot!(output, @r"
+    let output = render_to_string(&mut state, 28, 30);
+    insta::assert_snapshot!(output, @"
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
     ⓘ                        — ▾
     project
+    ┃ ● claude
     ╭ Activity │ Git ──────────╮
     │main                      │
     │+120/-30           3 files│
@@ -392,9 +404,12 @@ fn snapshot_git_diff_summary_tight_ui() {
     state.git.branch = "main".into();
     state.git.diff_stat = Some((10, 3));
 
-    let plain = render_to_string(&mut state, 28, 14);
-    insta::assert_snapshot!(plain, @r"
+    let plain = render_to_string(&mut state, 28, 30);
+    insta::assert_snapshot!(plain, @"
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
+    ⓘ                        — ▾
+    project
+    ┃ ● claude
     ╭ Activity │ Git ──────────╮
     │main                      │
     │+10/-3             0 files│
@@ -433,9 +448,12 @@ fn snapshot_git_staged_file_diff_right_ui() {
         path: String::new(),
     }];
 
-    let plain = render_to_string(&mut state, 28, 18);
-    insta::assert_snapshot!(plain, @r"
+    let plain = render_to_string(&mut state, 28, 30);
+    insta::assert_snapshot!(plain, @"
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
+    ⓘ                        — ▾
+    project
+    ┃ ● claude
     ╭ Activity │ Git ──────────╮
     │main                      │
     │+10/-2             1 files│
@@ -475,9 +493,12 @@ fn snapshot_git_unstaged_long_name_diff_right_ui() {
         path: String::new(),
     }];
 
-    let plain = render_to_string(&mut state, 28, 18);
-    insta::assert_snapshot!(plain, @r"
+    let plain = render_to_string(&mut state, 28, 30);
+    insta::assert_snapshot!(plain, @"
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
+    ⓘ                        — ▾
+    project
+    ┃ ● claude
     ╭ Activity │ Git ──────────╮
     │main                      │
     │+150/-50           1 files│
@@ -526,11 +547,12 @@ fn snapshot_git_long_filename_truncated_ui() {
     ];
 
     // Verify the long filename is truncated (contains ellipsis)
-    let plain = render_to_string(&mut state, 28, 24);
-    insta::assert_snapshot!(plain, @r"
+    let plain = render_to_string(&mut state, 28, 30);
+    insta::assert_snapshot!(plain, @"
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
     ⓘ                        — ▾
     project
+    ┃ ● claude
     ╭ Activity │ Git ──────────╮
     │main                      │
     │                   2 files│
@@ -686,9 +708,12 @@ fn snapshot_git_branch_only_no_changes() {
     state.git.branch = "feature/long-branch-name".into();
     state.git.ahead_behind = Some((5, 0));
 
-    let plain = render_to_string(&mut state, 38, 20);
-    insta::assert_snapshot!(plain, @r"
+    let plain = render_to_string(&mut state, 38, 30);
+    insta::assert_snapshot!(plain, @"
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
+    ⓘ                                  — ▾
+    project
+    ┃ ● claude
     ╭ Activity │ Git ────────────────────╮
     │feature/long-branch-name          ↑5│
     │────────────────────────────────────│
@@ -721,9 +746,12 @@ fn snapshot_git_pr_number_ui() {
     state.git.remote_url = "https://github.com/user/repo".into();
     state.git.diff_stat = Some((10, 3));
 
-    let plain = render_to_string(&mut state, 28, 14);
-    insta::assert_snapshot!(plain, @r"
+    let plain = render_to_string(&mut state, 28, 30);
+    insta::assert_snapshot!(plain, @"
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
+    ⓘ                        — ▾
+    project
+    ┃ ● claude
     ╭ Activity │ Git ──────────╮
     │feature/fix            #42│
     │+10/-3             0 files│
@@ -733,8 +761,16 @@ fn snapshot_git_pr_number_ui() {
     ");
     // Styled snapshot locks in the PR link's underline + pr_link color (fg:117)
     // so future style regressions surface as a diff rather than a missed grep.
-    insta::assert_snapshot!(render_to_styled_string(&mut state, 28, 14), @r"
+    insta::assert_snapshot!(render_to_styled_string(&mut state, 28, 30), @"
      ≡[fg:111]1[fg:255]  ●[fg:245]1[fg:255]  ◎[fg:245]0[fg:245]  ◐[fg:245]0[fg:245]  ○[fg:245]0[fg:245]  ✕[fg:245]0[fg:245]
+    ⓘ[fg:221]                        —[fg:252] ▾[fg:252]
+    p[fg:153]r[fg:153]o[fg:153]j[fg:153]e[fg:153]c[fg:153]t[fg:153]
+    ┃[fg:153] ●[fg:82] [fg:174]c[fg:174]l[fg:174]a[fg:174]u[fg:174]d[fg:174]e[fg:174]
+
+
+
+
+
 
     ╭[fg:153] [fg:153]A[fg:252]c[fg:252]t[fg:252]i[fg:252]v[fg:252]i[fg:252]t[fg:252]y[fg:252] [fg:240]│[fg:240] [fg:240]G[fg:153]i[fg:153]t[fg:153] [fg:153]─[fg:153]─[fg:153]─[fg:153]─[fg:153]─[fg:153]─[fg:153]─[fg:153]─[fg:153]─[fg:153]─[fg:153]╮[fg:153]
     │[fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153]│[fg:153]
@@ -743,7 +779,15 @@ fn snapshot_git_pr_number_ui() {
     │[fg:153]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]│[fg:153]
     │[fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153]│[fg:153]
     │[fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153]│[fg:153]
+    │[fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153]│[fg:153]
+    │[fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153]│[fg:153]
+    │[fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153]│[fg:153]
+    │[fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153]│[fg:153]
     │[fg:153] [fg:153] [fg:153] [fg:153] [fg:153]W[fg:252]o[fg:252]r[fg:252]k[fg:252]i[fg:252]n[fg:252]g[fg:252] [fg:252]t[fg:252]r[fg:252]e[fg:252]e[fg:252] [fg:252]c[fg:252]l[fg:252]e[fg:252]a[fg:252]n[fg:252] [fg:153] [fg:153] [fg:153] [fg:153]│[fg:153]
+    │[fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153]│[fg:153]
+    │[fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153]│[fg:153]
+    │[fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153]│[fg:153]
+    │[fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153]│[fg:153]
     │[fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153]│[fg:153]
     │[fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153]│[fg:153]
     │[fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153] [fg:153]│[fg:153]
@@ -783,9 +827,12 @@ fn snapshot_git_pr_with_diff_ui() {
     state.git.remote_url = "https://github.com/user/repo".into();
     state.git.diff_stat = Some((55, 20));
 
-    let plain = render_to_string(&mut state, 28, 14);
-    insta::assert_snapshot!(plain, @r"
+    let plain = render_to_string(&mut state, 28, 30);
+    insta::assert_snapshot!(plain, @"
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
+    ⓘ                        — ▾
+    project
+    ┃ ● claude
     ╭ Activity │ Git ──────────╮
     │main                  #123│
     │+55/-20            0 files│
@@ -813,7 +860,7 @@ fn snapshot_subagents_tree_ui() {
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
 
-    let output = render_to_string(&mut state, 40, 28);
+    let output = render_to_string(&mut state, 40, 30);
     insta::assert_snapshot!(output, @r"
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
     ⓘ                                    — ▾
@@ -850,7 +897,7 @@ fn snapshot_subagent_long_name_truncated_ui() {
     state.rebuild_row_targets();
 
     // Narrow width (28) to force truncation of long subagent names
-    let output = render_to_string(&mut state, 28, 27);
+    let output = render_to_string(&mut state, 28, 30);
     insta::assert_snapshot!(output, @r"
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
     ⓘ                        — ▾
@@ -886,7 +933,7 @@ fn snapshot_activity_empty_centered_ui() {
     state.bottom_tab = BottomTab::Activity;
     // No activity entries — should show centered "No activity yet"
 
-    let output = render_to_string(&mut state, 28, 26);
+    let output = render_to_string(&mut state, 28, 30);
     insta::assert_snapshot!(output, @r"
      ≡1  ●0  ◎0  ◐0  ○1  ✕0
     ⓘ                        — ▾
@@ -917,7 +964,7 @@ fn snapshot_git_clean_centered_ui() {
     state.bottom_tab = BottomTab::GitStatus;
     // No git info — should show centered "Working tree clean"
 
-    let output = render_to_string(&mut state, 28, 26);
+    let output = render_to_string(&mut state, 28, 30);
     insta::assert_snapshot!(output, @r"
      ≡1  ●0  ◎0  ◐0  ○1  ✕0
     ⓘ                        — ▾
@@ -957,11 +1004,12 @@ fn snapshot_git_branch_loaded_no_changes_shows_inline_clean() {
     // Branch loaded, but no changes/commits — should still show "Working tree clean"
     state.git.branch = "main".into();
 
-    let plain = render_to_string(&mut state, 28, 24);
-    insta::assert_snapshot!(plain, @r"
+    let plain = render_to_string(&mut state, 28, 30);
+    insta::assert_snapshot!(plain, @"
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
     ⓘ                        — ▾
     project
+    ┃ ● claude
     ╭ Activity │ Git ──────────╮
     │main                      │
     │──────────────────────────│
@@ -992,11 +1040,12 @@ fn snapshot_git_no_data_shows_centered_clean() {
     state.focus_state.sidebar_focused = true;
     // No git data at all
 
-    let output = render_to_string(&mut state, 28, 24);
-    insta::assert_snapshot!(output, @r"
+    let output = render_to_string(&mut state, 28, 30);
+    insta::assert_snapshot!(output, @"
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
     ⓘ                        — ▾
     project
+    ┃ ● claude
     ╭ Activity │ Git ──────────╮
     │    Working tree clean    │
     ╰──────────────────────────╯
@@ -1027,9 +1076,12 @@ fn test_git_behind_only() {
     state.git.branch = "main".into();
     state.git.ahead_behind = Some((0, 3));
 
-    let plain = render_to_string(&mut state, 28, 14);
-    insta::assert_snapshot!(plain, @r"
+    let plain = render_to_string(&mut state, 28, 30);
+    insta::assert_snapshot!(plain, @"
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
+    ⓘ                        — ▾
+    project
+    ┃ ● claude
     ╭ Activity │ Git ──────────╮
     │main                    ↓3│
     │──────────────────────────│
@@ -1060,9 +1112,12 @@ fn test_git_ahead_and_behind() {
     state.git.branch = "main".into();
     state.git.ahead_behind = Some((2, 3));
 
-    let plain = render_to_string(&mut state, 38, 14);
-    insta::assert_snapshot!(plain, @r"
+    let plain = render_to_string(&mut state, 38, 30);
+    insta::assert_snapshot!(plain, @"
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
+    ⓘ                                  — ▾
+    project
+    ┃ ● claude
     ╭ Activity │ Git ────────────────────╮
     │main                            ↑2↓3│
     │────────────────────────────────────│
@@ -1095,9 +1150,12 @@ fn test_git_diff_insertions_only() {
     state.git.branch = "main".into();
     state.git.diff_stat = Some((25, 0));
 
-    let plain = render_to_string(&mut state, 28, 14);
-    insta::assert_snapshot!(plain, @r"
+    let plain = render_to_string(&mut state, 28, 30);
+    insta::assert_snapshot!(plain, @"
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
+    ⓘ                        — ▾
+    project
+    ┃ ● claude
     ╭ Activity │ Git ──────────╮
     │main                      │
     │+25/-0             0 files│
@@ -1129,9 +1187,12 @@ fn test_git_diff_deletions_only() {
     state.git.branch = "main".into();
     state.git.diff_stat = Some((0, 15));
 
-    let plain = render_to_string(&mut state, 28, 14);
-    insta::assert_snapshot!(plain, @r"
+    let plain = render_to_string(&mut state, 28, 30);
+    insta::assert_snapshot!(plain, @"
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
+    ⓘ                        — ▾
+    project
+    ┃ ● claude
     ╭ Activity │ Git ──────────╮
     │main                      │
     │+0/-15             0 files│
@@ -1281,11 +1342,12 @@ fn snapshot_git_long_branch_with_pr_ui() {
         path: String::new(),
     }];
 
-    let output = render_to_string(&mut state, 28, 24);
-    insta::assert_snapshot!(output, @r"
+    let output = render_to_string(&mut state, 28, 30);
+    insta::assert_snapshot!(output, @"
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
     ⓘ                        — ▾
     project
+    ┃ ● claude
     ╭ Activity │ Git ──────────╮
     │feature/very-long-br… #123│
     │+5/-2              1 files│
@@ -1326,11 +1388,12 @@ fn snapshot_git_staged_only_ui() {
         path: String::new(),
     }];
 
-    let output = render_to_string(&mut state, 28, 24);
-    insta::assert_snapshot!(output, @r"
+    let output = render_to_string(&mut state, 28, 30);
+    insta::assert_snapshot!(output, @"
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
     ⓘ                        — ▾
     project
+    ┃ ● claude
     ╭ Activity │ Git ──────────╮
     │main                      │
     │+20/-0             1 files│

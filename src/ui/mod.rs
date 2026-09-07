@@ -10,10 +10,16 @@ use std::collections::HashMap;
 
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Rect},
+    style::Style,
+    text::{Line, Span},
+    widgets::Paragraph,
 };
 
-use crate::{state::AppState, tmux};
+use crate::{
+    state::{AppState, Focus},
+    tmux,
+};
 
 pub const BOTTOM_PANEL_HEIGHT: u16 = 20;
 
@@ -55,10 +61,72 @@ pub fn pet_enabled_from_tmux() -> bool {
 
 pub fn draw(frame: &mut Frame, state: &mut AppState) {
     state.layout.hyperlink_overlays.clear();
+    state.layout.bottom_toggle_target = None;
     let area = frame.area();
+    // Cache the viewport height so keyboard handlers (which lack a terminal
+    // handle) can resolve bottom-panel visibility for toggles and focus moves.
+    state.last_viewport_height = area.height;
 
+    // Resolve the compact/tall regime, then let a threshold crossing win over
+    // any stale manual toggle before reading the final visibility.
+    let (compact, _) = state.bottom_visibility(area.height);
+    state.sync_bottom_regime(compact);
+    let (compact, shown) = state.bottom_visibility(area.height);
+
+    // Keep focus consistent with what is actually on screen. When the panel
+    // is hidden, focus must not linger in the invisible Activity log; in the
+    // compact accordion the list is hidden, so focus lives in the panel.
+    if !shown {
+        if state.focus_state.focus == Focus::ActivityLog {
+            state.focus_state.focus = Focus::Panes;
+        }
+    } else if compact {
+        state.focus_state.focus = Focus::ActivityLog;
+    }
+
+    // Compact window: the list and a fixed panel can't share the height, so
+    // reserve the last row for a drawer handle and give the rest to either the
+    // revealed accordion or the list. The handle is the discoverable, clickable
+    // affordance for the otherwise keyboard-only `b` toggle.
+    if compact {
+        let handle_h = 1u16.min(area.height);
+        let body_area = Rect {
+            height: area.height.saturating_sub(handle_h),
+            ..area
+        };
+        let handle_area = Rect {
+            y: area.y + area.height.saturating_sub(handle_h),
+            height: handle_h,
+            ..area
+        };
+        if shown {
+            bottom::draw_bottom(frame, state, body_area);
+        } else {
+            panes::draw_agents(frame, state, body_area);
+        }
+        draw_panel_handle(frame, state, handle_area, shown);
+        state.layout.bottom_toggle_target = Some(handle_area);
+        // Keep an open popup on top. In the hidden state `draw_agents` already
+        // rendered it into `body_area` (above the handle row, so the handle
+        // can't cover it); the accordion draws the bottom panel instead, so
+        // render the overlay here — last, over `body_area` — to match.
+        if shown {
+            panes::render_popups(frame, state, body_area);
+        }
+        return;
+    }
+
+    // Panel disabled (`@sidebar_bottom_height` = 0): the list gets the full
+    // height and there is no handle. (A tall window with the panel enabled is
+    // always `shown`, so this only fires when the panel is turned off.)
+    if !shown {
+        panes::draw_agents(frame, state, area);
+        return;
+    }
+
+    // Tall window: list + divider + fixed bottom panel, always shown.
     let bot_h = state.bottom_panel_height;
-    let divider_h = if bot_h > 0 && state.pet_enabled {
+    let divider_h = if state.pet_enabled {
         PET_SCENE_HEIGHT
     } else {
         1
@@ -66,26 +134,51 @@ pub fn draw(frame: &mut Frame, state: &mut AppState) {
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints(if bot_h > 0 {
-            vec![
-                Constraint::Min(1),
-                Constraint::Length(divider_h),
-                Constraint::Length(bot_h),
-            ]
-        } else {
-            vec![Constraint::Min(1)]
-        })
+        .constraints(vec![
+            Constraint::Min(1),
+            Constraint::Length(divider_h),
+            Constraint::Length(bot_h),
+        ])
         .split(area);
 
     panes::draw_agents(frame, state, chunks[0]);
-
-    if bot_h > 0 && chunks.len() > 2 {
-        bottom::draw_bottom(frame, state, chunks[2]);
-        if state.pet_enabled {
-            let running_count = state.running_count();
-            pet::draw_pet(frame, state, chunks[1], running_count);
-        }
+    bottom::draw_bottom(frame, state, chunks[2]);
+    if state.pet_enabled {
+        let running_count = state.running_count();
+        pet::draw_pet(frame, state, chunks[1], running_count);
     }
+}
+
+/// Draw the one-row drawer handle that toggles the bottom panel on a compact
+/// window. It doubles as the click target (the whole row) and the discoverable
+/// hint for the `b` shortcut. `expanded` is the panel's current visibility: a
+/// revealed accordion shows `▾ Activity / Git` (click to hide), a hidden panel
+/// shows `▸ Activity / Git` (click to reveal).
+fn draw_panel_handle(frame: &mut Frame, state: &AppState, area: Rect, expanded: bool) {
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+    let theme = &state.theme;
+    let marker = if expanded { "▾" } else { "▸" };
+    let label = "Activity / Git";
+    let key_hint = "[b]";
+
+    let left_dw = 1 + text::display_width(marker) + 1 + text::display_width(label);
+    let gap = (area.width as usize).saturating_sub(left_dw + text::display_width(key_hint) + 1);
+
+    let line = Line::from(vec![
+        Span::raw(" "),
+        Span::styled(marker.to_string(), Style::default().fg(theme.accent)),
+        Span::raw(" "),
+        Span::styled(label.to_string(), Style::default().fg(theme.text_muted)),
+        Span::raw(" ".repeat(gap)),
+        Span::styled(
+            key_hint.to_string(),
+            Style::default().fg(theme.border_inactive),
+        ),
+        Span::raw(" "),
+    ]);
+    frame.render_widget(Paragraph::new(line), area);
 }
 
 #[cfg(test)]
