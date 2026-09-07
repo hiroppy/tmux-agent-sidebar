@@ -100,6 +100,7 @@ export default defineConfig({
             { slug: 'getting-started/claude-code' },
             { slug: 'getting-started/codex' },
             { slug: 'getting-started/opencode' },
+            { slug: 'getting-started/cursor' },
           ],
         },
         {
@@ -120,6 +121,7 @@ export default defineConfig({
             { slug: 'agents/claude-code' },
             { slug: 'agents/codex' },
             { slug: 'agents/opencode' },
+            { slug: 'agents/cursor' },
           ],
         },
         {
