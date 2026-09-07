@@ -34,6 +34,7 @@ pub(super) fn render_pane_lines_with_ports(
     theme: &ColorTheme,
     spinner_frame: usize,
     now: u64,
+    show_branch: bool,
 ) -> Vec<Line<'static>> {
     let bg = if selected {
         Some(theme.selection_bg)
@@ -73,7 +74,13 @@ pub(super) fn render_pane_lines_with_ports(
 
     let mut out: Vec<Line<'static>> = Vec::with_capacity(8);
     out.push(status_row(pane, &marker_ctx, icons, spinner_frame, now));
-    if let Some(line) = branch_ports_row(git_info, ports, pane.sidebar_spawned, &marker_ctx) {
+    if let Some(line) = branch_ports_row(
+        git_info,
+        ports,
+        pane.sidebar_spawned,
+        show_branch,
+        &marker_ctx,
+    ) {
         out.push(line);
     }
     let ctx = &plain_ctx;
@@ -171,6 +178,7 @@ mod tests {
             &theme,
             0,
             0,
+            true
         );
 
         let status = line_text(&lines[0]);
@@ -193,6 +201,7 @@ mod tests {
             &theme,
             0,
             0,
+            true
         );
 
         let status = line_text(&lines[0]);
@@ -219,6 +228,7 @@ mod tests {
             &theme,
             0,
             0,
+            true
         );
 
         let status = line_text(&lines[0]);
@@ -256,6 +266,7 @@ mod tests {
             &theme,
             0,
             66,
+            true
         );
 
         let status = line_text(&lines[0]);
@@ -301,6 +312,7 @@ mod tests {
             &theme,
             0,
             0,
+            true,
         );
 
         assert!(lines.len() >= 2);
@@ -332,6 +344,7 @@ mod tests {
             &theme,
             0,
             0,
+            true,
         );
 
         assert!(lines.len() >= 2);
@@ -364,6 +377,7 @@ mod tests {
             &theme,
             0,
             1_000_000,
+            true
         );
 
         let status = line_text(&lines[0]);
@@ -409,6 +423,7 @@ mod tests {
             &theme,
             0,
             0,
+            true
         );
 
         assert_eq!(lines.len(), 2);
@@ -437,6 +452,7 @@ mod tests {
             &theme,
             0,
             0,
+            true
         );
 
         let hint = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
@@ -463,6 +479,7 @@ mod tests {
             &theme,
             0,
             0,
+            true
         );
 
         let joined = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
@@ -489,6 +506,7 @@ mod tests {
             &theme,
             0,
             0,
+            true
         );
 
         assert_eq!(lines.len(), 2);
@@ -518,6 +536,7 @@ mod tests {
             &theme,
             0,
             0,
+            true
         );
 
         let hint = line_text(&lines[1]);
@@ -550,6 +569,7 @@ mod tests {
             &theme,
             0,
             0,
+            true
         );
 
         assert!(lines.len() >= 2);
@@ -575,6 +595,7 @@ mod tests {
             &theme,
             0,
             0,
+            true
         );
 
         assert!(lines.len() >= 3);
@@ -600,6 +621,7 @@ mod tests {
             &theme,
             0,
             0,
+            true
         );
 
         assert!(lines.len() >= 5);
@@ -629,6 +651,7 @@ mod tests {
             &theme,
             0,
             0,
+            true
         );
 
         assert!(lines.len() >= 3);
@@ -659,6 +682,7 @@ mod tests {
             &theme,
             0,
             0,
+            true
         );
 
         assert!(lines.len() >= 2);
@@ -688,6 +712,7 @@ mod tests {
             &theme,
             0,
             0,
+            true
         );
 
         assert!(lines.len() >= 2);
@@ -714,6 +739,7 @@ mod tests {
             &theme,
             0,
             0,
+            true
         );
 
         assert!(lines.len() >= 2);
@@ -746,6 +772,7 @@ mod tests {
             &theme,
             0,
             0,
+            true
         );
 
         assert!(lines.len() >= 2);
@@ -772,6 +799,7 @@ mod tests {
             &theme,
             0,
             0,
+            true
         );
 
         assert_eq!(lines.len(), 2);
@@ -784,7 +812,7 @@ mod tests {
         let theme = ColorTheme::default();
         let ctx = test_ctx(&theme, 40, false);
         let ports = vec![3000];
-        let line = branch_ports_row(&PaneGitInfo::default(), Some(&ports), false, &ctx)
+        let line = branch_ports_row(&PaneGitInfo::default(), Some(&ports), false, true, &ctx)
             .expect("should render port line");
         assert!(line_text(&line).contains(":3000"));
     }
@@ -799,7 +827,7 @@ mod tests {
             is_worktree: true,
             worktree_name: None,
         };
-        let line = branch_ports_row(&git, None, false, &ctx).expect("branch row should render");
+        let line = branch_ports_row(&git, None, false, true, &ctx).expect("branch row should render");
         let text = line_text(&line);
         assert!(text.contains("+ feat/x"), "plain + marker: {text}");
         assert!(!text.contains('×'), "non-spawned must not render ×");
@@ -816,7 +844,7 @@ mod tests {
             is_worktree: true,
             worktree_name: None,
         };
-        let line = branch_ports_row(&git, None, true, &ctx).expect("branch row should render");
+        let line = branch_ports_row(&git, None, true, true, &ctx).expect("branch row should render");
         let text = line_text(&line);
         assert!(
             text.contains("+ feat/x"),
@@ -877,7 +905,7 @@ mod tests {
             is_worktree: true,
             worktree_name: None,
         };
-        let line = branch_ports_row(&git, None, true, &ctx).expect("branch row should render");
+        let line = branch_ports_row(&git, None, true, true, &ctx).expect("branch row should render");
         let text = line_text(&line);
         assert!(
             text.contains('×'),
@@ -915,9 +943,9 @@ mod tests {
             is_worktree: true,
             worktree_name: None,
         };
-        let line = branch_ports_row(&git, None, true, &ctx).expect("branch row should render");
+        let line = branch_ports_row(&git, None, true, true, &ctx).expect("branch row should render");
         let text = line_text(&line);
-        let computed = sidebar_remove_marker_col(&git, None, true, ctx.inner_width)
+        let computed = sidebar_remove_marker_col(&git, None, true, ctx.inner_width, true)
             .expect("col should be Some");
         assert_eq!(
             computed as usize,
@@ -943,8 +971,8 @@ mod tests {
             is_worktree: true,
             worktree_name: None,
         };
-        let col_short = sidebar_remove_marker_col(&short, None, true, 40);
-        let col_long = sidebar_remove_marker_col(&long, None, true, 40);
+        let col_short = sidebar_remove_marker_col(&short, None, true, 40, true);
+        let col_long = sidebar_remove_marker_col(&long, None, true, 40, true);
         assert_eq!(col_short, col_long);
         assert_eq!(col_short, Some(41));
     }
@@ -957,7 +985,7 @@ mod tests {
             is_worktree: true,
             worktree_name: None,
         };
-        assert_eq!(sidebar_remove_marker_col(&git, None, false, 40), None);
+        assert_eq!(sidebar_remove_marker_col(&git, None, false, 40, true), None);
     }
 
     #[test]
@@ -970,7 +998,7 @@ mod tests {
             is_worktree: false,
             worktree_name: None,
         };
-        assert_eq!(sidebar_remove_marker_col(&git, None, true, 40), None);
+        assert_eq!(sidebar_remove_marker_col(&git, None, true, 40, true), None);
     }
 
     #[test]
@@ -989,7 +1017,7 @@ mod tests {
         };
         let ports = [3000u16];
         let line =
-            branch_ports_row(&git, Some(&ports), true, &ctx).expect("branch row should render");
+            branch_ports_row(&git, Some(&ports), true, true, &ctx).expect("branch row should render");
         let text = line_text(&line);
         assert_eq!(
             rendered_x_col(&text),
@@ -1018,7 +1046,7 @@ mod tests {
             is_worktree: false,
             worktree_name: None,
         };
-        let line = branch_ports_row(&git, None, true, &ctx).expect("branch row should render");
+        let line = branch_ports_row(&git, None, true, true, &ctx).expect("branch row should render");
         let text = line_text(&line);
         assert!(text.contains("main"));
         assert!(!text.contains('×'));
@@ -1055,6 +1083,7 @@ mod tests {
             &theme,
             0,
             0,
+            true
         );
 
         // Every inner (non-marker) span on the status line must carry the selection bg.
@@ -1086,6 +1115,7 @@ mod tests {
             &theme,
             0,
             0,
+            true
         );
 
         assert!(
@@ -1114,6 +1144,7 @@ mod tests {
             &theme,
             0,
             0,
+            true
         );
 
         // The status row (line 0) must start with the SELECTION_MARKER in the
