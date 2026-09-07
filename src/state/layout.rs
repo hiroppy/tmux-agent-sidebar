@@ -24,6 +24,17 @@ pub struct SpawnRemoveTarget {
     pub pane_id: String,
 }
 
+/// Click target for a visible file row rendered in the Git bottom tab.
+#[derive(Debug, Clone)]
+pub struct GitFileTarget {
+    /// Screen rectangle containing the clickable file name.
+    pub rect: ratatui::layout::Rect,
+    /// Repository root used as the command working directory.
+    pub repo_root: String,
+    /// Repository-relative file path to open.
+    pub file_path: String,
+}
+
 /// Screen-positioned hyperlink overlay for OSC 8 terminal hyperlinks.
 #[derive(Debug, Clone)]
 pub struct HyperlinkOverlay {
@@ -58,6 +69,8 @@ pub struct FrameLayout {
     /// Click regions for the red `×` remove marker rendered next to the
     /// branch of each sidebar-spawned pane. One entry per visible row.
     pub spawn_remove_targets: Vec<SpawnRemoveTarget>,
+    /// Click regions for visible Git tab file rows. Rebuilt every frame.
+    pub git_file_targets: Vec<GitFileTarget>,
     /// OSC 8 hyperlink overlays the main loop writes after each frame so
     /// terminals can recognise PR numbers as clickable links.
     pub hyperlink_overlays: Vec<HyperlinkOverlay>,
@@ -275,5 +288,68 @@ impl AppState {
             self.global.queue_cursor_save();
             self.activate_selected_pane();
         }
+    }
+
+    pub fn open_git_file_at(&mut self, row: u16, col: u16) -> bool {
+        self.open_git_file_at_with(row, col, crate::git_open::open_git_file)
+    }
+
+    pub(crate) fn open_git_file_at_with<F>(&mut self, row: u16, col: u16, opener: F) -> bool
+    where
+        F: FnOnce(&str, &str, &str) -> Result<(), String>,
+    {
+        let Some(target) = self
+            .layout
+            .git_file_targets
+            .iter()
+            .find(|target| point_in_rect(row, col, target.rect))
+            .cloned()
+        else {
+            return false;
+        };
+
+        match opener(&self.tmux_pane, &target.repo_root, &target.file_path) {
+            Ok(()) => true,
+            Err(err) => {
+                self.set_flash(format!("git open: {err}"));
+                false
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::layout::Rect;
+
+    #[test]
+    fn open_git_file_at_with_opener_uses_matching_file_target() {
+        let mut state = AppState::new("%sidebar".into());
+        state.layout.git_file_targets = vec![GitFileTarget {
+            rect: Rect::new(2, 5, 6, 1),
+            repo_root: "/repo".into(),
+            file_path: "src/lib.rs".into(),
+        }];
+        let mut opened = Vec::new();
+
+        let handled = state.open_git_file_at_with(5, 4, |sidebar_pane, repo_root, file_path| {
+            opened.push((
+                sidebar_pane.to_string(),
+                repo_root.to_string(),
+                file_path.to_string(),
+            ));
+            Ok(())
+        });
+
+        assert!(handled);
+        assert_eq!(
+            opened,
+            vec![(
+                "%sidebar".to_string(),
+                "/repo".to_string(),
+                "src/lib.rs".to_string(),
+            )]
+        );
     }
 }
