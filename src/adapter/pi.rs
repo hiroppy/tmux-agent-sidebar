@@ -36,6 +36,7 @@ fn normalize_tool_name(raw: &str) -> String {
         "write" => CanonicalTool::Write,
         "edit" => CanonicalTool::Edit,
         "powershell" => CanonicalTool::PowerShell,
+        "grep" => CanonicalTool::Grep,
         other => return other.to_string(),
     };
     canonical.as_str().to_string()
