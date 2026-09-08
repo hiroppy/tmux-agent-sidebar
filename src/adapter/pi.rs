@@ -276,7 +276,7 @@ mod tests {
     }
 
     #[test]
-    fn activity_log_passes_through_unmapped_tool_names() {
+    fn activity_log_normalizes_lowercase_grep() {
         let adapter = PiAdapter;
         let event = adapter
             .parse(
@@ -285,7 +285,22 @@ mod tests {
             )
             .unwrap();
         match event {
-            AgentEvent::ActivityLog { tool_name, .. } => assert_eq!(tool_name, "grep"),
+            AgentEvent::ActivityLog { tool_name, .. } => assert_eq!(tool_name, "Grep"),
+            other => panic!("expected ActivityLog, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn activity_log_passes_through_unmapped_tool_names() {
+        let adapter = PiAdapter;
+        let event = adapter
+            .parse(
+                "activity-log",
+                &json!({"tool_name": "find", "tool_input": {"pattern": "*.rs"}}),
+            )
+            .unwrap();
+        match event {
+            AgentEvent::ActivityLog { tool_name, .. } => assert_eq!(tool_name, "find"),
             other => panic!("expected ActivityLog, got {:?}", other),
         }
     }
