@@ -1,3 +1,4 @@
+use crate::cli::sanitize_tmux_query_value;
 use crate::tmux;
 
 use super::super::context::{append_subagent, drain_pending_teardowns, remove_subagent};
@@ -14,7 +15,7 @@ pub(in crate::cli::hook) fn on_subagent_start(
         return 0;
     };
     let current = tmux::get_pane_option_value(pane, tmux::PANE_SUBAGENTS);
-    let new_val = append_subagent(&current, agent_type, id);
+    let new_val = sanitize_tmux_query_value(&append_subagent(&current, agent_type, id));
     tmux::set_pane_option(pane, tmux::PANE_SUBAGENTS, &new_val);
     0
 }
@@ -31,6 +32,7 @@ pub(in crate::cli::hook) fn on_subagent_stop(pane: &str, agent_id: Option<&str>)
             true
         }
         Some(new_val) => {
+            let new_val = sanitize_tmux_query_value(&new_val);
             tmux::set_pane_option(pane, tmux::PANE_SUBAGENTS, &new_val);
             false
         }
@@ -72,6 +74,29 @@ mod tests {
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_SUBAGENTS).as_deref(),
             Some("Explore:sub-1,Plan:sub-2")
+        );
+    }
+
+    #[test]
+    fn on_subagent_start_sanitizes_raw_query_delimiter() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%SUB_SANITIZE";
+        on_subagent_start(pane, "Explore", Some("sub\x1f1"));
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_SUBAGENTS).as_deref(),
+            Some("Explore:sub 1")
+        );
+    }
+
+    #[test]
+    fn on_subagent_stop_sanitizes_rewritten_list() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%SUB_STOP_SANITIZE";
+        tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "Explore:sub-1,Plan:sub\x1f2");
+        on_subagent_stop(pane, Some("sub-1"));
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_SUBAGENTS).as_deref(),
+            Some("Plan:sub 2")
         );
     }
 
