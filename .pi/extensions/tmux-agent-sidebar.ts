@@ -18,12 +18,31 @@
 // no use of pi's ExtensionAPI types — it only needs `.ts` naming to match
 // pi's auto-discovery glob (`~/.pi/agent/extensions/*.ts`, `.pi/extensions/*.ts`).
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// pi loads extensions (via jiti) through a dynamic `import()` of whatever
+// path discovery found — for the documented global install that path is
+// the `~/.pi/agent/extensions/tmux-agent-sidebar.ts` symlink itself, and
+// `import.meta.url` reflects that symlink path verbatim rather than the
+// real file it points at (unlike a plain `node <path>` CLI invocation,
+// which does resolve symlinks for its entry module). Without realpath-ing
+// first, the walk-up below starts from the wrong directory tree entirely
+// (`~/.pi/agent/extensions/` instead of the plugin/repo root) and can
+// never find `hook.sh`, silently falling back to a bare `tmux-agent-sidebar`
+// command that usually isn't on PATH.
+const resolveSelfPath = () => {
+  const raw = fileURLToPath(import.meta.url);
+  try {
+    return realpathSync(raw);
+  } catch {
+    return raw;
+  }
+};
+
 const resolveHookScript = () => {
-  let dir = dirname(fileURLToPath(import.meta.url));
+  let dir = dirname(resolveSelfPath());
   for (let i = 0; i < 4; i += 1) {
     const candidate = resolve(dir, "hook.sh");
     if (existsSync(candidate)) {
