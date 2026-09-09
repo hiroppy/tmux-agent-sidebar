@@ -117,6 +117,13 @@ pub(crate) fn cmd_toggle(args: &[String]) -> i32 {
 
     if !sidebar_pane.is_empty() {
         tmux::set_pane_option(&sidebar_pane, tmux::PANE_ROLE, "sidebar");
+
+        // Sync sidebar widths across windows if enabled
+        let sync_on = tmux::get_option(tmux::SIDEBAR_SYNC_SIZE)
+            .is_some_and(|v| v.trim().eq_ignore_ascii_case("on"));
+        if sync_on {
+            sync_all_sidebar_widths(window_id, ReferenceSource::OtherWindow);
+        }
     }
 
     // Restore focus
@@ -346,6 +353,134 @@ fn pane_id_role_format() -> String {
     format!("#{{pane_id}}|#{{{}}}", tmux::PANE_ROLE)
 }
 
+/// Which sidebar to use as the reference width when syncing.
+#[derive(Clone, Copy)]
+pub(crate) enum ReferenceSource {
+    /// Use the first sidebar found in a window OTHER than the current one.
+    /// Correct for `cmd_toggle`: a newly created sidebar should match
+    /// the width already in use by other windows.
+    OtherWindow,
+    /// Use the sidebar in the CURRENT window as the reference.
+    /// Correct for `cmd_sync_size`: the user just resized this window's
+    /// sidebar (or switched here), so propagate ITS width outward.
+    CurrentWindow,
+}
+
+pub(crate) fn cmd_sync_size(args: &[String]) -> i32 {
+    let window_id = match args.first() {
+        Some(id) => id.as_str(),
+        None => return 0,
+    };
+
+    let sync_on = tmux::get_option(tmux::SIDEBAR_SYNC_SIZE)
+        .is_some_and(|v| v.trim().eq_ignore_ascii_case("on"));
+    if !sync_on {
+        return 0;
+    }
+
+    // sync-size hooks after window switch: use current window as reference
+    sync_all_sidebar_widths(window_id, ReferenceSource::CurrentWindow);
+    0
+}
+
+/// Sync all sidebar pane widths across all windows TO a common size.
+/// The reference width is determined by `source`.
+pub(crate) fn sync_all_sidebar_widths(current_window_id: &str, source: ReferenceSource) {
+    // Scope to this session only — avoid pulling in detached/other sessions
+    let session_id = tmux::display_message(current_window_id, "#{session_id}");
+    if session_id.is_empty() {
+        return;
+    }
+
+    let fmt = format!(
+        "#{{session_id}}|#{{window_id}}|#{{pane_id}}|#{{pane_width}}|#{{{}}}",
+        tmux::PANE_ROLE,
+    );
+    // list-panes -a returns from all sessions; we filter by session_id below
+    let output = match tmux::run_tmux(&["list-panes", "-a", "-F", &fmt]) {
+        Some(s) => s,
+        None => return,
+    };
+
+    let resizes = compute_sync_resizes(current_window_id, &session_id, &output, source);
+    for (pane_id, target_width) in &resizes {
+        let _ = tmux::run_tmux(&[
+            "resize-pane",
+            "-t",
+            pane_id,
+            "-x",
+            &target_width.to_string(),
+        ]);
+    }
+}
+
+/// Pure function: parse `list-panes -a` output and return (pane_id, target_width)
+/// pairs that need resizing. Only panes in `expected_session` are considered.
+/// `current_window_id` is excluded when building the reference (for `OtherWindow` source).
+fn compute_sync_resizes(
+    current_window_id: &str,
+    expected_session: &str,
+    list_panes_output: &str,
+    source: ReferenceSource,
+) -> Vec<(String, u32)> {
+    // Collect sidebar panes in this session: (window_id, pane_id, width)
+    let sidebars: Vec<(String, String, u32)> = list_panes_output
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.splitn(5, '|');
+            let session_id = parts.next()?;
+            // Only panes in the expected session
+            if session_id != expected_session {
+                return None;
+            }
+            let window_id = parts.next()?;
+            let pane_id = parts.next()?;
+            let width = parts.next()?.parse().ok()?;
+            let role = parts.next().unwrap_or("");
+            if role.trim() == "sidebar" {
+                Some((window_id.to_string(), pane_id.to_string(), width))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if sidebars.len() <= 1 {
+        return vec![];
+    }
+
+    // Reference width strategy depends on source
+    let Some(reference) = (match source {
+        // toggle: new sidebar → inherit from other windows
+        ReferenceSource::OtherWindow => sidebars
+            .iter()
+            .find(|(wid, _, _)| wid != current_window_id)
+            .map(|(_, _, w)| *w)
+            .or_else(|| sidebars.first().map(|(_, _, w)| *w)),
+        // sync-size: propagating FROM current window → use its sidebar
+        ReferenceSource::CurrentWindow => sidebars
+            .iter()
+            .find(|(wid, _, _)| wid == current_window_id)
+            .map(|(_, _, w)| *w),
+        // No fallback: if the current window has no sidebar there is
+        // nothing to propagate — returning None lets this be a no-op.
+    }) else {
+        return vec![];
+    };
+
+    // Skip if all already match
+    if sidebars.iter().all(|(_, _, w)| *w == reference) {
+        return vec![];
+    }
+
+    // Return panes that need resizing to match reference
+    sidebars
+        .iter()
+        .filter(|(_, _, w)| *w != reference)
+        .map(|(_, pid, _)| (pid.clone(), reference))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -524,5 +659,132 @@ mod tests {
         // pane than to destroy a live workspace.
         assert!(!should_kill_window(Some("sidebar"), None, Some(1)));
         assert!(!should_kill_window(Some("sidebar"), Some(0), Some(1)));
+    }
+
+    // ─── sync-size ────────────────────────────────────────────────────
+
+    #[test]
+    fn sync_resizes_returns_empty_when_only_one_sidebar() {
+        let resizes = compute_sync_resizes(
+            "@1",
+            "s1",
+            "s1|@1|%1|35|sidebar",
+            ReferenceSource::OtherWindow,
+        );
+        assert!(resizes.is_empty());
+    }
+
+    #[test]
+    fn sync_resizes_returns_empty_when_none_are_sidebars() {
+        let resizes =
+            compute_sync_resizes("@1", "s1", "s1|@1|%1|35|main", ReferenceSource::OtherWindow);
+        assert!(resizes.is_empty());
+    }
+
+    #[test]
+    fn sync_resizes_returns_empty_when_all_same_width() {
+        let output = "s1|@1|%1|35|sidebar\ns1|@2|%2|35|sidebar";
+        let resizes = compute_sync_resizes("@1", "s1", output, ReferenceSource::OtherWindow);
+        assert!(resizes.is_empty());
+    }
+
+    #[test]
+    fn sync_resizes_uses_other_window_width_as_reference() {
+        let output = "s1|@1|%1|35|sidebar\ns1|@2|%2|50|sidebar";
+        let resizes = compute_sync_resizes("@1", "s1", output, ReferenceSource::OtherWindow);
+        assert_eq!(resizes.len(), 1);
+        assert_eq!(resizes[0], ("%1".to_string(), 50));
+    }
+
+    #[test]
+    fn sync_resizes_multi_window_resizes_others_to_reference() {
+        let output = "s1|@1|%1|50|sidebar\ns1|@2|%2|35|sidebar\ns1|@3|%3|35|sidebar";
+        let resizes = compute_sync_resizes("@1", "s1", output, ReferenceSource::OtherWindow);
+        assert_eq!(resizes.len(), 1);
+        assert_eq!(resizes[0], ("%1".to_string(), 35));
+    }
+
+    #[test]
+    fn sync_resizes_all_in_current_window_falls_back_to_first() {
+        // All sidebars in @1 → no "other" window, fallback to first (35)
+        let output = "s1|@1|%1|35|sidebar\ns1|@1|%2|50|sidebar";
+        let resizes = compute_sync_resizes("@1", "s1", output, ReferenceSource::OtherWindow);
+        assert_eq!(resizes.len(), 1);
+        assert_eq!(resizes[0], ("%2".to_string(), 35));
+    }
+
+    #[test]
+    fn sync_resizes_skips_malformed_lines() {
+        let output = "s1|@1|%1|35|sidebar\nbad-line\ns1|@2|%2|50|sidebar";
+        let resizes = compute_sync_resizes("@1", "s1", output, ReferenceSource::OtherWindow);
+        assert_eq!(resizes.len(), 1);
+        assert_eq!(resizes[0], ("%1".to_string(), 50));
+    }
+
+    #[test]
+    fn sync_resizes_ignores_non_sidebar_role() {
+        let output = "s1|@1|%1|35|sidebar\ns1|@2|%2|50|main\ns1|@3|%3|60|sidebar";
+        let resizes = compute_sync_resizes("@1", "s1", output, ReferenceSource::OtherWindow);
+        assert_eq!(resizes.len(), 1);
+        assert_eq!(resizes[0], ("%1".to_string(), 60));
+    }
+
+    // ─── CurrentWindow source ──────────────────────────────────────────
+
+    #[test]
+    fn sync_current_window_uses_own_sidebar_as_reference() {
+        // Current window @1 has sidebar at 50 → propagate 50 to @2
+        let output = "s1|@1|%1|50|sidebar\ns1|@2|%2|35|sidebar";
+        let resizes = compute_sync_resizes("@1", "s1", output, ReferenceSource::CurrentWindow);
+        assert_eq!(resizes.len(), 1);
+        assert_eq!(resizes[0], ("%2".to_string(), 50));
+    }
+
+    #[test]
+    fn sync_current_window_no_sidebar_returns_empty() {
+        // Current window @1 has no sidebar, others have 2+ with different widths —
+        // no fallback, no-op because there is no valid "current window width"
+        let output = "s1|@2|%2|35|sidebar\ns1|@3|%3|50|sidebar";
+        let resizes = compute_sync_resizes("@1", "s1", output, ReferenceSource::CurrentWindow);
+        assert!(
+            resizes.is_empty(),
+            "current window has no sidebar, nothing to propagate"
+        );
+    }
+
+    #[test]
+    fn sync_current_window_propagates_to_multiple_others() {
+        // @1 (60) is reference, @2 (35) and @3 (50) both need resizing
+        let output = "s1|@1|%1|60|sidebar\ns1|@2|%2|35|sidebar\ns1|@3|%3|50|sidebar";
+        let resizes = compute_sync_resizes("@1", "s1", output, ReferenceSource::CurrentWindow);
+        assert_eq!(resizes.len(), 2);
+        assert!(resizes.contains(&("%2".to_string(), 60)));
+        assert!(resizes.contains(&("%3".to_string(), 60)));
+    }
+
+    #[test]
+    fn sync_other_window_propagates_to_all_mismatched() {
+        // @1 current, first other @2 (35) = reference, both @1 (60) and @3 (50) mismatch
+        let output = "s1|@1|%1|60|sidebar\ns1|@2|%2|35|sidebar\ns1|@3|%3|50|sidebar";
+        let resizes = compute_sync_resizes("@1", "s1", output, ReferenceSource::OtherWindow);
+        assert_eq!(resizes.len(), 2);
+        assert!(resizes.contains(&("%1".to_string(), 35)));
+        assert!(resizes.contains(&("%3".to_string(), 35)));
+    }
+
+    #[test]
+    fn sync_ignores_panes_from_other_session() {
+        // s2's sidebar should be ignored — only s1 panes considered
+        let output = "s1|@1|%1|35|sidebar\ns2|@1|%2|50|sidebar";
+        let resizes = compute_sync_resizes("@1", "s1", output, ReferenceSource::OtherWindow);
+        assert!(resizes.is_empty(), "only one sidebar in session s1");
+    }
+
+    #[test]
+    fn sync_ignores_panes_from_other_session_cross_session() {
+        // s1: @1 sidebar 35, s2: @2 sidebar 50. Only s1 counted → alone → empty
+        let output = "s1|@1|%1|35|sidebar\ns2|@2|%2|50|sidebar";
+        let resizes = compute_sync_resizes("@1", "s1", output, ReferenceSource::OtherWindow);
+        assert!(resizes.is_empty(), "only one sidebar in session s1");
     }
 }
