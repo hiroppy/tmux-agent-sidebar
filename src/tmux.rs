@@ -6,7 +6,7 @@ mod types;
 
 pub use commands::{
     display_message, kill_window, new_window, pane_session_name, run_tmux, run_tmux_capture,
-    select_pane, send_command, set_window_option,
+    select_pane, send_command, set_window_option, unset_window_option,
 };
 pub use options::{
     BG_CMD_PLACEHOLDER, PANE_AGENT, PANE_ATTENTION, PANE_BG_CMD, PANE_CWD, PANE_NAME,
@@ -28,8 +28,8 @@ pub use options::{
     SIDEBAR_ICON_BACKGROUND, SIDEBAR_ICON_ERROR, SIDEBAR_ICON_IDLE, SIDEBAR_ICON_RUNNING,
     SIDEBAR_ICON_UNKNOWN, SIDEBAR_ICON_WAITING, SIDEBAR_NOTIFICATIONS,
     SIDEBAR_NOTIFICATIONS_EVENTS, SIDEBAR_PET, SIDEBAR_PID, SIDEBAR_POSITION, SIDEBAR_REPO_FILTER,
-    SIDEBAR_WIDTH, get_all_global_options, get_option, get_pane_option_value, set_pane_option,
-    unset_pane_option,
+    SIDEBAR_SAVED_LAYOUT, SIDEBAR_WIDTH, get_all_global_options, get_option, get_pane_option_value,
+    set_pane_option, unset_pane_option,
 };
 pub use panes::{
     find_active_pane, focused_pane_path, get_pane_path, get_sidebar_pane_info,
