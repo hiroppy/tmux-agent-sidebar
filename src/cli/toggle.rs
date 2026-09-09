@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use crate::sidebar_width::{SidebarWidth, parse_sidebar_width, resolve_percent_width};
 use crate::tmux;
 
 pub(crate) fn cmd_toggle(args: &[String]) -> i32 {
@@ -26,26 +27,18 @@ pub(crate) fn cmd_toggle(args: &[String]) -> i32 {
         if s.is_empty() { "30".to_string() } else { s }
     };
 
-    let sidebar_width = if sidebar_width_setting.ends_with('%') {
-        let window_width: u32 = tmux::display_message(window_id, "#{window_width}")
-            .parse()
-            .unwrap_or(0);
-        let pct: u32 = sidebar_width_setting
-            .trim_end_matches('%')
-            .parse()
-            .unwrap_or(15);
-        if window_width > 0 && pct > 0 {
-            let w = window_width * pct / 100;
-            if w < 1 {
-                "1".to_string()
-            } else {
-                w.to_string()
-            }
-        } else {
-            sidebar_width_setting
+    let (parsed_width, width_warning) = parse_sidebar_width(&sidebar_width_setting);
+    if let Some(warning) = width_warning {
+        let _ = tmux::run_tmux(&["display-message", &format!("agent-sidebar: {warning}")]);
+    }
+    let sidebar_width = match parsed_width {
+        SidebarWidth::Columns(columns) => columns,
+        SidebarWidth::Percent { pct, min, max } => {
+            let window_width: u32 = tmux::display_message(window_id, "#{window_width}")
+                .parse()
+                .unwrap_or(0);
+            resolve_percent_width(window_width, pct, min, max)
         }
-    } else {
-        sidebar_width_setting
     };
 
     let sidebar_position = SidebarPosition::from_setting(&tmux::display_message(
