@@ -2412,3 +2412,85 @@ fn snapshot_background_long_command_truncates_with_ellipsis() {
     ╰──────────────────────────╯
     ");
 }
+
+// ─── @sidebar_sort: flat "started" vs grouped "repo" ───────────────
+
+/// Two repo groups whose sessions' start times interleave across the
+/// groups, so `repo` (grouped, alphabetical) and `started` (flat,
+/// oldest-first) produce visibly different orders.
+fn sorted_mode_state() -> tmux_agent_sidebar::state::AppState {
+    // `age_secs` before the fixed "now" only feeds the rendered age column
+    // (that column reflects the per-run `started_at`, kept readable here). The
+    // sort key is the session start time in `sessions.names`, set below — a
+    // larger age means the session started earlier.
+    let mk = |id: &str, sid: &str, name: &str, age_secs: u64| {
+        let mut p = make_pane(AgentType::Claude, PaneStatus::Idle);
+        p.pane_id = id.into();
+        p.pane_active = false;
+        p.session_id = Some(sid.into());
+        p.session_name = name.into();
+        p.started_at = Some(FIXED_NOW - age_secs);
+        p
+    };
+    let mut state = make_state(vec![]);
+    state.focus_state.focused_pane_id = None;
+    // Hide the bottom panel so the whole frame is the agent list.
+    state.bottom_panel_height = 0;
+    state.repo_groups = vec![
+        make_repo_group("alpha", vec![mk("%5", "s5", "sess-late", 100)]),
+        make_repo_group(
+            "beta",
+            vec![
+                mk("%6", "s6", "sess-early", 300),
+                mk("%7", "s7", "sess-mid", 200),
+            ],
+        ),
+    ];
+    // Session start times (the real sort key): early < mid < late.
+    let started = |ms: u64| tmux_agent_sidebar::session::SessionMeta {
+        name: String::new(),
+        started_at_ms: Some(ms),
+    };
+    state.sessions.names.insert("s6".into(), started(1000)); // sess-early
+    state.sessions.names.insert("s7".into(), started(2000)); // sess-mid
+    state.sessions.names.insert("s5".into(), started(3000)); // sess-late
+    state
+}
+
+#[test]
+fn snapshot_sort_started_is_flat_oldest_first() {
+    let mut state = sorted_mode_state();
+    state.sort_mode = tmux_agent_sidebar::ui::SortMode::Started;
+    state.rebuild_row_targets();
+    let output = render_to_string(&mut state, 28, 12);
+    insta::assert_snapshot!(output, @"
+     ≡3  ●0  ◎0  ◐0  ○3  ✕0
+    ⓘ                        — ▾
+      ○ sess-early          5m0s
+        Waiting for prompt…
+      ○ sess-mid           3m20s
+        Waiting for prompt…
+      ○ sess-late          1m40s
+        Waiting for prompt…
+    ");
+}
+
+#[test]
+fn snapshot_sort_repo_keeps_group_headers() {
+    let mut state = sorted_mode_state();
+    // Default sort mode is Repo.
+    state.rebuild_row_targets();
+    let output = render_to_string(&mut state, 28, 12);
+    insta::assert_snapshot!(output, @"
+     ≡3  ●0  ◎0  ◐0  ○3  ✕0
+    ⓘ                        — ▾
+    alpha
+      ○ sess-late          1m40s
+        Waiting for prompt…
+    beta
+      ○ sess-early          5m0s
+        Waiting for prompt…
+      ○ sess-mid           3m20s
+        Waiting for prompt…
+    ");
+}

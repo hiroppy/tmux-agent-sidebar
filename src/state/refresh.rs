@@ -175,9 +175,9 @@ impl AppState {
         for group in &mut self.repo_groups {
             for (pane, _) in &mut group.panes {
                 if let Some(sid) = &pane.session_id
-                    && let Some(name) = self.sessions.names.get(sid)
+                    && let Some(meta) = self.sessions.names.get(sid)
                 {
-                    pane.session_name.clone_from(name);
+                    pane.session_name.clone_from(&meta.name);
                 } else {
                     pane.session_name.clear();
                 }
@@ -853,8 +853,20 @@ mod tests {
             pane_with_session("%1", "sess-a"),
             pane_with_session("%2", "sess-b"),
         ]);
-        state.sessions.names.insert("sess-a".into(), "alpha".into());
-        state.sessions.names.insert("sess-b".into(), "beta".into());
+        state.sessions.names.insert(
+            "sess-a".into(),
+            crate::session::SessionMeta {
+                name: "alpha".into(),
+                started_at_ms: None,
+            },
+        );
+        state.sessions.names.insert(
+            "sess-b".into(),
+            crate::session::SessionMeta {
+                name: "beta".into(),
+                started_at_ms: None,
+            },
+        );
 
         state.refresh_session_names();
 
@@ -927,7 +939,13 @@ mod tests {
         // to a known session.
         let mut state = state_with_panes(vec![test_pane("%1")]);
         state.repo_groups[0].panes[0].0.session_name = "stray".into();
-        state.sessions.names.insert("sess-a".into(), "alpha".into());
+        state.sessions.names.insert(
+            "sess-a".into(),
+            crate::session::SessionMeta {
+                name: "alpha".into(),
+                started_at_ms: None,
+            },
+        );
 
         state.refresh_session_names();
 

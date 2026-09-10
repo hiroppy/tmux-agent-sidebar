@@ -134,6 +134,9 @@ pub struct AppState {
     /// Whether the pet animation is drawn and ticked. Loaded once at startup
     /// from the `@sidebar_pet` tmux option. Defaults to `false`.
     pub pet_enabled: bool,
+    /// How the agent list is ordered. Loaded once at startup from the
+    /// `@sidebar_sort` tmux option. Defaults to [`SortMode::Repo`].
+    pub sort_mode: crate::ui::SortMode,
 }
 
 impl AppState {
@@ -181,6 +184,7 @@ impl AppState {
             bottom_panel_height: crate::ui::BOTTOM_PANEL_HEIGHT,
             sessions: SessionNamesState::new(),
             pet_enabled: false,
+            sort_mode: crate::ui::SortMode::Repo,
         };
         crate::state::pet::reseed_pet_idle_motion(&mut state);
         state
@@ -229,6 +233,90 @@ mod tests {
         let path = crate::activity::log_file_path(pane_id);
         fs::write(&path, contents).unwrap();
         path.to_string_lossy().into_owned()
+    }
+
+    /// Pane whose `session_id` is derived from its id (`%5` → `s5`), so tests
+    /// can wire a matching `sessions.names` start-time entry.
+    fn pane_with_session(id: &str) -> PaneInfo {
+        PaneInfo {
+            session_id: Some(format!("s{}", id.trim_start_matches('%'))),
+            ..test_pane(id)
+        }
+    }
+
+    /// Two repo groups whose sessions' start times interleave across groups,
+    /// plus one session with no known start time (no `sessions.names` entry).
+    /// Start times live in `sessions.names`, matching how the real sort key is
+    /// resolved (session `startedAt`, not the per-pane run timer).
+    fn state_with_start_times() -> AppState {
+        let mut state = AppState::new("%0".into());
+        state.repo_groups = vec![
+            RepoGroup {
+                name: "alpha".into(),
+                has_focus: false,
+                panes: vec![
+                    (pane_with_session("%5"), PaneGitInfo::default()),
+                    (pane_with_session("%6"), PaneGitInfo::default()),
+                ],
+            },
+            RepoGroup {
+                name: "beta".into(),
+                has_focus: false,
+                panes: vec![
+                    (pane_with_session("%7"), PaneGitInfo::default()),
+                    (pane_with_session("%8"), PaneGitInfo::default()),
+                ],
+            },
+        ];
+        let started = |ms: u64| crate::session::SessionMeta {
+            name: String::new(),
+            started_at_ms: Some(ms),
+        };
+        // %8 intentionally has no entry → unknown start time → sorts last.
+        state.sessions.names.insert("s5".into(), started(300));
+        state.sessions.names.insert("s6".into(), started(100));
+        state.sessions.names.insert("s7".into(), started(200));
+        state
+    }
+
+    #[test]
+    fn flat_started_order_sorts_oldest_first_across_groups() {
+        let state = state_with_start_times();
+        let order: Vec<&str> = state
+            .flat_started_order()
+            .into_iter()
+            .map(|(gi, pi)| state.repo_groups[gi].panes[pi].0.pane_id.as_str())
+            .collect();
+        // 100, 200, 300, then the unknown-start-time session last.
+        assert_eq!(order, vec!["%6", "%7", "%5", "%8"]);
+    }
+
+    #[test]
+    fn row_targets_follow_start_order_in_started_mode() {
+        let mut state = state_with_start_times();
+        state.sort_mode = crate::ui::SortMode::Started;
+        state.rebuild_row_targets();
+        let ids: Vec<&str> = state
+            .layout
+            .pane_row_targets
+            .iter()
+            .map(|t| t.pane_id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["%6", "%7", "%5", "%8"]);
+    }
+
+    #[test]
+    fn row_targets_keep_group_order_in_repo_mode() {
+        let mut state = state_with_start_times();
+        // Default sort mode is Repo.
+        state.rebuild_row_targets();
+        let ids: Vec<&str> = state
+            .layout
+            .pane_row_targets
+            .iter()
+            .map(|t| t.pane_id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["%5", "%6", "%7", "%8"]);
     }
 
     #[test]
