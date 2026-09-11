@@ -41,6 +41,12 @@ pub(crate) fn cmd_hook(args: &[String]) -> i32 {
 
 fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
     match event {
+        AgentEvent::ExecutionUpdate {
+            agent,
+            cwd,
+            session_id,
+            state,
+        } => handlers::on_execution_update(pane, &agent, &cwd, &session_id, &state),
         AgentEvent::SessionStart {
             agent,
             cwd,
@@ -178,5 +184,64 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
         } => handlers::on_teammate_idle(pane, &teammate_name, &idle_reason),
         AgentEvent::WorktreeCreate => 0,
         AgentEvent::WorktreeRemove { .. } => handlers::on_worktree_remove(pane),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tmux;
+    use serde_json::json;
+
+    #[test]
+    fn antigravity_execution_sequence_only_finishes_when_fully_idle() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%AGY_SEQUENCE";
+        let adapter = resolve_adapter("agy").unwrap();
+        let send = |fields: serde_json::Value| {
+            let mut input = json!({"conversationId":"c1","workspacePaths":["/repo"]});
+            input
+                .as_object_mut()
+                .unwrap()
+                .extend(fields.as_object().unwrap().clone());
+            handle_event(
+                pane,
+                "agy",
+                adapter.parse("execution-update", &input).unwrap(),
+            );
+        };
+        send(json!({"invocationNum":0}));
+        tmux::test_mock::set(pane, tmux::PANE_STARTED_AT, "123");
+        send(json!({"terminationReason":"model_stop","fullyIdle":false}));
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("running")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STARTED_AT).as_deref(),
+            Some("123")
+        );
+        assert!(!tmux::test_mock::contains(
+            pane,
+            tmux::PANE_OS_NOTIFY_TASK_COMPLETED
+        ));
+        send(json!({"terminationReason":"model_stop","fullyIdle":true}));
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("idle")
+        );
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_STARTED_AT));
+        send(json!({"invocationNum":0}));
+        assert!(tmux::test_mock::contains(pane, tmux::PANE_STARTED_AT));
+        send(json!({"terminationReason":"error","fullyIdle":true,"error":"quota exceeded"}));
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("error")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_WAIT_REASON).as_deref(),
+            Some("quota exceeded")
+        );
+        let _ = std::fs::remove_file(crate::activity::log_file_path(pane));
     }
 }

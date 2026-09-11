@@ -276,14 +276,20 @@ fn parse_pane_fields_with_processes(
     // is gone. Subsequent polls short-circuit at the `AgentType::from_label`
     // check above once `@pane_agent` has been cleared. Claude is excluded
     // because its SessionEnd hook drives cleanup instead.
-    if matches!(agent, AgentType::Codex | AgentType::OpenCode) && is_shell_command(current_command)
+    if matches!(
+        agent,
+        AgentType::Codex | AgentType::OpenCode | AgentType::Antigravity
+    ) && is_shell_command(current_command)
     {
-        let agent_still_alive = pane_pid
-            .and_then(|pid| {
-                process_snapshot.map(|snapshot| snapshot.tree_has_agent(&[pid], &agent))
-            })
-            .unwrap_or(false);
-        if !agent_still_alive {
+        let agent_still_alive = pane_pid.and_then(|pid| {
+            process_snapshot.map(|snapshot| snapshot.tree_has_agent(&[pid], &agent))
+        });
+        let should_clear = if agent == AgentType::Antigravity {
+            agent_still_alive == Some(false)
+        } else {
+            !agent_still_alive.unwrap_or(false)
+        };
+        if should_clear {
             clear_agent_pane_state(&parts[pane_line_field::PANE_ID]);
             return None;
         }
@@ -444,8 +450,12 @@ fn pane_output_needs_process_snapshot(all_panes_output: &str) -> bool {
             return false;
         }
         let pane_fields = &parts[session_line_field::PANE_LINE_OFFSET..];
-        AgentType::from_label(&pane_fields[pane_line_field::AGENT])
-            .is_some_and(|agent| matches!(agent, AgentType::Codex | AgentType::OpenCode))
+        AgentType::from_label(&pane_fields[pane_line_field::AGENT]).is_some_and(|agent| {
+            matches!(
+                agent,
+                AgentType::Codex | AgentType::OpenCode | AgentType::Antigravity
+            )
+        })
     })
 }
 
@@ -1027,6 +1037,53 @@ mod tests {
             Some("keep me"),
             "live OpenCode panes must not be swept just because tmux reports a shell"
         );
+    }
+
+    #[test]
+    fn antigravity_shell_pane_liveness_and_cleanup() {
+        let _guard = test_mock::install();
+        let pane = "%AGY_LIVENESS";
+        test_mock::set(pane, PANE_AGENT, "agy");
+        test_mock::set(pane, PANE_SESSION_ID, "c1");
+        let mut fields = full_fields();
+        fields[pane_line_field::PANE_ID] = pane;
+        fields[pane_line_field::AGENT] = "agy";
+        fields[pane_line_field::PANE_CURRENT_COMMAND] = "zsh";
+        fields[pane_line_field::PANE_PID] = "100";
+        let fields = field_strings(&fields);
+        let live = process_snapshot("100 1 zsh zsh\n101 100 /home/me/.local/bin/agy agy\n");
+        assert_eq!(
+            parse_pane_fields_with_processes(&fields, Some(&live))
+                .unwrap()
+                .agent,
+            AgentType::Antigravity
+        );
+        let exited = process_snapshot("100 1 zsh zsh\n101 100 other other agy\n");
+        assert!(parse_pane_fields_with_processes(&fields, Some(&exited)).is_none());
+        assert!(!test_mock::contains(pane, PANE_AGENT));
+        assert!(!test_mock::contains(pane, PANE_SESSION_ID));
+    }
+
+    #[test]
+    fn antigravity_shell_pane_preserves_metadata_when_liveness_is_unknown() {
+        let _guard = test_mock::install();
+        let pane = "%AGY_UNKNOWN_LIVENESS";
+        test_mock::set(pane, PANE_AGENT, "agy");
+        test_mock::set(pane, PANE_STATUS, "running");
+        test_mock::set(pane, PANE_SESSION_ID, "c1");
+        let mut fields = full_fields();
+        fields[pane_line_field::PANE_ID] = pane;
+        fields[pane_line_field::AGENT] = "agy";
+        fields[pane_line_field::PANE_CURRENT_COMMAND] = "zsh";
+        fields[pane_line_field::PANE_PID] = "not-a-pid";
+        let fields = field_strings(&fields);
+
+        let pane_info = parse_pane_fields_with_processes(&fields, None)
+            .expect("unknown Antigravity liveness must preserve the pane");
+
+        assert_eq!(pane_info.agent, AgentType::Antigravity);
+        assert!(test_mock::contains(pane, PANE_AGENT));
+        assert_eq!(test_mock::get(pane, PANE_SESSION_ID).as_deref(), Some("c1"));
     }
 
     #[test]

@@ -7,7 +7,7 @@ pub const AGENT_OPTION: &str = "@agent-sidebar-default-agent";
 pub const BRANCH_PREFIX_OPTION: &str = "@agent-sidebar-branch-prefix";
 pub const WORKTREE_DIR_OPTION: &str = "@agent-sidebar-worktree-dir";
 
-pub const AGENTS: &[&str] = &["claude", "codex", "opencode"];
+pub const AGENTS: &[&str] = &["claude", "codex", "opencode", "agy"];
 pub const CLAUDE_MODES: &[&str] = &[
     "default",
     "plan",
@@ -17,11 +17,13 @@ pub const CLAUDE_MODES: &[&str] = &[
 ];
 pub const CODEX_MODES: &[&str] = &["default", "auto", "bypassPermissions"];
 pub const OPENCODE_MODES: &[&str] = &["default"];
+pub const AGY_MODES: &[&str] = &["default"];
 
 pub fn modes_for(agent: &str) -> &'static [&'static str] {
     match agent {
         "codex" => CODEX_MODES,
         "opencode" => OPENCODE_MODES,
+        "agy" => AGY_MODES,
         _ => CLAUDE_MODES,
     }
 }

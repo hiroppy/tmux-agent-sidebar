@@ -1,11 +1,12 @@
 //! `setup` subcommand — prints required hooks and ready-to-paste config
-//! snippets for Claude Code and Codex as JSON on stdout. Pure generator:
+//! snippets for Claude Code, Codex, and Antigravity as JSON on stdout. Pure generator:
 //! reads only the adapter `HOOK_REGISTRATIONS` tables, never the user's
 //! config files.
 
 use std::path::PathBuf;
 
 use crate::adapter::HookRegistration;
+use crate::adapter::antigravity::AntigravityAdapter;
 use crate::adapter::claude::ClaudeAdapter;
 use crate::adapter::codex::CodexAdapter;
 
@@ -54,22 +55,47 @@ fn format_hook_command(hook_script: &str, agent: &str, event: &str) -> String {
     format!("bash {} {} {}", shell_quote(hook_script), agent, event)
 }
 
-/// Build the ready-to-paste `{ "hooks": { ... } }` JSON block for a single
-/// agent. Returns `None` for unknown agent names.
+fn antigravity_hook_command(hook_script: &str, reg: &HookRegistration) -> String {
+    let command = format_hook_command(hook_script, "agy", reg.kind.external_name());
+    let response = if reg.trigger == "Stop" {
+        "{\"decision\":\"stop\"}"
+    } else {
+        "{}"
+    };
+    // Observational hooks must always return valid JSON, even without tmux or the binary.
+    format!("{command} >/dev/null 2>&1; printf '%s\\n' '{response}'")
+}
+
+/// Build a ready-to-paste JSON hook block for a single agent. Antigravity
+/// uses a named hook set; Claude/Codex use `{ "hooks": { ... } }`.
+/// Returns `None` for unknown agent names.
 ///
 /// Reads **only** from the adapter's `HOOK_REGISTRATIONS` table and
 /// `AgentEventKind::external_name()` — no hook identity is duplicated here.
-/// When `HookRegistration.matcher` is `None`, the snippet uses the empty
-/// string `""` (matching Claude/Codex's "any tool" convention).
+/// An absent matcher means a direct handler array for Antigravity, or an
+/// empty matcher string for Claude/Codex's "any tool" convention.
 pub(crate) fn build_agent_snippet(agent: &str, hook_script: &str) -> Option<serde_json::Value> {
     let table: &[HookRegistration] = match agent {
         "claude" => ClaudeAdapter::HOOK_REGISTRATIONS,
         "codex" => CodexAdapter::HOOK_REGISTRATIONS,
+        "agy" => AntigravityAdapter::HOOK_REGISTRATIONS,
         _ => return None,
     };
 
     let mut hooks = serde_json::Map::new();
     for reg in table {
+        if agent == "agy" {
+            let action = serde_json::json!({
+                "type":"command", "command":antigravity_hook_command(hook_script, reg)
+            });
+            let entries = if let Some(matcher) = reg.matcher {
+                serde_json::json!([{"matcher":matcher,"hooks":[action]}])
+            } else {
+                serde_json::json!([action])
+            };
+            hooks.insert(reg.trigger.into(), entries);
+            continue;
+        }
         let matcher = reg.matcher.unwrap_or("");
         let command = format_hook_command(hook_script, agent, reg.kind.external_name());
         let entry = serde_json::json!({
@@ -86,7 +112,12 @@ pub(crate) fn build_agent_snippet(agent: &str, hook_script: &str) -> Option<serd
         arr.push(entry);
     }
 
-    Some(serde_json::json!({ "hooks": serde_json::Value::Object(hooks) }))
+    let key = if agent == "agy" {
+        "tmux-agent-sidebar"
+    } else {
+        "hooks"
+    };
+    Some(serde_json::json!({ key: serde_json::Value::Object(hooks) }))
 }
 
 #[allow(dead_code)]
@@ -104,7 +135,11 @@ fn normalize_matcher(value: Option<&serde_json::Value>) -> String {
 
 #[allow(dead_code)]
 fn collect_hook_specs(config: &serde_json::Value) -> Vec<HookSpec> {
-    let Some(hooks) = config.get("hooks").and_then(serde_json::Value::as_object) else {
+    let Some(hooks) = config
+        .get("hooks")
+        .or_else(|| config.get("tmux-agent-sidebar"))
+        .and_then(serde_json::Value::as_object)
+    else {
         return Vec::new();
     };
 
@@ -115,9 +150,11 @@ fn collect_hook_specs(config: &serde_json::Value) -> Vec<HookSpec> {
         };
         for entry in entries {
             let matcher = normalize_matcher(entry.get("matcher"));
-            let Some(actions) = entry.get("hooks").and_then(serde_json::Value::as_array) else {
-                continue;
-            };
+            let actions = entry
+                .get("hooks")
+                .and_then(serde_json::Value::as_array)
+                .map(Vec::as_slice)
+                .unwrap_or_else(|| std::slice::from_ref(entry));
             for action in actions {
                 if action.get("type").and_then(serde_json::Value::as_str) != Some("command") {
                     continue;
@@ -283,11 +320,18 @@ pub(crate) fn build_setup_output(hook_script: &str) -> serde_json::Value {
         CodexAdapter::HOOK_REGISTRATIONS,
         hook_script,
     );
+    let agy = build_agent_entry(
+        "agy",
+        "~/.gemini/antigravity-cli/plugins/tmux-agent-sidebar/hooks.json",
+        AntigravityAdapter::HOOK_REGISTRATIONS,
+        hook_script,
+    );
 
     serde_json::json!({
         "version": crate::VERSION,
         "hook_script": hook_script,
         "agents": {
+            "agy": agy,
             "claude": claude,
             "codex": codex,
         },
@@ -303,7 +347,11 @@ fn build_agent_entry(
     let hooks: Vec<serde_json::Value> = table
         .iter()
         .map(|reg| {
-            let command = format_hook_command(hook_script, agent, reg.kind.external_name());
+            let command = if agent == "agy" {
+                antigravity_hook_command(hook_script, reg)
+            } else {
+                format_hook_command(hook_script, agent, reg.kind.external_name())
+            };
             serde_json::json!({
                 "trigger": reg.trigger,
                 "matcher": match reg.matcher {
@@ -401,6 +449,7 @@ pub(crate) fn config_path_for_agent(agent: &str) -> Option<PathBuf> {
     match agent {
         "claude" => Some(home.join(".claude/settings.json")),
         "codex" => Some(home.join(".codex/hooks.json")),
+        "agy" => Some(home.join(".gemini/antigravity-cli/plugins/tmux-agent-sidebar/hooks.json")),
         _ => None,
     }
 }
@@ -431,14 +480,14 @@ fn run_setup(args: &[String], hook_script: &str) -> (i32, Option<serde_json::Val
             Some(snippet) => (0, Some(snippet)),
             None => {
                 eprintln!(
-                    "error: unknown agent '{}' (expected 'claude' or 'codex')",
+                    "error: unknown agent '{}' (expected 'claude', 'codex', or 'agy')",
                     args[0]
                 );
                 (2, None)
             }
         },
         _ => {
-            eprintln!("usage: tmux-agent-sidebar setup [claude|codex]");
+            eprintln!("usage: tmux-agent-sidebar setup [claude|codex|agy]");
             (2, None)
         }
     }

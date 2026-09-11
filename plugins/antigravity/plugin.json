@@ -1,0 +1,4 @@
+{
+  "name": "tmux-agent-sidebar",
+  "description": "Monitor Antigravity CLI agents in tmux: execution status and tool activity."
+}
