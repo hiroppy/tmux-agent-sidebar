@@ -70,3 +70,12 @@ The sidebar receives status updates through agent hooks — continue with the ag
 - [Claude Code setup](/tmux-agent-sidebar/getting-started/claude-code/)
 - [Codex setup](/tmux-agent-sidebar/getting-started/codex/)
 - [OpenCode setup](/tmux-agent-sidebar/getting-started/opencode/)
+- **Oh My Pi (OMP)** — link the bundled extension directory, then restart OMP:
+
+  ```sh
+  mkdir -p ~/.omp/agent/extensions
+  ln -sfn ~/.tmux/plugins/tmux-agent-sidebar/omp \
+    ~/.omp/agent/extensions/tmux-agent-sidebar
+  ```
+
+  Named OMP profiles use `~/.omp/profiles/<profile>/agent/extensions/` instead.

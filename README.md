@@ -1,6 +1,6 @@
 <h1 align="center">tmux-agent-sidebar</h1>
 
-<p align="center">One tmux sidebar that tracks every Claude Code, Codex, and OpenCode pane across every session and window. See status, background shells, prompts, Git state, activity, and worktrees without switching windows.</p>
+<p align="center">One tmux sidebar that tracks every Claude Code, Codex, OpenCode, and Oh My Pi (OMP) pane across every session and window. See status, background shells, prompts, Git state, activity, and worktrees without switching windows.</p>
 
 <p align="center"><img src="website/src/assets/captures/hero.png" alt="tmux-agent-sidebar hero" /></p>
 
@@ -13,7 +13,7 @@
 ## Features
 
 - **Every pane, one view** 
-  — tracks Claude Code, Codex, and OpenCode panes across all tmux sessions and windows
+  — tracks Claude Code, Codex, OpenCode, and OMP panes across all tmux sessions and windows
 - **Live metadata** 
   — prompts, tool calls, response previews, background shell state, wait reasons, task progress, and subagent trees refresh as the agents work
 - **Worktrees, included** 
@@ -21,7 +21,7 @@
 - **Desktop notifications** 
   — native alerts when an agent finishes, needs permission, or errors out
 
-OpenCode uses a small local plugin bridge instead of per-event hook config. The plugin lives at `.opencode/plugins/tmux-agent-sidebar.js` and can be symlinked as a single file into `~/.config/opencode/plugins/` so it coexists with any existing plugins.
+OpenCode and OMP use small local extension bridges instead of per-event hook config. The OpenCode bridge lives at `.opencode/plugins/tmux-agent-sidebar.js`; the OMP bridge lives at `omp/index.ts`. Each can be symlinked into the agent's global extension directory without replacing existing extensions.
 
 ## Requirements
 
@@ -57,6 +57,14 @@ Reload tmux (`tmux source ~/.tmux.conf`), then press `prefix + I`. The install w
   mkdir -p ~/.config/opencode/plugins
   ln -sf ~/.tmux/plugins/tmux-agent-sidebar/.opencode/plugins/tmux-agent-sidebar.js \
     ~/.config/opencode/plugins/tmux-agent-sidebar.js
+  ```
+
+- **Oh My Pi (OMP)** — symlink the bundled extension directory, then restart OMP:
+
+  ```sh
+  mkdir -p ~/.omp/agent/extensions
+  ln -sfn ~/.tmux/plugins/tmux-agent-sidebar/omp \
+    ~/.omp/agent/extensions/tmux-agent-sidebar
   ```
 
 Full walkthroughs: [Claude Code setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/claude-code/) · [Codex setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/codex/) · [OpenCode setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/opencode/)

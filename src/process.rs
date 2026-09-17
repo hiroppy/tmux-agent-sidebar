@@ -195,4 +195,17 @@ mod tests {
             "opencode",
         ));
     }
+
+    #[test]
+    fn omp_process_detection_matches_executable_basename_not_name_fragments() {
+        let exact = ProcessSnapshot::from_ps_output(
+            "100 1 zsh zsh\n101 100 node /opt/omp/bin/omp --model gpt\n",
+        );
+        assert!(exact.tree_has_agent(&[100], &AgentType::Omp));
+
+        let lookalike = ProcessSnapshot::from_ps_output(
+            "200 1 zsh zsh\n201 200 not-omp /opt/omp/bin/not-omp --model gpt\n",
+        );
+        assert!(!lookalike.tree_has_agent(&[200], &AgentType::Omp));
+    }
 }
