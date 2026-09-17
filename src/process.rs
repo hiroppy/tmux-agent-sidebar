@@ -98,6 +98,21 @@ impl ProcessSnapshot {
         })
     }
 
+    /// Return the first known agent binary found in the pane process tree.
+    pub(crate) fn detect_agent_in_tree(&self, seed_pids: &[u32]) -> Option<AgentType> {
+        for agent in [
+            AgentType::Claude,
+            AgentType::Codex,
+            AgentType::OpenCode,
+            AgentType::Pi,
+        ] {
+            if self.tree_has_agent(seed_pids, &agent) {
+                return Some(agent);
+            }
+        }
+        None
+    }
+
     pub(crate) fn command_lines_for_tree(&self, seed_pids: &[u32]) -> Vec<String> {
         self.descendants(seed_pids)
             .into_iter()
@@ -169,6 +184,14 @@ mod tests {
 
         assert!(snapshot.tree_has_agent(&[100], &AgentType::OpenCode));
         assert!(!snapshot.tree_has_agent(&[100], &AgentType::Codex));
+    }
+
+    #[test]
+    fn detect_agent_in_tree_prefers_first_match() {
+        let snapshot = ProcessSnapshot::from_ps_output(
+            "100 1 zsh zsh -c pi\n101 100 pi pi --mode rpc\n",
+        );
+        assert_eq!(snapshot.detect_agent_in_tree(&[100]), Some(AgentType::Pi));
     }
 
     #[test]
