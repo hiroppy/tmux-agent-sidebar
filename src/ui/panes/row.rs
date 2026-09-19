@@ -40,9 +40,17 @@ pub(super) fn render_pane_lines_with_ports(
     } else {
         None
     };
-    let apply_bg = |style: Style| match bg {
-        Some(c) => style.bg(c),
-        None => style,
+    // Under the theme-adaptive palette the selection is a reverse-video bar
+    // rather than a fixed-background fill (legible on light and dark alike).
+    let reversed = selected && theme.selection_reversed;
+    let apply_bg = |style: Style| {
+        if reversed {
+            return Style::default().add_modifier(ratatui::style::Modifier::REVERSED);
+        }
+        match bg {
+            Some(c) => style.bg(c),
+            None => style,
+        }
     };
     // The left marker `┃` highlights the pane that is currently focused in
     // tmux (`active`). To keep the active accent compact, it only appears on
@@ -60,6 +68,7 @@ pub(super) fn render_pane_lines_with_ports(
         inner_width: width.saturating_sub(2),
         theme,
         bg,
+        reversed,
         active,
     };
     let plain_ctx = RowCtx {
@@ -68,6 +77,7 @@ pub(super) fn render_pane_lines_with_ports(
         inner_width: width.saturating_sub(2),
         theme,
         bg: None,
+        reversed: false,
         active,
     };
 
@@ -151,6 +161,7 @@ mod tests {
             inner_width,
             theme,
             bg: None,
+            reversed: false,
             active,
         }
     }
