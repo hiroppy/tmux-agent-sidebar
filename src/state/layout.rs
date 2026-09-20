@@ -183,6 +183,15 @@ impl AppState {
     /// via line_to_row (adjusted for scroll offset) and activates that pane.
     /// Row 0 is the fixed filter bar, row 1+ maps to the scrollable agent list.
     pub fn handle_mouse_click(&mut self, row: u16, col: u16) {
+        if self.is_help_popup_open() {
+            if let Some(area) = self.help_popup_area()
+                && point_in_rect(row, col, area)
+            {
+                return;
+            }
+            self.close_help_popup();
+            return;
+        }
         if self.is_notices_popup_open() {
             if let Some(area) = self.notices_popup_area()
                 && point_in_rect(row, col, area)
