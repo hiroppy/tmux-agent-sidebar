@@ -118,13 +118,23 @@ pub fn query_sessions() -> Vec<SessionInfo> {
 
 pub(crate) fn query_sessions_with_process_snapshot() -> (Vec<SessionInfo>, Option<ProcessSnapshot>)
 {
+    query_sessions_impl(true)
+}
+
+pub(crate) fn query_sessions_without_process_snapshot() -> Vec<SessionInfo> {
+    query_sessions_impl(false).0
+}
+
+fn query_sessions_impl(scan_processes: bool) -> (Vec<SessionInfo>, Option<ProcessSnapshot>) {
     let pane_format = pane_format();
     let all_panes_output = match run_tmux(&["list-panes", "-a", "-F", &pane_format]) {
         Some(s) => s,
         None => return (vec![], None),
     };
 
-    let process_snapshot = process_snapshot_for_panes(&all_panes_output);
+    let process_snapshot = scan_processes
+        .then(|| process_snapshot_for_panes(&all_panes_output))
+        .flatten();
     let (mut sessions_map, codex_pids) =
         build_session_hierarchy(&all_panes_output, process_snapshot.as_ref());
     if !codex_pids.is_empty()

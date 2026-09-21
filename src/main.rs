@@ -2,7 +2,7 @@ use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crossterm::{
-    event::{DisableMouseCapture, EnableMouseCapture},
+    event::{DisableFocusChange, DisableMouseCapture, EnableFocusChange, EnableMouseCapture},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -18,7 +18,12 @@ struct TuiSession {
 impl TuiSession {
     fn enter(stdout: &mut io::Stdout) -> io::Result<Self> {
         enable_raw_mode()?;
-        if let Err(err) = execute!(stdout, EnterAlternateScreen, EnableMouseCapture) {
+        if let Err(err) = execute!(
+            stdout,
+            EnterAlternateScreen,
+            EnableMouseCapture,
+            EnableFocusChange
+        ) {
             let _ = disable_raw_mode();
             return Err(err);
         }
@@ -33,7 +38,12 @@ impl Drop for TuiSession {
         let _ = disable_raw_mode();
         if self.entered_alt_screen {
             let mut stdout = io::stdout();
-            let _ = execute!(stdout, LeaveAlternateScreen, DisableMouseCapture);
+            let _ = execute!(
+                stdout,
+                LeaveAlternateScreen,
+                DisableMouseCapture,
+                DisableFocusChange
+            );
         }
     }
 }

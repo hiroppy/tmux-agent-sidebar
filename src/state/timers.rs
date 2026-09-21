@@ -14,9 +14,13 @@ pub struct RefreshTimers {
     pub last_filter_click: Instant,
     /// Timestamp of the last port/command scan.
     pub last_port_refresh: Instant,
+    /// Timestamp of the last full-system process-tree scan.
+    pub last_process_refresh: Instant,
     /// Whether the first port scan has completed; the first scan must
     /// always run regardless of the elapsed-time gate.
     pub port_scan_initialized: bool,
+    /// Whether at least one process-tree scan has completed.
+    pub process_scan_initialized: bool,
     /// Timestamp of the last background-shell liveness sweep.
     pub last_bg_shell_sweep: Option<Instant>,
 }
@@ -27,7 +31,9 @@ impl Default for RefreshTimers {
         Self {
             last_filter_click: now,
             last_port_refresh: now,
+            last_process_refresh: now,
             port_scan_initialized: false,
+            process_scan_initialized: false,
             last_bg_shell_sweep: None,
         }
     }

@@ -5,8 +5,8 @@ mod query;
 mod types;
 
 pub use commands::{
-    display_message, kill_window, new_window, pane_session_name, run_tmux, run_tmux_capture,
-    select_pane, send_command, set_window_option,
+    display_message, kill_window, new_window, notify_other_sidebars, pane_session_name, run_tmux,
+    run_tmux_capture, select_pane, send_command, set_window_option,
 };
 pub use options::{
     BG_CMD_PLACEHOLDER, PANE_AGENT, PANE_ATTENTION, PANE_BG_CMD, PANE_CWD, PANE_NAME,
@@ -36,7 +36,9 @@ pub use panes::{
     query_active_window_panes,
 };
 pub use query::query_sessions;
-pub(crate) use query::query_sessions_with_process_snapshot;
+pub(crate) use query::{
+    query_sessions_with_process_snapshot, query_sessions_without_process_snapshot,
+};
 pub use types::{
     AgentType, CLAUDE_AGENT, CODEX_AGENT, OPENCODE_AGENT, PaneInfo, PaneStatus, PermissionMode,
     SessionInfo, WindowInfo, WorktreeMetadata,
