@@ -1,6 +1,6 @@
 /// Canonical tool-name vocabulary used across agents. Claude and Codex emit
-/// these PascalCase names natively; OpenCode's lowercase IDs are normalised to
-/// this vocabulary in `src/adapter/opencode.rs`. Keeping the list as an enum
+/// these PascalCase names natively; Grok and OpenCode IDs are normalised to
+/// this vocabulary in their adapters. Keeping the list as an enum
 /// means typos in adapters or the strategy table become compile errors rather
 /// than silently unmatched tools.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

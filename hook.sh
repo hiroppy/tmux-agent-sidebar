@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Thin wrapper: delegates to the Rust binary. Called by Claude Code /
-# Codex hooks (settings.json).
+# Thin wrapper: delegates to the Rust binary. Called by Claude Code,
+# Codex, and Grok hooks.
 #
 # Why this file exists even though `tmux-agent-sidebar setup` can emit
 # absolute binary paths:

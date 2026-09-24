@@ -7,7 +7,7 @@ pub const AGENT_OPTION: &str = "@agent-sidebar-default-agent";
 pub const BRANCH_PREFIX_OPTION: &str = "@agent-sidebar-branch-prefix";
 pub const WORKTREE_DIR_OPTION: &str = "@agent-sidebar-worktree-dir";
 
-pub const AGENTS: &[&str] = &["claude", "codex", "opencode"];
+pub const AGENTS: &[&str] = &["claude", "codex", "grok", "opencode"];
 pub const CLAUDE_MODES: &[&str] = &[
     "default",
     "plan",
@@ -16,11 +16,20 @@ pub const CLAUDE_MODES: &[&str] = &[
     "bypassPermissions",
 ];
 pub const CODEX_MODES: &[&str] = &["default", "auto", "bypassPermissions"];
+pub const GROK_MODES: &[&str] = &[
+    "default",
+    "plan",
+    "acceptEdits",
+    "auto",
+    "dontAsk",
+    "bypassPermissions",
+];
 pub const OPENCODE_MODES: &[&str] = &["default"];
 
 pub fn modes_for(agent: &str) -> &'static [&'static str] {
     match agent {
         "codex" => CODEX_MODES,
+        "grok" => GROK_MODES,
         "opencode" => OPENCODE_MODES,
         _ => CLAUDE_MODES,
     }
@@ -43,6 +52,11 @@ pub fn agent_command(agent: &str, mode: &str) -> String {
         ("codex", "auto") => "codex --full-auto".into(),
         ("codex", "bypassPermissions") => "codex --dangerously-bypass-approvals-and-sandbox".into(),
         ("codex", _) => "codex".into(),
+        ("grok", "" | "default") => "grok".into(),
+        ("grok", m @ ("plan" | "acceptEdits" | "auto" | "dontAsk" | "bypassPermissions")) => {
+            format!("grok --permission-mode {m}")
+        }
+        ("grok", _) => "grok".into(),
         ("opencode", _) => "opencode".into(),
         (a, _) => a.to_string(),
     }
@@ -69,6 +83,21 @@ mod tests {
     #[test]
     fn modes_for_codex_returns_codex_modes() {
         assert_eq!(modes_for("codex"), CODEX_MODES);
+    }
+
+    #[test]
+    fn modes_for_grok_returns_grok_modes() {
+        assert_eq!(
+            modes_for("grok"),
+            &[
+                "default",
+                "plan",
+                "acceptEdits",
+                "auto",
+                "dontAsk",
+                "bypassPermissions"
+            ]
+        );
     }
 
     #[test]
@@ -105,6 +134,18 @@ mod tests {
             agent_command("codex", "bypassPermissions"),
             "codex --dangerously-bypass-approvals-and-sandbox"
         );
+    }
+
+    #[test]
+    fn agent_command_grok_forwards_whitelisted_permission_modes() {
+        assert_eq!(agent_command("grok", ""), "grok");
+        assert_eq!(agent_command("grok", "default"), "grok");
+        assert_eq!(agent_command("grok", "plan"), "grok --permission-mode plan");
+        assert_eq!(
+            agent_command("grok", "bypassPermissions"),
+            "grok --permission-mode bypassPermissions"
+        );
+        assert_eq!(agent_command("grok", "stale-mode"), "grok");
     }
 
     #[test]

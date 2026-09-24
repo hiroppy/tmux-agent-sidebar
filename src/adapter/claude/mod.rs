@@ -2,7 +2,7 @@ use crate::event::{AgentEvent, AgentEventKind, EventAdapter, WorktreeInfo};
 use crate::tmux::CLAUDE_AGENT;
 use serde_json::Value;
 
-use super::{HookRegistration, json_str};
+use super::{HookRegistration, is_system_message, json_str};
 
 /// Parse optional worktree object from hook payload.
 /// Returns None if the "worktree" field is missing or not an object.
@@ -132,23 +132,35 @@ impl ClaudeAdapter {
 impl EventAdapter for ClaudeAdapter {
     fn parse(&self, event_name: &str, input: &Value) -> Option<AgentEvent> {
         match event_name {
-            "session-start" => Some(AgentEvent::SessionStart {
-                agent: CLAUDE_AGENT.into(),
-                cwd: json_str(input, "cwd").into(),
-                permission_mode: json_str(input, "permission_mode").into(),
-                source: json_str(input, "source").into(),
-                worktree: parse_worktree(input),
-                agent_id: optional_str(input, "agent_id"),
-                session_id: optional_str(input, "session_id"),
-            }),
+            "session-start" => {
+                let agent_id = optional_str(input, "agent_id");
+                Some(AgentEvent::SessionStart {
+                    agent: CLAUDE_AGENT.into(),
+                    cwd: json_str(input, "cwd").into(),
+                    permission_mode: json_str(input, "permission_mode").into(),
+                    source: json_str(input, "source").into(),
+                    // Claude supplies agent_id only when this hook runs inside a subagent.
+                    top_level: agent_id.is_none(),
+                    worktree: parse_worktree(input),
+                    agent_id,
+                    session_id: optional_str(input, "session_id"),
+                })
+            }
             "session-end" => Some(AgentEvent::SessionEnd {
+                agent: CLAUDE_AGENT.into(),
+                session_id: optional_str(input, "session_id"),
+                requires_existing_session: false,
                 end_reason: json_str(input, "end_reason").into(),
+                top_level: false,
             }),
             "user-prompt-submit" => Some(AgentEvent::UserPromptSubmit {
                 agent: CLAUDE_AGENT.into(),
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: json_str(input, "permission_mode").into(),
                 prompt: json_str(input, "prompt").into(),
+                prompt_is_system_message: is_system_message(json_str(input, "prompt")),
+                requires_existing_session: false,
+                prompt_id: None,
                 worktree: parse_worktree(input),
                 agent_id: optional_str(input, "agent_id"),
                 session_id: optional_str(input, "session_id"),
@@ -162,6 +174,7 @@ impl EventAdapter for ClaudeAdapter {
                     permission_mode: json_str(input, "permission_mode").into(),
                     wait_reason: wait_reason.into(),
                     meta_only,
+                    requires_existing_session: false,
                     worktree: parse_worktree(input),
                     agent_id: optional_str(input, "agent_id"),
                     session_id: optional_str(input, "session_id"),
@@ -173,6 +186,9 @@ impl EventAdapter for ClaudeAdapter {
                 permission_mode: json_str(input, "permission_mode").into(),
                 last_message: json_str(input, "last_assistant_message").into(),
                 response: None,
+                prompt_id: None,
+                requires_existing_session: false,
+                children_may_outlive_turn: false,
                 worktree: parse_worktree(input),
                 agent_id: optional_str(input, "agent_id"),
                 session_id: optional_str(input, "session_id"),
@@ -198,6 +214,8 @@ impl EventAdapter for ClaudeAdapter {
                     cwd: json_str(input, "cwd").into(),
                     permission_mode: json_str(input, "permission_mode").into(),
                     error: error.into(),
+                    prompt_id: None,
+                    requires_existing_session: false,
                     worktree: parse_worktree(input),
                     agent_id: optional_str(input, "agent_id"),
                     session_id: optional_str(input, "session_id"),
@@ -207,6 +225,7 @@ impl EventAdapter for ClaudeAdapter {
                 agent: CLAUDE_AGENT.into(),
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: json_str(input, "permission_mode").into(),
+                requires_existing_session: false,
                 worktree: parse_worktree(input),
                 agent_id: optional_str(input, "agent_id"),
                 session_id: optional_str(input, "session_id"),
@@ -223,8 +242,13 @@ impl EventAdapter for ClaudeAdapter {
                     return None;
                 }
                 Some(AgentEvent::SubagentStart {
+                    agent: CLAUDE_AGENT.into(),
+                    session_id: optional_str(input, "session_id"),
+                    requires_existing_session: false,
                     agent_type: agent_type.into(),
                     agent_id: optional_str(input, "agent_id"),
+                    display_name: None,
+                    children_may_outlive_turn: false,
                 })
             }
             "subagent-stop" => {
@@ -237,6 +261,7 @@ impl EventAdapter for ClaudeAdapter {
                     agent_id: optional_str(input, "agent_id"),
                     last_message: json_str(input, "last_assistant_message").into(),
                     transcript_path: json_str(input, "agent_transcript_path").into(),
+                    children_may_outlive_turn: false,
                 })
             }
             "activity-log" => {
@@ -245,6 +270,9 @@ impl EventAdapter for ClaudeAdapter {
                     return None;
                 }
                 Some(AgentEvent::ActivityLog {
+                    agent: CLAUDE_AGENT.into(),
+                    session_id: optional_str(input, "session_id"),
+                    requires_existing_session: false,
                     tool_name: tool_name.into(),
                     tool_input: parse_json_field(input, "tool_input"),
                     tool_response: parse_json_field(input, "tool_response"),

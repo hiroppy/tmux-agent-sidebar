@@ -1,14 +1,14 @@
 use ratatui::{style::Style, text::Span};
 
 use crate::state::{AppState, debug_forced_display};
-use crate::tmux::CODEX_AGENT;
+use crate::tmux::{CODEX_AGENT, GROK_AGENT};
 
 /// Width (in columns) reserved for the notices indicator button in the
 /// secondary header: the glyph plus a trailing space.
 pub(in crate::ui) const BUTTON_WIDTH: usize = 2;
 
 /// Whether the missing-hooks section should render a `[copy]` button
-/// next to `agent`. Only Codex qualifies — Claude's setup story is
+/// next to `agent`. Codex and Grok qualify; Claude's setup story is
 /// owned by the dedicated `Plugin / claude` section (which has its own
 /// `[prompt]` button), so adding a second clickable copy target on the
 /// Claude row would race with it and flip the shared `[copied]` feedback
@@ -17,7 +17,7 @@ pub(in crate::ui) const BUTTON_WIDTH: usize = 2;
 /// Kept as a pure check so layout calculations do not pay the cost of
 /// resolving the running binary path on every frame.
 pub(super) fn missing_hooks_has_copy_button(agent: &str) -> bool {
-    agent == CODEX_AGENT
+    matches!(agent, CODEX_AGENT | GROK_AGENT)
 }
 
 /// Whether the secondary header should show the notices indicator.
@@ -56,11 +56,12 @@ mod tests {
     }
 
     #[test]
-    fn missing_hooks_has_copy_button_only_for_codex() {
+    fn missing_hooks_has_copy_button_for_setup_based_agents() {
         // Claude is excluded because the Plugin / claude section owns
         // its own [prompt] button — leaving a [copy] on the Claude row
         // would race with it on the shared `[copied]` feedback state.
         assert!(missing_hooks_has_copy_button("codex"));
+        assert!(missing_hooks_has_copy_button("grok"));
         assert!(!missing_hooks_has_copy_button("claude"));
         assert!(!missing_hooks_has_copy_button("gemini"));
         assert!(!missing_hooks_has_copy_button(""));

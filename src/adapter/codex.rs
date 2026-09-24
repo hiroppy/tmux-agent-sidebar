@@ -2,7 +2,7 @@ use crate::event::{AgentEvent, AgentEventKind, EventAdapter};
 use crate::tmux::CODEX_AGENT;
 use serde_json::Value;
 
-use super::{HookRegistration, json_str, json_value_or_null, optional_str};
+use super::{HookRegistration, is_system_message, json_str, json_value_or_null, optional_str};
 
 pub struct CodexAdapter;
 
@@ -50,6 +50,7 @@ impl EventAdapter for CodexAdapter {
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: json_str(input, "permission_mode").into(),
                 source: json_str(input, "source").into(),
+                top_level: true,
                 worktree: None,
                 agent_id: None,
                 session_id: optional_str(input, "session_id"),
@@ -59,6 +60,9 @@ impl EventAdapter for CodexAdapter {
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: json_str(input, "permission_mode").into(),
                 prompt: json_str(input, "prompt").into(),
+                prompt_is_system_message: is_system_message(json_str(input, "prompt")),
+                requires_existing_session: false,
+                prompt_id: None,
                 worktree: None,
                 agent_id: None,
                 session_id: optional_str(input, "session_id"),
@@ -69,6 +73,9 @@ impl EventAdapter for CodexAdapter {
                 permission_mode: json_str(input, "permission_mode").into(),
                 last_message: json_str(input, "last_assistant_message").into(),
                 response: Some("{\"continue\":true}".into()),
+                prompt_id: None,
+                requires_existing_session: false,
+                children_may_outlive_turn: false,
                 worktree: None,
                 agent_id: None,
                 session_id: optional_str(input, "session_id"),
@@ -82,6 +89,9 @@ impl EventAdapter for CodexAdapter {
                     return None;
                 }
                 Some(AgentEvent::ActivityLog {
+                    agent: CODEX_AGENT.into(),
+                    session_id: optional_str(input, "session_id"),
+                    requires_existing_session: false,
                     tool_name: tool_name.into(),
                     tool_input: json_value_or_null(input, "tool_input"),
                     tool_response: json_value_or_null(input, "tool_response"),
@@ -114,6 +124,7 @@ mod tests {
                 cwd: "/home/user".into(),
                 permission_mode: "".into(),
                 source: "".into(),
+                top_level: true,
                 worktree: None,
                 agent_id: None,
                 session_id: Some("sess-codex-1".into()),
@@ -140,6 +151,9 @@ mod tests {
                 cwd: "/tmp".into(),
                 permission_mode: "".into(),
                 prompt: "hello".into(),
+                prompt_is_system_message: false,
+                requires_existing_session: false,
+                prompt_id: None,
                 worktree: None,
                 agent_id: None,
                 session_id: Some("sess-codex-2".into()),
@@ -164,6 +178,9 @@ mod tests {
                 permission_mode: "".into(),
                 last_message: "done".into(),
                 response: Some("{\"continue\":true}".into()),
+                prompt_id: None,
+                requires_existing_session: false,
+                children_may_outlive_turn: false,
                 worktree: None,
                 agent_id: None,
                 session_id: Some("sess-codex-3".into()),
@@ -269,6 +286,9 @@ mod tests {
                 permission_mode: "".into(),
                 last_message: "".into(),
                 response: Some("{\"continue\":true}".into()),
+                prompt_id: None,
+                requires_existing_session: false,
+                children_may_outlive_turn: false,
                 worktree: None,
                 agent_id: None,
                 session_id: None,
@@ -358,6 +378,7 @@ mod tests {
                 cwd: "".into(),
                 permission_mode: "".into(),
                 source: "".into(),
+                top_level: true,
                 worktree: None,
                 agent_id: None,
                 session_id: None,
