@@ -126,6 +126,16 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
                 &notifications,
             )
         }
+        AgentEvent::Interrupt {
+            agent,
+            cwd,
+            permission_mode,
+            worktree,
+            session_id,
+        } => handlers::on_interrupt(
+            pane,
+            &context::make_ctx(&agent, &cwd, &permission_mode, &worktree, &session_id),
+        ),
         AgentEvent::SubagentStart {
             agent_type,
             agent_id,

@@ -73,6 +73,14 @@ pub enum AgentEvent {
         agent_id: Option<String>,
         session_id: Option<String>,
     },
+    /// The user aborted the running turn (Codex `Interrupt`).
+    Interrupt {
+        agent: String,
+        cwd: String,
+        permission_mode: String,
+        worktree: Option<WorktreeInfo>,
+        session_id: Option<String>,
+    },
     SubagentStart {
         agent_type: String,
         agent_id: Option<String>,
@@ -131,6 +139,7 @@ impl AgentEvent {
             Self::Notification { .. } => AgentEventKind::Notification,
             Self::Stop { .. } => AgentEventKind::Stop,
             Self::StopFailure { .. } => AgentEventKind::StopFailure,
+            Self::Interrupt { .. } => AgentEventKind::Interrupt,
             Self::SubagentStart { .. } => AgentEventKind::SubagentStart,
             Self::SubagentStop { .. } => AgentEventKind::SubagentStop,
             Self::ActivityLog { .. } => AgentEventKind::ActivityLog,

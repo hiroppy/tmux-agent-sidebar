@@ -856,15 +856,66 @@ const EXPECTED_FULL_OUTPUT: &str = r#"{
           "event": "activity-log",
           "matcher": null,
           "trigger": "PostToolUse"
+        },
+        {
+          "command": "bash /fake/hook.sh codex notification",
+          "event": "notification",
+          "matcher": null,
+          "trigger": "PermissionRequest"
+        },
+        {
+          "command": "bash /fake/hook.sh codex session-end",
+          "event": "session-end",
+          "matcher": null,
+          "trigger": "SessionEnd"
+        },
+        {
+          "command": "bash /fake/hook.sh codex interrupt",
+          "event": "interrupt",
+          "matcher": null,
+          "trigger": "Interrupt"
         }
       ],
       "snippet": {
         "hooks": {
+          "Interrupt": [
+            {
+              "hooks": [
+                {
+                  "command": "bash /fake/hook.sh codex interrupt",
+                  "type": "command"
+                }
+              ],
+              "matcher": ""
+            }
+          ],
+          "PermissionRequest": [
+            {
+              "hooks": [
+                {
+                  "command": "bash /fake/hook.sh codex notification",
+                  "type": "command"
+                }
+              ],
+              "matcher": ""
+            }
+          ],
           "PostToolUse": [
             {
               "hooks": [
                 {
                   "command": "bash /fake/hook.sh codex activity-log",
+                  "type": "command"
+                }
+              ],
+              "matcher": ""
+            }
+          ],
+          "SessionEnd": [
+            {
+              "hooks": [
+                {
+                  "command": "bash /fake/hook.sh codex session-end",
                   "type": "command"
                 }
               ],

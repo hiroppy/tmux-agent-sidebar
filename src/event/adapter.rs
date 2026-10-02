@@ -117,7 +117,6 @@ mod tests {
     #[test]
     fn codex_ignores_claude_only_events() {
         let adapter = resolve_adapter("codex").unwrap();
-        assert!(adapter.parse("notification", &json!({})).is_none());
         assert!(adapter.parse("stop-failure", &json!({})).is_none());
         assert!(
             adapter
@@ -178,20 +177,16 @@ mod tests {
                 "{agent_name} should handle session-start"
             );
         }
-        // Codex does not fire SessionEnd, so only Claude handles it.
-        let claude = resolve_adapter("claude").unwrap();
-        assert_eq!(
-            claude.parse("session-end", &json!({})),
-            Some(AgentEvent::SessionEnd {
-                end_reason: "".into()
-            }),
-        );
-        assert!(
-            resolve_adapter("codex")
-                .unwrap()
-                .parse("session-end", &json!({}))
-                .is_none()
-        );
+        for agent_name in &["claude", "codex"] {
+            let adapter = resolve_adapter(agent_name).unwrap();
+            assert_eq!(
+                adapter.parse("session-end", &json!({})),
+                Some(AgentEvent::SessionEnd {
+                    end_reason: "".into()
+                }),
+                "{agent_name} should handle session-end"
+            );
+        }
     }
 
     #[test]

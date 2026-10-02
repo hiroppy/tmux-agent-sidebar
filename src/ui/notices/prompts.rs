@@ -37,8 +37,11 @@ pub(crate) fn prompt_for_agent(agent: &str) -> Option<String> {
                  codex_hooks = true\n\
                  \n\
                  Add these hooks to ~/.codex/hooks.json. If hooks already \
-                 exist, merge them without making destructive changes. Restart \
-                 Codex after changing config.toml so the feature flag takes effect."
+                 exist, merge them without making destructive changes: append \
+                 new groups after the existing ones, because Codex keys hook \
+                 trust by position. Restart Codex after changing config.toml so \
+                 the feature flag takes effect, and approve the new hooks when \
+                 Codex asks to trust them."
             ))
         }
         _ => None,

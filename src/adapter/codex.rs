@@ -8,16 +8,24 @@ pub struct CodexAdapter;
 
 impl CodexAdapter {
     /// Single source of truth for Codex CLI hook wiring. Verified against
-    /// Codex CLI's official hook event enum in
-    /// `openai/codex:codex-rs/hooks/src/engine/config.rs`, which currently
-    /// defines only: `PreToolUse`, `PostToolUse`, `SessionStart`,
-    /// `UserPromptSubmit`, `Stop`.
+    /// the hook input schemas in `openai/codex:codex-rs/hooks/src/schema.rs`
+    /// at `rust-v0.155.1`, which defines `PreToolUse`, `PermissionRequest`,
+    /// `PostToolUse`, `PreCompact`, `PostCompact`, `SessionStart`,
+    /// `SessionEnd`, `UserPromptSubmit`, `Stop`, `SubagentStart`,
+    /// `SubagentStop` and `Interrupt`.
     ///
     /// Caveats:
-    /// - `PostToolUse` fires only for Bash (Codex's `PostToolUseToolInput`
-    ///   is a typed `{ command: String }` struct); the resulting activity
-    ///   log is Bash-only.
-    /// - `PreToolUse` is supported by Codex but not yet wired.
+    /// - `PermissionRequest` runs before the approval UI. Our hook prints
+    ///   nothing and exits 0, which Codex treats as "no verdict", so the
+    ///   normal approval prompt still shows. Mapped to `Notification` so
+    ///   the pane lands in `waiting` until the next tool event.
+    /// - Subagent `UserPromptSubmit` events carry `agent_id` and are dropped
+    ///   so a child prompt cannot overwrite the parent's prompt preview.
+    /// - `Interrupt` fires when the user aborts a turn (never for subagents)
+    ///   and is the only signal that ends it: `Stop` does not follow. Its
+    ///   output schema rejects unknown fields, so the hook prints nothing.
+    /// - `PreToolUse`, the compact events and the subagent lifecycle events
+    ///   are supported by Codex but not yet wired.
     pub const HOOK_REGISTRATIONS: &'static [HookRegistration] = &[
         HookRegistration {
             trigger: "SessionStart",
@@ -39,6 +47,21 @@ impl CodexAdapter {
             matcher: None,
             kind: AgentEventKind::ActivityLog,
         },
+        HookRegistration {
+            trigger: "PermissionRequest",
+            matcher: None,
+            kind: AgentEventKind::Notification,
+        },
+        HookRegistration {
+            trigger: "SessionEnd",
+            matcher: None,
+            kind: AgentEventKind::SessionEnd,
+        },
+        HookRegistration {
+            trigger: "Interrupt",
+            matcher: None,
+            kind: AgentEventKind::Interrupt,
+        },
     ];
 }
 
@@ -54,6 +77,7 @@ impl EventAdapter for CodexAdapter {
                 agent_id: None,
                 session_id: optional_str(input, "session_id"),
             }),
+            "user-prompt-submit" if optional_str(input, "agent_id").is_some() => None,
             "user-prompt-submit" => Some(AgentEvent::UserPromptSubmit {
                 agent: CODEX_AGENT.into(),
                 cwd: json_str(input, "cwd").into(),
@@ -73,9 +97,26 @@ impl EventAdapter for CodexAdapter {
                 agent_id: None,
                 session_id: optional_str(input, "session_id"),
             }),
-            // Codex's PostToolUse currently fires only for Bash (tool_input is
-            // typed `{ command: String }`). Other tools do not emit the hook,
-            // so the resulting activity log is Bash-only.
+            "notification" => Some(AgentEvent::Notification {
+                agent: CODEX_AGENT.into(),
+                cwd: json_str(input, "cwd").into(),
+                permission_mode: json_str(input, "permission_mode").into(),
+                wait_reason: "permission_prompt".into(),
+                meta_only: false,
+                worktree: None,
+                agent_id: optional_str(input, "agent_id"),
+                session_id: optional_str(input, "session_id"),
+            }),
+            "interrupt" => Some(AgentEvent::Interrupt {
+                agent: CODEX_AGENT.into(),
+                cwd: json_str(input, "cwd").into(),
+                permission_mode: json_str(input, "permission_mode").into(),
+                worktree: None,
+                session_id: optional_str(input, "session_id"),
+            }),
+            "session-end" => Some(AgentEvent::SessionEnd {
+                end_reason: json_str(input, "reason").into(),
+            }),
             "activity-log" => {
                 let tool_name = json_str(input, "tool_name");
                 if tool_name.is_empty() {
@@ -122,10 +163,43 @@ mod tests {
     }
 
     #[test]
-    fn session_end_not_supported() {
-        // Codex CLI does not fire SessionEnd (verified against
-        // openai/codex:codex-rs/hooks/src/engine/config.rs).
-        assert!(CodexAdapter.parse("session-end", &json!({})).is_none());
+    fn session_end_carries_reason() {
+        let input = json!({
+            "hook_event_name": "SessionEnd",
+            "session_id": "sess-codex-9",
+            "cwd": "/tmp",
+            "transcript_path": null,
+            "reason": "other",
+        });
+        assert_eq!(
+            CodexAdapter.parse("session-end", &input),
+            Some(AgentEvent::SessionEnd {
+                end_reason: "other".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn interrupt_ends_the_turn() {
+        let input = json!({
+            "hook_event_name": "Interrupt",
+            "session_id": "sess-codex-7",
+            "turn_id": "turn-3",
+            "transcript_path": null,
+            "cwd": "/tmp",
+            "model": "gpt-5.5",
+            "permission_mode": "default",
+        });
+        assert_eq!(
+            CodexAdapter.parse("interrupt", &input),
+            Some(AgentEvent::Interrupt {
+                agent: CODEX_AGENT.into(),
+                cwd: "/tmp".into(),
+                permission_mode: "default".into(),
+                worktree: None,
+                session_id: Some("sess-codex-7".into()),
+            })
+        );
     }
 
     #[test]
@@ -204,9 +278,46 @@ mod tests {
         }
     }
 
+    /// PermissionRequest payload shape from
+    /// `codex-rs/hooks/schema/generated/permission-request.command.input.schema.json`.
     #[test]
-    fn notification_not_supported() {
-        assert!(CodexAdapter.parse("notification", &json!({})).is_none());
+    fn permission_request_maps_to_permission_prompt_notification() {
+        let input = json!({
+            "hook_event_name": "PermissionRequest",
+            "session_id": "sess-codex-4",
+            "turn_id": "turn-7",
+            "cwd": "/repo",
+            "transcript_path": null,
+            "model": "gpt-5.5",
+            "permission_mode": "default",
+            "tool_name": "Bash",
+            "tool_input": {"command": "rm -rf build"},
+        });
+        assert_eq!(
+            CodexAdapter.parse("notification", &input),
+            Some(AgentEvent::Notification {
+                agent: CODEX_AGENT.into(),
+                cwd: "/repo".into(),
+                permission_mode: "default".into(),
+                wait_reason: "permission_prompt".into(),
+                meta_only: false,
+                worktree: None,
+                agent_id: None,
+                session_id: Some("sess-codex-4".into()),
+            })
+        );
+    }
+
+    #[test]
+    fn subagent_user_prompt_submit_is_dropped() {
+        let input = json!({
+            "cwd": "/tmp",
+            "prompt": "child task",
+            "session_id": "sess-codex-5",
+            "agent_id": "agent-1",
+            "agent_type": "worker",
+        });
+        assert!(CodexAdapter.parse("user-prompt-submit", &input).is_none());
     }
 
     #[test]

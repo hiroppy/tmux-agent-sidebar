@@ -10,6 +10,7 @@ pub enum AgentEventKind {
     Notification,
     Stop,
     StopFailure,
+    Interrupt,
     PermissionDenied,
     CwdChanged,
     SubagentStart,
@@ -33,6 +34,7 @@ impl AgentEventKind {
         Self::Notification,
         Self::Stop,
         Self::StopFailure,
+        Self::Interrupt,
         Self::PermissionDenied,
         Self::CwdChanged,
         Self::SubagentStart,
@@ -56,6 +58,7 @@ impl AgentEventKind {
             Self::Notification => "notification",
             Self::Stop => "stop",
             Self::StopFailure => "stop-failure",
+            Self::Interrupt => "interrupt",
             Self::PermissionDenied => "permission-denied",
             Self::CwdChanged => "cwd-changed",
             Self::SubagentStart => "subagent-start",
@@ -94,6 +97,7 @@ mod tests {
                 | AgentEventKind::Notification
                 | AgentEventKind::Stop
                 | AgentEventKind::StopFailure
+                | AgentEventKind::Interrupt
                 | AgentEventKind::PermissionDenied
                 | AgentEventKind::CwdChanged
                 | AgentEventKind::SubagentStart
@@ -106,7 +110,7 @@ mod tests {
                 | AgentEventKind::WorktreeRemove => {}
             }
         }
-        assert_eq!(AgentEventKind::ALL.len(), 16);
+        assert_eq!(AgentEventKind::ALL.len(), 17);
     }
 
     #[test]

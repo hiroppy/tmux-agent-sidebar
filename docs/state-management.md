@@ -40,13 +40,13 @@ Pane options written to tmux:
 | `@pane_prompt` | UserPromptSubmit, Stop | Latest prompt or response text |
 | `@pane_prompt_source` | UserPromptSubmit, Stop | "user" or "response" |
 | `@pane_started_at` | UserPromptSubmit | Unix epoch when agent started |
-| `@pane_attention` | SessionStart, Stop, StopFailure (clear); Notification, PermissionDenied, TeammateIdle (set) | "notification" or "clear" |
+| `@pane_attention` | SessionStart, Stop, StopFailure, Interrupt (clear); Notification, PermissionDenied, TeammateIdle (set) | "notification" or "clear" |
 | `@pane_wait_reason` | StopFailure, PermissionDenied, TeammateIdle | Reason for waiting/error (`permission_denied`, `teammate_idle:<name>`, or error text) |
 | `@pane_bg_cmd` | ActivityLog (bg Bash), Refresh sweep (clear), SessionEnd (clear) | Latest sanitized command of a Bash tool started with `run_in_background`. Its presence is the single source of truth for "live bg shell" — Stop routes to `background` while it is set, and the row body renders the command. Persists across UserPromptSubmit so shells spanning turns stay visible; overwritten by the next bg Bash. The refresh loop runs a `ps`-based liveness sweep each tick and clears the marker (plus downgrades `background → idle`) when no process matches the stored command. Only the most recent bg Bash is tracked; older ones are not retained. |
 | `@pane_subagents` | SubagentStart/Stop | Comma-separated active subagent list |
 | `@pane_worktree_name` | SessionStart | Worktree name (if applicable) |
 | `@pane_worktree_branch` | SessionStart | Worktree branch (if applicable) |
-| `@pane_session_id` | SessionStart, UserPromptSubmit, Notification, Stop, StopFailure, PermissionDenied, CwdChanged | Agent-reported session id (skipped when subagents are active) |
+| `@pane_session_id` | SessionStart, UserPromptSubmit, Notification, Stop, StopFailure, Interrupt, PermissionDenied, CwdChanged | Agent-reported session id (skipped when subagents are active) |
 
 In-memory per-pane runtime state. Every field lives inside
 `PaneRuntimeState` so the whole record is dropped together when its

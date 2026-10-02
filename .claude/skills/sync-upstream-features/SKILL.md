@@ -25,6 +25,7 @@ Mapping between upstream hook events and internal event names used by this proje
 | `Notification` | `notification` | |
 | `Stop` | `stop` | |
 | `StopFailure` | `stop-failure` | |
+| `Interrupt` (Codex) | `interrupt` | User aborted the turn; `Stop` does not follow. Idle without a notification |
 | `SubagentStart` | `subagent-start` | |
 | `SubagentStop` | `subagent-stop` | |
 | `PostToolUse` | `activity-log` | **Important**: `PreToolUse`/`PostToolUse` are not used directly. Instead, a custom `activity-log` event passes `tool_name`, `tool_input`, `tool_response` from the `PostToolUse` hook |
@@ -34,7 +35,7 @@ Mapping between upstream hook events and internal event names used by this proje
 The following are unrelated to the sidebar monitoring TUI and should NOT be reported as gaps:
 
 - **`PreToolUse` / `PostToolUse` / `PostToolUseFailure`**: Already handled via `activity-log`. No need to handle these directly
-- **`PermissionRequest`**: For permission UI control. Sidebar only displays, doesn't need this
+- **`PermissionRequest` (Claude Code)**: Claude Code already reports permission prompts through `Notification`. For **Codex** it IS in scope: Codex has no `Notification` hook, so `PermissionRequest` is the only way a Codex pane reaches `waiting` (wired in `src/adapter/codex.rs`). The hook must keep printing nothing and exiting 0, which Codex treats as "no verdict"
 - **`PreCompact` / `PostCompact`**: Compaction doesn't affect sidebar
 - **`InstructionsLoaded`**: CLAUDE.md loading is unrelated to sidebar
 - **`ConfigChange`**: Config change monitoring is outside sidebar scope

@@ -41,27 +41,7 @@ pub(in crate::cli::hook) fn on_stop(
     response: Option<&str>,
     notifications: &desktop_notification::DesktopNotificationSettings,
 ) -> i32 {
-    set_agent_meta(pane, ctx);
-    set_attention(pane, "clear");
-    if !last_message.is_empty() {
-        let msg = sanitize_tmux_value(last_message);
-        tmux::set_pane_option(pane, tmux::PANE_PROMPT, &msg);
-        tmux::set_pane_option(pane, tmux::PANE_PROMPT_SOURCE, "response");
-    }
-    let bg_shell_live = !tmux::get_pane_option_value(pane, tmux::PANE_BG_CMD).is_empty();
-    // `Stop` is emitted for the parent turn, and Claude Code `Task` subagents
-    // are synchronous: once the parent reaches Stop, no child should still be
-    // running. Treat any leftover list as stale state from a missed or
-    // mismatched SubagentStop and clear it before `mark_task_reset`, whose
-    // guard intentionally skips writes while subagents are active.
-    tmux::unset_pane_option(pane, tmux::PANE_SUBAGENTS);
-    if bg_shell_live {
-        tmux::unset_pane_option(pane, tmux::PANE_WAIT_REASON);
-    } else {
-        clear_run_state(pane);
-    }
-    mark_task_reset(pane);
-    set_status(pane, resolve_stop_status(bg_shell_live));
+    let bg_shell_live = end_turn(pane, ctx, last_message);
 
     if !bg_shell_live {
         let run_id = notification_run_id(pane);
@@ -93,6 +73,41 @@ pub(in crate::cli::hook) fn on_stop(
         println!("{resp}");
     }
     0
+}
+
+/// Codex `Interrupt`: the user aborted the turn. Ends it like `Stop` with no
+/// reply text, and skips the desktop notification since the user is at the
+/// pane. Prints nothing: Codex rejects unknown fields in Interrupt output.
+pub(in crate::cli::hook) fn on_interrupt(pane: &str, ctx: &AgentContext<'_>) -> i32 {
+    end_turn(pane, ctx, "");
+    0
+}
+
+/// Shared end-of-turn bookkeeping for `Stop` and `Interrupt`. Returns
+/// whether a background shell is still live.
+fn end_turn(pane: &str, ctx: &AgentContext<'_>, last_message: &str) -> bool {
+    set_agent_meta(pane, ctx);
+    set_attention(pane, "clear");
+    if !last_message.is_empty() {
+        let msg = sanitize_tmux_value(last_message);
+        tmux::set_pane_option(pane, tmux::PANE_PROMPT, &msg);
+        tmux::set_pane_option(pane, tmux::PANE_PROMPT_SOURCE, "response");
+    }
+    let bg_shell_live = !tmux::get_pane_option_value(pane, tmux::PANE_BG_CMD).is_empty();
+    // `Stop` is emitted for the parent turn, and Claude Code `Task` subagents
+    // are synchronous: once the parent reaches Stop, no child should still be
+    // running. Treat any leftover list as stale state from a missed or
+    // mismatched SubagentStop and clear it before `mark_task_reset`, whose
+    // guard intentionally skips writes while subagents are active.
+    tmux::unset_pane_option(pane, tmux::PANE_SUBAGENTS);
+    if bg_shell_live {
+        tmux::unset_pane_option(pane, tmux::PANE_WAIT_REASON);
+    } else {
+        clear_run_state(pane);
+    }
+    mark_task_reset(pane);
+    set_status(pane, resolve_stop_status(bg_shell_live));
+    bg_shell_live
 }
 
 pub(in crate::cli::hook) fn on_stop_failure(
@@ -325,6 +340,34 @@ mod tests {
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
             Some("idle")
+        );
+    }
+
+    #[test]
+    fn on_interrupt_idles_a_blocked_turn_and_keeps_the_prompt() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%INTERRUPT";
+        tmux::test_mock::set(pane, tmux::PANE_STATUS, "waiting");
+        tmux::test_mock::set(pane, tmux::PANE_WAIT_REASON, "permission_prompt");
+        tmux::test_mock::set(pane, tmux::PANE_PROMPT, "fix the bug");
+        let ctx = AgentContext {
+            agent: "codex",
+            cwd: "/repo",
+            permission_mode: "default",
+            worktree: &None,
+            session_id: &Some("sid-1".into()),
+        };
+
+        assert_eq!(on_interrupt(pane, &ctx), 0);
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("idle")
+        );
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_WAIT_REASON));
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_PROMPT).as_deref(),
+            Some("fix the bug")
         );
     }
 

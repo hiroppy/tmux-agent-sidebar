@@ -10,6 +10,9 @@ Codex exposes a smaller hook set than Claude Code, so some sidebar features are 
 ### Status and prompts
 
 - Live status from `SessionStart` / `UserPromptSubmit` / `Stop`
+- `waiting` with a `permission_prompt` wait reason from `PermissionRequest`. The hook prints nothing, so Codex still shows its own approval prompt
+- Interrupted turns (`Esc`) return to `idle` via `Interrupt`, since Codex sends no `Stop` for them
+- Pane cleanup on exit via `SessionEnd`
 - Prompt text from `UserPromptSubmit`
 - Response preview (`▷ …`) from `Stop`
 - Elapsed time since the last prompt
@@ -26,7 +29,8 @@ Codex exposes a smaller hook set than Claude Code, so some sidebar features are 
 
 ### Notifications
 
-- `stop` only — fires when the assistant finishes responding.
+- `stop`: fires when the assistant finishes responding.
+- `notification`: fires when Codex asks for approval (`PermissionRequest`).
 
 ### Activity log
 
@@ -36,13 +40,15 @@ Codex exposes a smaller hook set than Claude Code, so some sidebar features are 
 
 | Feature                                   | Why                                                                 |
 | ----------------------------------------- | ------------------------------------------------------------------- |
-| Waiting status + wait reason              | Needs `Notification`, `PermissionDenied`, `TeammateIdle` (Claude-only) |
+| Wait reasons other than permission prompts | Needs `Notification`, `PermissionDenied`, `TeammateIdle` (Claude-only) |
 | Background shell state                    | Codex's Bash hook payload is schema-typed as `{ command: string }` and does not include a background flag |
 | API failure reason                        | Needs `StopFailure` (Claude-only)                                    |
 | Task progress counter                     | Needs non-Bash `PostToolUse` coverage                                |
 | Sub-agent tree                            | Needs `SubagentStart` / `SubagentStop`                               |
 | Worktree lifecycle tracking               | Needs `WorktreeCreate` / `WorktreeRemove`                            |
-| `notification` / `task_completed` / `stop_failure` / `permission_denied` notifications | Those hooks don't exist in Codex                                     |
+| `task_completed` / `stop_failure` / `permission_denied` notifications | Those hooks don't exist in Codex                                     |
+
+**Waiting status**: after you approve a permission prompt, the status stays `waiting` until the approved tool finishes and its `PostToolUse` fires.
 
 ## Setup
 
