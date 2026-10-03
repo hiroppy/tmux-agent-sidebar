@@ -2,7 +2,7 @@ use serde_json::Value;
 
 use super::AgentEvent;
 use crate::adapter;
-use crate::tmux::{CLAUDE_AGENT, CODEX_AGENT, OPENCODE_AGENT};
+use crate::tmux::{AGY_AGENT, CLAUDE_AGENT, CODEX_AGENT, OPENCODE_AGENT};
 
 /// Adapter that converts external agent events into internal `AgentEvent`.
 pub trait EventAdapter {
@@ -11,6 +11,7 @@ pub trait EventAdapter {
 
 pub fn resolve_adapter(agent_name: &str) -> Option<Box<dyn EventAdapter>> {
     match agent_name {
+        AGY_AGENT => Some(Box::new(adapter::antigravity::AntigravityAdapter)),
         CLAUDE_AGENT => Some(Box::new(adapter::claude::ClaudeAdapter)),
         CODEX_AGENT => Some(Box::new(adapter::codex::CodexAdapter)),
         OPENCODE_AGENT => Some(Box::new(adapter::opencode::OpenCodeAdapter)),
@@ -22,6 +23,11 @@ pub fn resolve_adapter(agent_name: &str) -> Option<Box<dyn EventAdapter>> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn resolve_antigravity() {
+        assert!(resolve_adapter("agy").is_some());
+    }
 
     #[test]
     fn resolve_claude() {

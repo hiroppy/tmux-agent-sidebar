@@ -1,6 +1,6 @@
 <h1 align="center">tmux-agent-sidebar</h1>
 
-<p align="center">One tmux sidebar that tracks every Claude Code, Codex, and OpenCode pane across every session and window. See status, background shells, prompts, Git state, activity, and worktrees without switching windows.</p>
+<p align="center">One tmux sidebar that tracks Claude Code, Codex, OpenCode, and Antigravity CLI panes across every session and window. See status, Git state, activity, and agent-specific metadata without switching windows.</p>
 
 <p align="center"><img src="website/src/assets/captures/hero.png" alt="tmux-agent-sidebar hero" /></p>
 
@@ -13,7 +13,7 @@
 ## Features
 
 - **Every pane, one view** 
-  — tracks Claude Code, Codex, and OpenCode panes across all tmux sessions and windows
+  — tracks Claude Code, Codex, OpenCode, and Antigravity CLI panes across all tmux sessions and windows
 - **Live metadata** 
   — prompts, tool calls, response previews, background shell state, wait reasons, task progress, and subagent trees refresh as the agents work
 - **Worktrees, included** 
@@ -22,6 +22,8 @@
   — native alerts when an agent finishes, needs permission, or errors out
 
 OpenCode uses a small local plugin bridge instead of per-event hook config. The plugin lives at `.opencode/plugins/tmux-agent-sidebar.js` and can be symlinked as a single file into `~/.config/opencode/plugins/` so it coexists with any existing plugins.
+
+Antigravity CLI (`agy`) uses the native plugin in `plugins/antigravity/`. It tracks execution status and tool activity starting with the first model invocation. Prompt/response previews, permission waiting, and subagent tracking are not supported by this integration.
 
 ## Requirements
 
@@ -59,7 +61,40 @@ Reload tmux (`tmux source ~/.tmux.conf`), then press `prefix + I`. The install w
     ~/.config/opencode/plugins/tmux-agent-sidebar.js
   ```
 
-Full walkthroughs: [Claude Code setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/claude-code/) · [Codex setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/codex/) · [OpenCode setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/opencode/)
+- **Antigravity CLI (`agy`)** - validate and install the bundled native plugin:
+
+  ```sh
+  agy plugin validate ~/.tmux/plugins/tmux-agent-sidebar/plugins/antigravity
+  agy plugin install ~/.tmux/plugins/tmux-agent-sidebar/plugins/antigravity
+  ```
+
+  Restart `agy` inside a tmux pane, use `/hooks` to confirm the hooks are loaded,
+  and submit a prompt. The pane appears on its first model invocation. The sidebar
+  tracks running/idle/error status and tool activity; prompt/response previews,
+  permission-wait detection, and subagent tracking are not supported.
+
+  Both the hooks and the sidebar TUI need a binary with Antigravity support.
+  Verify the binary configured in tmux:
+
+  ```sh
+  sidebar_bin="$(tmux show-option -gqv @agent_sidebar_bin)"
+  "$sidebar_bin" setup agy
+  ```
+
+  If this reports an unknown agent, update the installed sidebar binary and toggle
+  the sidebar off and on. Building a separate checkout does not update the TPM
+  installation, and `bin/tmux-agent-sidebar` takes precedence over `target/release/`.
+
+  For a non-default sidebar location, install from that checkout and export its
+  hook path before launching `agy`:
+
+  ```sh
+  agy plugin install /absolute/path/to/tmux-agent-sidebar/plugins/antigravity
+  export TMUX_AGENT_SIDEBAR_HOOK="/absolute/path/to/tmux-agent-sidebar/hook.sh"
+  agy
+  ```
+
+Full walkthroughs: [Claude Code setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/claude-code/) · [Codex setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/codex/) · [OpenCode setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/opencode/) · [Antigravity setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/antigravity/)
 
 ### 3. Toggle the sidebar
 
