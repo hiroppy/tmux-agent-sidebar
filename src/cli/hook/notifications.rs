@@ -89,6 +89,34 @@ pub(super) fn notification_run_id(pane: &str) -> Option<u64> {
         .ok()
 }
 
+pub(super) fn notify_stop(
+    pane: &str,
+    labels: NotifyLabels<'_>,
+    settings: &desktop_notification::DesktopNotificationSettings,
+    body: &str,
+) -> bool {
+    let run_id = notification_run_id(pane);
+    if desktop_notification::has_run_scoped_stamp(
+        pane,
+        DesktopNotificationKind::TaskCompleted,
+        run_id,
+    ) {
+        return false;
+    }
+    notify_lifecycle(
+        pane,
+        labels,
+        settings,
+        run_id,
+        NotifyPayload {
+            kind: DesktopNotificationKind::TaskCompleted,
+            event: desktop_notification::DesktopNotificationEvent::Stop,
+            fingerprint_suffix: "stop",
+            body,
+        },
+    )
+}
+
 pub(super) fn notify_desktop(
     pane: &str,
     kind: DesktopNotificationKind,

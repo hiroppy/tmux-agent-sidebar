@@ -553,7 +553,7 @@ mod tests {
     #[test]
     fn snapshot_notices_popup_plugin_stale_with_codex_missing_hooks() {
         // Plugin install path: the Claude row is suppressed (the plugin
-        // owns it) and only Codex shows up in the missing-hooks section.
+        // owns it) and Codex remains in the missing-hooks section.
         let mut state = state_with_plugin_stale();
         state.notices.missing_hook_groups = vec![NoticesMissingHookGroup {
             agent: "codex".into(),
@@ -774,22 +774,26 @@ mod tests {
     // ─── click target tracking ──────────────────────────────────────
 
     #[test]
-    fn rendering_populates_copy_target_only_for_codex_in_missing_hooks() {
+    fn rendering_populates_copy_targets_for_setup_based_agents() {
         // Claude must NOT register a copy target in the missing-hooks
         // section — its [prompt] button lives in the Plugin section
         // and the two would race on the shared `[copied]` feedback.
         let mut state = state_with(
             None,
-            vec![("claude", vec!["Stop"]), ("codex", vec!["Stop"])],
+            vec![
+                ("claude", vec!["Stop"]),
+                ("codex", vec!["Stop"]),
+                ("grok", vec!["Stop"]),
+            ],
         );
-        let _ = render_notices_popup_text(&mut state, 40, 10);
-        assert_eq!(state.notices.copy_targets.len(), 1);
+        let _ = render_notices_popup_text(&mut state, 40, 12);
+        assert_eq!(state.notices.copy_targets.len(), 2);
         assert_eq!(state.notices.copy_targets[0].agent, "codex");
-        assert_eq!(
-            state.notices.copy_targets[0].area.width,
-            LABEL_MAX_WIDTH as u16
-        );
-        assert_eq!(state.notices.copy_targets[0].area.height, 1);
+        assert_eq!(state.notices.copy_targets[1].agent, "grok");
+        for target in &state.notices.copy_targets {
+            assert_eq!(target.area.width, LABEL_MAX_WIDTH as u16);
+            assert_eq!(target.area.height, 1);
+        }
     }
 
     #[test]

@@ -18,6 +18,7 @@ fn session_start() {
             cwd: "/home/user".into(),
             permission_mode: "default".into(),
             source: "".into(),
+            top_level: true,
             worktree: None,
             agent_id: None,
             session_id: None,
@@ -46,7 +47,11 @@ fn session_end() {
     assert_eq!(
         adapter.parse("session-end", &json!({})).unwrap(),
         AgentEvent::SessionEnd {
-            end_reason: "".into()
+            agent: "claude".into(),
+            session_id: None,
+            requires_existing_session: false,
+            end_reason: "".into(),
+            top_level: false,
         }
     );
 }
@@ -60,7 +65,11 @@ fn session_end_captures_reason() {
     assert_eq!(
         event,
         AgentEvent::SessionEnd {
-            end_reason: "logout".into()
+            agent: "claude".into(),
+            session_id: None,
+            requires_existing_session: false,
+            end_reason: "logout".into(),
+            top_level: false,
         }
     );
 }
@@ -77,6 +86,9 @@ fn user_prompt_submit() {
             cwd: "/tmp".into(),
             permission_mode: "auto".into(),
             prompt: "fix bug".into(),
+            prompt_is_system_message: false,
+            requires_existing_session: false,
+            prompt_id: None,
             worktree: None,
             agent_id: None,
             session_id: None,
@@ -98,6 +110,7 @@ fn notification() {
             permission_mode: "default".into(),
             wait_reason: "permission".into(),
             meta_only: false,
+            requires_existing_session: false,
             worktree: None,
             agent_id: None,
             session_id: None,
@@ -119,6 +132,7 @@ fn notification_idle_prompt_is_meta_only() {
             permission_mode: "default".into(),
             wait_reason: "idle_prompt".into(),
             meta_only: true,
+            requires_existing_session: false,
             worktree: None,
             agent_id: None,
             session_id: None,
@@ -140,6 +154,9 @@ fn stop() {
             permission_mode: "default".into(),
             last_message: "done".into(),
             response: None,
+            prompt_id: None,
+            requires_existing_session: false,
+            children_may_outlive_turn: false,
             worktree: None,
             agent_id: None,
             session_id: None,
@@ -159,6 +176,8 @@ fn stop_failure_upstream_error_type_field() {
             cwd: "/tmp".into(),
             permission_mode: "default".into(),
             error: "rate_limit".into(),
+            prompt_id: None,
+            requires_existing_session: false,
             worktree: None,
             agent_id: None,
             session_id: None,
@@ -178,6 +197,8 @@ fn stop_failure_legacy_error_field() {
             cwd: "/tmp".into(),
             permission_mode: "default".into(),
             error: "rate_limit".into(),
+            prompt_id: None,
+            requires_existing_session: false,
             worktree: None,
             agent_id: None,
             session_id: None,
@@ -197,6 +218,8 @@ fn stop_failure_falls_back_to_error_message() {
             cwd: "/tmp".into(),
             permission_mode: "default".into(),
             error: "something went wrong".into(),
+            prompt_id: None,
+            requires_existing_session: false,
             worktree: None,
             agent_id: None,
             session_id: None,
@@ -216,6 +239,8 @@ fn stop_failure_falls_back_to_error_details() {
             cwd: "/tmp".into(),
             permission_mode: "default".into(),
             error: "something went wrong".into(),
+            prompt_id: None,
+            requires_existing_session: false,
             worktree: None,
             agent_id: None,
             session_id: None,
@@ -230,8 +255,13 @@ fn subagent_start() {
     assert_eq!(
         adapter.parse("subagent-start", &input).unwrap(),
         AgentEvent::SubagentStart {
+            agent: "claude".into(),
+            session_id: None,
+            requires_existing_session: false,
             agent_type: "Explore".into(),
             agent_id: None,
+            display_name: None,
+            children_may_outlive_turn: false,
         }
     );
 }
@@ -243,8 +273,13 @@ fn subagent_start_captures_agent_id() {
     assert_eq!(
         adapter.parse("subagent-start", &input).unwrap(),
         AgentEvent::SubagentStart {
+            agent: "claude".into(),
+            session_id: None,
+            requires_existing_session: false,
             agent_type: "Explore".into(),
             agent_id: Some("sub-42".into()),
+            display_name: None,
+            children_may_outlive_turn: false,
         }
     );
 }
@@ -266,6 +301,7 @@ fn subagent_stop() {
             agent_id: None,
             last_message: "".into(),
             transcript_path: "".into(),
+            children_may_outlive_turn: false,
         }
     );
 }
@@ -286,6 +322,7 @@ fn subagent_stop_captures_full_payload() {
             agent_id: Some("sub-42".into()),
             last_message: "Found the bug at main.rs:42".into(),
             transcript_path: "/tmp/sub-transcript.json".into(),
+            children_may_outlive_turn: false,
         }
     );
 }
@@ -298,6 +335,9 @@ fn activity_log() {
     assert_eq!(
         event,
         AgentEvent::ActivityLog {
+            agent: "claude".into(),
+            session_id: None,
+            requires_existing_session: false,
             tool_name: "Read".into(),
             tool_input: json!({"file_path": "/a/b.rs"}),
             tool_response: Value::Null,
@@ -313,6 +353,9 @@ fn activity_log_string_tool_input() {
     assert_eq!(
         event,
         AgentEvent::ActivityLog {
+            agent: "claude".into(),
+            session_id: None,
+            requires_existing_session: false,
             tool_name: "Edit".into(),
             tool_input: json!({"file_path": "/a/b.rs"}),
             tool_response: Value::Null,
@@ -537,6 +580,7 @@ fn notification_empty_reason() {
             permission_mode: "default".into(),
             wait_reason: "".into(),
             meta_only: false,
+            requires_existing_session: false,
             worktree: None,
             agent_id: None,
             session_id: None,
@@ -595,6 +639,8 @@ fn stop_failure_error_type_takes_priority_over_legacy() {
             cwd: "/tmp".into(),
             permission_mode: "default".into(),
             error: "rate_limit".into(),
+            prompt_id: None,
+            requires_existing_session: false,
             worktree: None,
             agent_id: None,
             session_id: None,
@@ -614,6 +660,8 @@ fn stop_failure_both_empty() {
             cwd: "/tmp".into(),
             permission_mode: "default".into(),
             error: "".into(),
+            prompt_id: None,
+            requires_existing_session: false,
             worktree: None,
             agent_id: None,
             session_id: None,
@@ -634,6 +682,9 @@ fn stop_empty_last_message() {
             permission_mode: "default".into(),
             last_message: "".into(),
             response: None,
+            prompt_id: None,
+            requires_existing_session: false,
+            children_may_outlive_turn: false,
             worktree: None,
             agent_id: None,
             session_id: None,
@@ -658,7 +709,10 @@ fn session_start_with_worktree_and_agent_id() {
     let event = adapter.parse("session-start", &input).unwrap();
     match event {
         AgentEvent::SessionStart {
-            worktree, agent_id, ..
+            worktree,
+            agent_id,
+            top_level,
+            ..
         } => {
             let wt = worktree.unwrap();
             assert_eq!(wt.name, "feat-wt");
@@ -666,6 +720,7 @@ fn session_start_with_worktree_and_agent_id() {
             assert_eq!(wt.branch, "feat");
             assert_eq!(wt.original_repo_dir, "/home/user/repo");
             assert_eq!(agent_id.unwrap(), "abc-123");
+            assert!(!top_level);
         }
         _ => panic!("wrong variant"),
     }
@@ -702,6 +757,7 @@ fn permission_denied_event() {
             agent: "claude".into(),
             cwd: "/tmp".into(),
             permission_mode: "auto".into(),
+            requires_existing_session: false,
             worktree: None,
             agent_id: None,
             session_id: None,
@@ -785,6 +841,7 @@ fn session_start_missing_fields_default_to_empty() {
             cwd: "".into(),
             permission_mode: "".into(),
             source: "".into(),
+            top_level: true,
             worktree: None,
             agent_id: None,
             session_id: None,
@@ -804,6 +861,9 @@ fn activity_log_with_tool_response() {
     assert_eq!(
         event,
         AgentEvent::ActivityLog {
+            agent: "claude".into(),
+            session_id: None,
+            requires_existing_session: false,
             tool_name: "TaskCreate".into(),
             tool_input: json!({"subject": "Fix bug"}),
             tool_response: json!({"task": {"id": "42"}}),

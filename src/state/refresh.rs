@@ -96,8 +96,13 @@ impl AppState {
             tmux::PANE_STATUS,
             tmux::PANE_ATTENTION,
             tmux::PANE_PROMPT,
+            tmux::PANE_PROMPT_ID,
             tmux::PANE_PROMPT_SOURCE,
+            tmux::PANE_TURN_ACTIVE,
             tmux::PANE_SUBAGENTS,
+            tmux::PANE_PENDING_SESSION_END,
+            tmux::PANE_PENDING_STOP_NOTIFICATION_BODY,
+            tmux::PANE_PENDING_WORKTREE_REMOVE,
             tmux::PANE_CWD,
             tmux::PANE_PERMISSION_MODE,
             tmux::PANE_WORKTREE_NAME,
@@ -413,7 +418,7 @@ pub(crate) fn clear_dead_bg_shells(
                     continue;
                 }
                 tmux::unset_pane_option(&pane.pane_id, tmux::PANE_BG_CMD);
-                if pane.status == PaneStatus::Background {
+                if pane.status == PaneStatus::Background && pane.subagents.is_empty() {
                     tmux::set_pane_option(&pane.pane_id, tmux::PANE_STATUS, "idle");
                     pane.status = PaneStatus::Idle;
                 }
@@ -586,6 +591,34 @@ mod tests {
         assert_eq!(
             tmux::test_mock::get(pane_id, tmux::PANE_STATUS).as_deref(),
             Some("idle"),
+        );
+    }
+
+    #[test]
+    fn clear_dead_bg_shells_keeps_background_while_subagent_is_live() {
+        let _guard = tmux::test_mock::install();
+        let pane_id = "%BG_DEAD_SUBAGENT_LIVE";
+        tmux::test_mock::set(pane_id, tmux::PANE_BG_CMD, "sleep 300");
+        tmux::test_mock::set(pane_id, tmux::PANE_STATUS, "background");
+
+        let mut pane = pane_with_bg(pane_id, "sleep 300", PaneStatus::Background);
+        pane.subagents.push("Explore:sub-1".into());
+        let mut sessions = test_session(vec![pane]);
+        let snapshot = process_snapshot("100 1 zsh /bin/zsh\n");
+
+        clear_dead_bg_shells(&mut sessions, &snapshot);
+
+        let pane = &sessions[0].windows[0].panes[0];
+        assert!(pane.bg_shell_cmd.is_none());
+        assert_eq!(
+            pane.status,
+            PaneStatus::Background,
+            "a live subagent must keep the settled pane in background"
+        );
+        assert!(!tmux::test_mock::contains(pane_id, tmux::PANE_BG_CMD));
+        assert_eq!(
+            tmux::test_mock::get(pane_id, tmux::PANE_STATUS).as_deref(),
+            Some("background")
         );
     }
 
@@ -807,6 +840,29 @@ mod tests {
         assert_eq!(filtered[0].windows.len(), 1);
         assert_eq!(filtered[0].windows[0].panes.len(), 1);
         assert_eq!(filtered[0].windows[0].panes[0].pane_id, "%2");
+    }
+
+    #[test]
+    fn clear_dead_agent_metadata_clears_internal_lifecycle_options() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%DEAD_GROK_CORRELATION";
+        tmux::test_mock::set(pane, tmux::PANE_PROMPT_ID, "70726f6d70742d31");
+        tmux::test_mock::set(pane, tmux::PANE_TURN_ACTIVE, "1");
+        tmux::test_mock::set(pane, tmux::PANE_PENDING_SESSION_END, "logout");
+        tmux::test_mock::set(pane, tmux::PANE_PENDING_WORKTREE_REMOVE, "/repo/wt");
+
+        AppState::clear_dead_agent_metadata(pane);
+
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_PROMPT_ID));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_TURN_ACTIVE));
+        assert!(!tmux::test_mock::contains(
+            pane,
+            tmux::PANE_PENDING_SESSION_END
+        ));
+        assert!(!tmux::test_mock::contains(
+            pane,
+            tmux::PANE_PENDING_WORKTREE_REMOVE
+        ));
     }
 
     #[test]
