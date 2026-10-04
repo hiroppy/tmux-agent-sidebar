@@ -1,23 +1,33 @@
 ---
 title: Keybindings
-description: Every shortcut in the sidebar, the worktree spawn modal, and the close-pane modal.
+description: Every shortcut in the sidebar, keybindings popup, worktree spawn modal, and close-pane modal.
 ---
 
 ## Sidebar
 
-| Key            | Action                                                        |
-| -------------- | ------------------------------------------------------------- |
-| `prefix + e`   | Toggle sidebar                                                |
-| `prefix + E`   | Toggle sidebar in all windows                                 |
-| `j` / `Down`   | Move selection down                                           |
-| `k` / `Up`     | Move selection up                                             |
-| `h` / `Left`   | Previous status filter                                        |
-| `l` / `Right`  | Next status filter                                            |
-| `r`            | Open repo filter popup                                        |
-| `Enter`        | Jump to the selected pane                                     |
-| `Tab`          | Cycle status filter                                           |
-| `Shift+Tab`    | Switch bottom panel tab (Activity ⇄ Git)                      |
-| `Esc`          | Return focus or close the popup                               |
+| Key             | Action                                   |
+| --------------- | ---------------------------------------- |
+| `prefix + e`    | Toggle sidebar                           |
+| `prefix + E`    | Toggle sidebar in all windows            |
+| `j` / `Down`    | Move selection down                      |
+| `k` / `Up`      | Move selection up                        |
+| `h` / `Left`    | Previous status filter                   |
+| `l` / `Right`   | Next status filter                       |
+| `r`             | Open repo filter popup                   |
+| `?` / `Shift+/` | Show keybindings help                    |
+| `Enter`         | Jump to the selected pane                |
+| `Tab`           | Cycle status filter                      |
+| `Shift+Tab`     | Switch bottom panel tab (Activity ⇄ Git) |
+| `Esc`           | Return focus or close the popup          |
+
+## Keybindings popup
+
+Opened with `?` or `Shift+/`. Clicking outside the popup closes it without triggering the underlying sidebar action.
+
+| Key             | Action          |
+| --------------- | --------------- |
+| `?` / `Shift+/` | Close the popup |
+| `Esc`           | Close the popup |
 
 ## Repo filter popup
 

@@ -201,6 +201,7 @@ enum PopupState {
     None,
     Repo { selected: usize, area: Option<Rect> },
     Notices { area: Option<Rect> },
+    Help { area: Option<Rect> },
     /// Modal text input shown when the user spawns a new worktree.
     SpawnInput {
         input: String,

@@ -1812,6 +1812,34 @@ fn snapshot_repo_header_shows_spawn_plus_button() {
 }
 
 #[test]
+fn snapshot_help_popup_lists_sidebar_keybindings() {
+    let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
+    let mut state = make_state_for_popup_tests(vec![repo_group_with_root("proj", vec![pane])]);
+    state.toggle_help_popup();
+    let output = render_to_string(&mut state, 46, 20);
+    insta::assert_snapshot!(output, @r"
+ ≡1  ●0  ◎0  ◐0  ○1  ✕0
+ⓘ ╭ Keybindings ───────────────────────────╮ ▾
+pr│?         - Show / hide help            │ +
+┃ │j / Down  - Move selection down         │
+┃ │k / Up    - Move selection up           │
+  │h / Left  - Previous status filter      │
+  │l / Right - Next status filter          │
+  │Tab       - Cycle status filter         │
+  │Shift+Tab - Switch Activity / Git       │
+  │r         - Open repo filter            │
+  │n         - Spawn worktree              │
+  │x         - Remove spawned pane         │
+  │Enter     - Jump to selected pane       │
+  │Esc       - Return focus / close popup  │
+  ╰────────────────────────────────────────╯
+╭ Activity │ Git ────────────────────────────╮
+│               No activity yet              │
+╰────────────────────────────────────────────╯
+");
+}
+
+#[test]
 fn snapshot_spawn_modal_default_state() {
     let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
     let mut state = make_state_for_popup_tests(vec![repo_group_with_root("proj", vec![pane])]);
