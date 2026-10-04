@@ -85,6 +85,10 @@ pub const PANE_WORKTREE_NAME: &str = "@pane_worktree_name";
 pub const SIDEBAR_PID: &str = "@sidebar_pid";
 pub const SIDEBAR_WIDTH: &str = "@sidebar_width";
 pub const SIDEBAR_POSITION: &str = "@sidebar_position";
+/// How panes are grouped in the sidebar: `repo` (default — one group per
+/// repository, merging panes across tmux sessions) or `session` (one
+/// group per tmux session). See `crate::group::GroupBy`.
+pub const SIDEBAR_GROUP_BY: &str = "@sidebar_group_by";
 pub const SIDEBAR_FILTER: &str = "@sidebar_filter";
 pub const SIDEBAR_CURSOR: &str = "@sidebar_cursor";
 pub const SIDEBAR_REPO_FILTER: &str = "@sidebar_repo_filter";
