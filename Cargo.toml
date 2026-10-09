@@ -22,7 +22,7 @@ arboard = { version = "=3.6.1", default-features = false }
 vte = "=0.15.0"
 
 [dev-dependencies]
-indoc = "=2.0.7"
+indoc = "=2.0.8"
 insta = "=1.48.0"
 tempfile = "=3.27.0"
 scopeguard = "=1.2.0"
