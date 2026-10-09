@@ -23,7 +23,7 @@ vte = "=0.15.0"
 
 [dev-dependencies]
 indoc = "=2.0.8"
-insta = "=1.48.0"
+insta = "=1.49.0"
 tempfile = "=3.27.0"
 scopeguard = "=1.2.0"
 
