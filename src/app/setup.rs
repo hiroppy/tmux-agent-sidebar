@@ -16,6 +16,7 @@ pub(super) fn init_state(tmux_pane: String) -> AppState {
     state.icons = ui::icons::StatusIcons::from_tmux();
     state.bottom_panel_height = ui::bottom_panel_height_from_tmux();
     state.pet_enabled = ui::pet_enabled_from_tmux();
+    state.ports_enabled = ui::ports_enabled_from_tmux();
     state.global.load_from_tmux();
     state.refresh();
 
