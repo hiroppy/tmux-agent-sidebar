@@ -9,6 +9,45 @@ pub fn run_tmux(args: &[&str]) -> Option<String> {
     }
 }
 
+/// Poke every *other* sidebar instance (each advertises its pid in the
+/// `@sidebar_pid` pane option) with SIGUSR1 so it reloads globally-shared
+/// state right away. Use after writing a shared tmux option (status filter,
+/// repo filter, selection cursor) so the change propagates to all instances —
+/// including hidden ones — immediately, instead of each picking it up lazily on
+/// its next refresh. The caller already holds the new value, so its own pid is
+/// skipped.
+///
+/// Returns `true` once the pane enumeration succeeded (the broadcast was
+/// attempted), or `false` when tmux couldn't be queried — so the caller can
+/// keep the broadcast queued and retry instead of dropping it.
+pub fn notify_other_sidebars() -> bool {
+    let self_pid = std::process::id();
+    let Some(out) = run_tmux(&["list-panes", "-a", "-F", "#{@sidebar_pid}"]) else {
+        return false;
+    };
+    for line in out.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        // Parse straight into the native pid type and require a strictly
+        // positive value: an out-of-range u32 would wrap to a negative pid_t,
+        // and a non-positive pid makes libc::kill target a process group
+        // instead of a single process — either could signal the wrong target.
+        if let Ok(pid) = line.parse::<libc::pid_t>()
+            && pid > 0
+            && pid as u32 != self_pid
+        {
+            // SIGUSR1 is the existing "reload" signal; an invalid/dead pid just
+            // yields ESRCH, which we ignore.
+            unsafe {
+                libc::kill(pid, libc::SIGUSR1);
+            }
+        }
+    }
+    true
+}
+
 /// Run a tmux command, returning trimmed stdout on success and stderr on failure.
 /// Used by the spawn/remove flow so the UI can surface a meaningful error message
 /// instead of a silent fallthrough.

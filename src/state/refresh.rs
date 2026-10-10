@@ -143,11 +143,36 @@ impl AppState {
     }
 
     /// Fast refresh: tmux state + activity log (called every 1s).
-    /// Returns whether the sidebar's window is the active tmux window.
+    /// Returns whether this sidebar belongs to the active window of an
+    /// attached tmux session, i.e. whether a user can currently see it.
     pub fn refresh(&mut self) -> bool {
         self.refresh_now();
-        let (focused, window_active, _, _) = tmux::get_sidebar_pane_info(&self.tmux_pane);
-        let (mut sessions, mut process_snapshot) = tmux::query_sessions_with_process_snapshot();
+        let (pane_active, window_active, session_attached, _, _) =
+            tmux::get_sidebar_pane_info(&self.tmux_pane);
+        // Treat the sidebar as focused only when it is the active pane, of the
+        // active window, of the *attached* session — i.e. the pane the user is
+        // actually viewing. window_active/pane_active are both session-local:
+        // every background session still has one active window whose active
+        // pane may be its sidebar, so without the session_attached gate those
+        // background sidebars keep drawing the selection cursor into their
+        // hidden buffers, which flashes back as a stale "background focus"
+        // residual when the user returns to that session.
+        let sidebar_focused = pane_active && window_active && session_attached;
+        let sidebar_visible = window_active && session_attached;
+        // Process discovery shells out to `ps -eo` and walks the entire
+        // machine's process tree. Pane metadata still refreshes every UI tick,
+        // but process discovery is slow-changing and does not need to multiply
+        // by every sidebar instance every second.
+        const PROCESS_REFRESH_INTERVAL: Duration = Duration::from_secs(10);
+        let (mut sessions, mut process_snapshot) = if !self.timers.process_scan_initialized
+            || self.timers.last_process_refresh.elapsed() >= PROCESS_REFRESH_INTERVAL
+        {
+            self.timers.process_scan_initialized = true;
+            self.timers.last_process_refresh = std::time::Instant::now();
+            tmux::query_sessions_with_process_snapshot()
+        } else {
+            (tmux::query_sessions_without_process_snapshot(), None)
+        };
         self.sweep_dead_bg_shells_if_due(&mut sessions, &mut process_snapshot);
         if let Some(process_snapshot) = self.refresh_port_data(&sessions, process_snapshot.as_ref())
         {
@@ -155,16 +180,16 @@ impl AppState {
                 sessions,
                 &process_snapshot.live_agent_panes,
             );
-            self.apply_session_snapshot(focused, sessions);
+            self.apply_session_snapshot(sidebar_focused, sessions);
         } else {
-            self.apply_session_snapshot(focused, sessions);
+            self.apply_session_snapshot(sidebar_focused, sessions);
         }
         if self.sessions.dirty {
             self.refresh_session_names();
             self.sessions.dirty = false;
         }
         self.refresh_activity_data();
-        window_active
+        sidebar_visible
     }
 
     /// Apply the current `session_id → name` map to each pane so the
@@ -190,7 +215,12 @@ impl AppState {
         sessions: &[SessionInfo],
         process_snapshot: Option<&ProcessSnapshot>,
     ) -> Option<crate::port::PaneProcessSnapshot> {
-        const PORT_REFRESH_INTERVAL: Duration = Duration::from_secs(10);
+        // The port scan shells out to a full-system `lsof` (scans every
+        // process's TCP FDs), which is CPU/syscall-heavy on busy hosts. With
+        // one sidebar per window that cost is paid N times over, so keep it
+        // infrequent — listening ports rarely change, and 60s is plenty fresh
+        // for the dev-server labels this drives.
+        const PORT_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 
         if !self.timers.port_scan_initialized
             || self.timers.last_port_refresh.elapsed() >= PORT_REFRESH_INTERVAL
