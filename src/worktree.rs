@@ -11,7 +11,7 @@ mod slug;
 pub use config::{
     AGENT_OPTION, AGENTS, BRANCH_PREFIX_OPTION, CLAUDE_MODES, CODEX_MODES, DEFAULT_AGENT,
     DEFAULT_BRANCH_PREFIX, DEFAULT_MODE, DEFAULT_WORKTREE_DIR, OPENCODE_MODES, RemoveMode,
-    WORKTREE_DIR_OPTION, agent_command, modes_for,
+    WORKTREE_DIR_OPTION, agent_command, agent_index_for, modes_for,
 };
 pub use flow::{SpawnRequest, remove, spawn};
 pub use markers::{
