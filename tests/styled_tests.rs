@@ -410,6 +410,7 @@ fn test_theme_default_matches_shell_colors() {
     assert_eq!(theme.status_error, Color::Indexed(167));
     assert_eq!(theme.agent_claude, Color::Indexed(174));
     assert_eq!(theme.agent_codex, Color::Indexed(141));
+    assert_eq!(theme.agent_pi, Color::Indexed(209));
     assert_eq!(theme.text_active, Color::Indexed(255));
     assert_eq!(theme.text_muted, Color::Indexed(252));
     assert_eq!(theme.session_header, Color::Indexed(39));
