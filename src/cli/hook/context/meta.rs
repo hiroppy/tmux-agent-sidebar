@@ -67,6 +67,7 @@ pub(in crate::cli::hook) fn clear_all_meta(pane: &str) {
         tmux::PANE_SESSION_ID,
         PENDING_SESSION_END,
         PENDING_WORKTREE_REMOVE,
+        tmux::SIDEBAR_GIT_OPEN_PANE,
     ] {
         tmux::unset_pane_option(pane, key);
     }
@@ -275,6 +276,7 @@ mod tests {
             tmux::PANE_WAIT_REASON,
             PENDING_SESSION_END,
             PENDING_WORKTREE_REMOVE,
+            tmux::SIDEBAR_GIT_OPEN_PANE,
         ] {
             tmux::test_mock::set(pane, key, "x");
         }
@@ -295,6 +297,7 @@ mod tests {
             tmux::PANE_WAIT_REASON,
             PENDING_SESSION_END,
             PENDING_WORKTREE_REMOVE,
+            tmux::SIDEBAR_GIT_OPEN_PANE,
         ] {
             assert!(
                 !tmux::test_mock::contains(pane, key),

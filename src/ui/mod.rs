@@ -55,6 +55,7 @@ pub fn pet_enabled_from_tmux() -> bool {
 
 pub fn draw(frame: &mut Frame, state: &mut AppState) {
     state.layout.hyperlink_overlays.clear();
+    state.layout.git_file_targets.clear();
     let area = frame.area();
 
     let bot_h = state.bottom_panel_height;

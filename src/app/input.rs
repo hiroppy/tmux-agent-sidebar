@@ -36,6 +36,10 @@ pub(super) fn handle_event(
                         // next refresh tick and the tab renders stale data.
                         git_tab_active
                             .store(state.bottom_tab == BottomTab::GitStatus, Ordering::Relaxed);
+                    } else if state.bottom_tab == BottomTab::GitStatus
+                        && mouse.modifiers.contains(KeyModifiers::CONTROL)
+                    {
+                        state.open_git_file_at(mouse.row, mouse.column);
                     }
                 }
                 MouseEventKind::ScrollDown => {
