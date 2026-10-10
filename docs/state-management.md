@@ -103,7 +103,7 @@ Per-pane file-based state:
 | `pane_states.seen` | Every 1s | Set of pane IDs that have been seen as agents (bundled with `pane_states.map` under the `PaneRuntimeMap` wrapper) |
 | `version_notice` | Once at startup (bg fetch) | GitHub release update notice, `None` when up-to-date |
 | `sessions.names` | Every 10s (background thread) | `session_id → session name` map; scanned by `session_poll_loop` in `app/workers.rs` so the TUI thread never blocks on filesystem I/O |
-| `sessions.dirty` | On session map refresh / application tick | Marks the session map as changed so the per-pane session label walk only runs when needed |
+| `sessions.dirty` | On session map refresh / application tick | Marks the session map as changed so the per-pane session label walk only runs when needed. Between walks, `apply_session_snapshot` carries each unchanged pane's resolved label across the 1s rebuild — the tmux snapshot arrives with every label empty, so without the carry-over a row would show its session name for one tick and the bare agent name for the rest |
 
 ---
 
