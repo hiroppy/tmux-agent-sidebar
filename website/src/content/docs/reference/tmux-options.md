@@ -19,6 +19,7 @@ Most options must be set **before** loading the plugin in your `tmux.conf`. Colo
 | `@sidebar_notifications`         | `on`    | Master switch for desktop notifications                                                 |
 | `@sidebar_notifications_events`  | unset   | Restrict events — see [Notifications](/tmux-agent-sidebar/features/notifications/)       |
 | `@sidebar_pet`                  | `off`   | Show the animated pet in a 5-row band above the bottom panel                           |
+| `@sidebar_sort`                 | `repo`  | Agent list order: `repo` groups panes by git repository (groups sorted alphabetically); `started` (aliases `start`/`age`/`oldest`) is a single flat list of every session ordered by start time, oldest first, with repo headers and their spawn buttons hidden |
 
 ## Worktree spawn defaults
 
