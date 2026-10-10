@@ -167,6 +167,22 @@ fn agent_command_unknown_agent_is_echoed_raw() {
 }
 
 #[test]
+fn agent_command_cursor_prefers_agent_with_cursor_agent_fallback() {
+    assert_eq!(
+        agent_command("cursor", "default"),
+        "if command -v agent >/dev/null 2>&1; then agent; else cursor-agent; fi"
+    );
+}
+
+#[test]
+fn agent_command_cursor_fallback_preserves_force() {
+    assert_eq!(
+        agent_command("cursor", "bypassPermissions"),
+        "if command -v agent >/dev/null 2>&1; then agent --force; else cursor-agent --force; fi"
+    );
+}
+
+#[test]
 fn modes_for_claude_returns_claude_modes() {
     assert_eq!(modes_for("claude"), CLAUDE_MODES);
 }
@@ -193,6 +209,13 @@ fn agents_list_is_non_empty_and_unique() {
 
 #[test]
 fn mode_lists_start_with_default() {
+    for agent in AGENTS {
+        assert_eq!(
+            modes_for(agent).first().copied(),
+            Some("default"),
+            "{agent} mode list must start with `default`"
+        );
+    }
     assert_eq!(CLAUDE_MODES.first().copied(), Some("default"));
     assert_eq!(CODEX_MODES.first().copied(), Some("default"));
 }

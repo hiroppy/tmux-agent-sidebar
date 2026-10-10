@@ -457,13 +457,13 @@ fn full_output_has_expected_top_level_keys() {
     let agents = v.get("agents").and_then(Value::as_object).unwrap();
     let mut keys: Vec<&str> = agents.keys().map(String::as_str).collect();
     keys.sort();
-    assert_eq!(keys, vec!["claude", "codex"]);
+    assert_eq!(keys, vec!["claude", "codex", "cursor"]);
 }
 
 #[test]
 fn full_output_snippet_matches_single_agent_snippet() {
     let full = build_setup_output(FAKE_HOOK);
-    for agent in ["claude", "codex"] {
+    for agent in SETUP_AGENTS.iter().copied() {
         let from_full = full
             .pointer(&format!("/agents/{}/snippet", agent))
             .unwrap_or_else(|| panic!("missing snippet for {}", agent));
@@ -478,6 +478,7 @@ fn full_output_normalized_hooks_count_matches_table() {
     for (agent, table_len) in [
         ("claude", ClaudeAdapter::HOOK_REGISTRATIONS.len()),
         ("codex", CodexAdapter::HOOK_REGISTRATIONS.len()),
+        ("cursor", CursorAdapter::HOOK_REGISTRATIONS.len()),
     ] {
         let hooks = full
             .pointer(&format!("/agents/{}/hooks", agent))
@@ -507,6 +508,12 @@ fn full_output_normalized_entry_shape() {
     let codex_ss = full.pointer("/agents/codex/hooks/0").unwrap();
     assert_eq!(codex_ss.get("trigger"), Some(&json!("SessionStart")));
     assert_eq!(codex_ss.get("matcher"), Some(&json!("startup|resume")));
+
+    // Cursor's trigger names are camelCase upstream, unlike Claude/Codex.
+    let cursor_ss = full.pointer("/agents/cursor/hooks/0").unwrap();
+    assert_eq!(cursor_ss.get("trigger"), Some(&json!("sessionStart")));
+    assert_eq!(cursor_ss.get("event"), Some(&json!("session-start")));
+    assert_eq!(cursor_ss.get("matcher"), Some(&Value::Null));
 }
 
 #[test]
@@ -522,6 +529,154 @@ fn full_output_config_paths() {
             .and_then(Value::as_str),
         Some("~/.codex/hooks.json")
     );
+    assert_eq!(
+        full.pointer("/agents/cursor/config_path")
+            .and_then(Value::as_str),
+        Some("~/.cursor/hooks.json")
+    );
+}
+
+// ─── cursor: flat hooks.json schema ─────────────────────────────────
+
+#[test]
+fn snippet_cursor_carries_schema_version() {
+    // Cursor rejects a hooks.json without a top-level `version`.
+    let v = build_agent_snippet("cursor", FAKE_HOOK).unwrap();
+    assert_eq!(v.get("version"), Some(&json!(1)));
+}
+
+#[test]
+fn snippet_cursor_entries_are_flat_commands_without_matcher() {
+    // Unlike Claude/Codex, a Cursor trigger array holds the command action
+    // directly — no `{matcher, hooks: [...]}` wrapper. And because Cursor
+    // treats an absent matcher as "match everything" (and only accepts one
+    // on a subset of triggers), the key is omitted rather than set to "".
+    let v = build_agent_snippet("cursor", FAKE_HOOK).unwrap();
+    let entries = v
+        .pointer("/hooks/sessionStart")
+        .and_then(Value::as_array)
+        .expect("sessionStart should be an array");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].get("type"), Some(&json!("command")));
+    assert_eq!(
+        entries[0].get("command"),
+        Some(&json!("bash /fake/hook.sh cursor session-start"))
+    );
+    assert!(entries[0].get("hooks").is_none());
+    assert!(entries[0].get("matcher").is_none());
+}
+
+#[test]
+fn snippet_cursor_covers_every_registration() {
+    let v = build_agent_snippet("cursor", FAKE_HOOK).unwrap();
+    let hooks = v.get("hooks").unwrap().as_object().unwrap();
+    let mut expected_triggers: Vec<&str> = CursorAdapter::HOOK_REGISTRATIONS
+        .iter()
+        .map(|r| r.trigger)
+        .collect();
+    expected_triggers.sort();
+    expected_triggers.dedup();
+    let mut actual_triggers: Vec<&str> = hooks.keys().map(String::as_str).collect();
+    actual_triggers.sort();
+    assert_eq!(actual_triggers, expected_triggers);
+}
+
+#[test]
+fn snippet_cursor_post_tool_use_maps_to_activity_log() {
+    let v = build_agent_snippet("cursor", FAKE_HOOK).unwrap();
+    let cmd = v
+        .pointer("/hooks/postToolUse/0/command")
+        .and_then(Value::as_str)
+        .unwrap();
+    assert_eq!(cmd, "bash /fake/hook.sh cursor activity-log");
+}
+
+#[test]
+fn missing_hooks_is_empty_for_matching_cursor_config() {
+    // The flat-schema comparator must round-trip its own output, otherwise
+    // the notices popup would nag Cursor users who are correctly wired up.
+    let config = build_agent_snippet("cursor", FAKE_HOOK).unwrap();
+    assert!(missing_hooks("cursor", &config, FAKE_HOOK).is_empty());
+    assert!(!has_missing_hooks("cursor", &config, FAKE_HOOK));
+}
+
+#[test]
+fn missing_hooks_reports_removed_cursor_trigger() {
+    let mut config = build_agent_snippet("cursor", FAKE_HOOK).unwrap();
+    config
+        .get_mut("hooks")
+        .and_then(Value::as_object_mut)
+        .expect("top-level hooks object")
+        .remove("stop");
+
+    assert_eq!(
+        missing_hooks("cursor", &config, FAKE_HOOK),
+        vec!["stop".to_string()]
+    );
+}
+
+#[test]
+fn missing_hooks_accepts_cursor_entry_without_explicit_type() {
+    // Cursor documents `type` as defaulting to "command", so a hand-written
+    // config that omits it is still valid wiring and must not be flagged.
+    let mut config = build_agent_snippet("cursor", FAKE_HOOK).unwrap();
+    for entries in config
+        .get_mut("hooks")
+        .and_then(Value::as_object_mut)
+        .expect("top-level hooks object")
+        .values_mut()
+    {
+        for entry in entries.as_array_mut().expect("trigger array") {
+            entry.as_object_mut().expect("entry object").remove("type");
+        }
+    }
+
+    assert!(
+        missing_hooks("cursor", &config, FAKE_HOOK).is_empty(),
+        "an omitted `type` must be treated as a command action"
+    );
+}
+
+#[test]
+fn missing_hooks_reports_stale_cursor_command_path() {
+    let mut config = build_agent_snippet("cursor", FAKE_HOOK).unwrap();
+    config
+        .pointer_mut("/hooks/sessionStart/0")
+        .and_then(Value::as_object_mut)
+        .expect("sessionStart entry object")
+        .insert(
+            "command".to_string(),
+            json!("bash /definitely/not/here/hook.sh cursor session-start"),
+        );
+
+    assert_eq!(
+        missing_hooks("cursor", &config, FAKE_HOOK),
+        vec!["sessionStart".to_string()]
+    );
+}
+
+#[test]
+fn run_setup_cursor_returns_only_snippet() {
+    let (code, json) = run_setup(&["cursor".to_string()], FAKE_HOOK);
+    assert_eq!(code, 0);
+    let v = json.unwrap();
+    assert!(v.get("hooks").is_some());
+    assert!(v.get("agents").is_none());
+    assert!(v.get("hook_script").is_none());
+}
+
+#[test]
+fn config_path_for_agent_covers_every_setup_agent() {
+    // `load_current_config` silently reports "no config" for an agent whose
+    // path cannot be resolved, which would make the notices popup go quiet
+    // for that agent instead of reporting missing hooks.
+    for agent in SETUP_AGENTS.iter().copied() {
+        assert!(
+            config_path_for_agent(agent).is_some(),
+            "{agent} must resolve a config path"
+        );
+    }
+    assert!(config_path_for_agent("opencode").is_none());
 }
 
 #[test]
@@ -906,6 +1061,64 @@ const EXPECTED_FULL_OUTPUT: &str = r#"{
           ]
         }
       }
+    },
+    "cursor": {
+      "config_path": "~/.cursor/hooks.json",
+      "hooks": [
+        {
+          "command": "bash /fake/hook.sh cursor session-start",
+          "event": "session-start",
+          "matcher": null,
+          "trigger": "sessionStart"
+        },
+        {
+          "command": "bash /fake/hook.sh cursor session-end",
+          "event": "session-end",
+          "matcher": null,
+          "trigger": "sessionEnd"
+        },
+        {
+          "command": "bash /fake/hook.sh cursor stop",
+          "event": "stop",
+          "matcher": null,
+          "trigger": "stop"
+        },
+        {
+          "command": "bash /fake/hook.sh cursor activity-log",
+          "event": "activity-log",
+          "matcher": null,
+          "trigger": "postToolUse"
+        }
+      ],
+      "snippet": {
+        "hooks": {
+          "postToolUse": [
+            {
+              "command": "bash /fake/hook.sh cursor activity-log",
+              "type": "command"
+            }
+          ],
+          "sessionEnd": [
+            {
+              "command": "bash /fake/hook.sh cursor session-end",
+              "type": "command"
+            }
+          ],
+          "sessionStart": [
+            {
+              "command": "bash /fake/hook.sh cursor session-start",
+              "type": "command"
+            }
+          ],
+          "stop": [
+            {
+              "command": "bash /fake/hook.sh cursor stop",
+              "type": "command"
+            }
+          ]
+        },
+        "version": 1
+      }
     }
   },
   "hook_script": "/fake/hook.sh",
@@ -915,7 +1128,7 @@ const EXPECTED_FULL_OUTPUT: &str = r#"{
 #[test]
 fn full_output_normalized_command_matches_snippet_command() {
     let full = build_setup_output(FAKE_HOOK);
-    for agent in ["claude", "codex"] {
+    for &agent in SETUP_AGENTS {
         let hooks = full
             .pointer(&format!("/agents/{}/hooks", agent))
             .and_then(Value::as_array)
@@ -928,10 +1141,12 @@ fn full_output_normalized_command_matches_snippet_command() {
                 .and_then(Value::as_array)
                 .unwrap_or_else(|| panic!("snippet missing trigger {} for {}", trigger, agent));
             let found = group.iter().any(|slot: &Value| {
-                slot.pointer("/hooks/0/command")
-                    .and_then(Value::as_str)
-                    .map(|c| c == command)
-                    .unwrap_or(false)
+                // Nested (Claude/Codex) keeps the command one level down;
+                // flat (Cursor) puts it on the entry itself.
+                let candidate = slot
+                    .pointer("/hooks/0/command")
+                    .or_else(|| slot.get("command"));
+                candidate.and_then(Value::as_str) == Some(command)
             });
             assert!(
                 found,

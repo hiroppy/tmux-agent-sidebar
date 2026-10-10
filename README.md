@@ -1,6 +1,6 @@
 <h1 align="center">tmux-agent-sidebar</h1>
 
-<p align="center">One tmux sidebar that tracks every Claude Code, Codex, and OpenCode pane across every session and window. See status, background shells, prompts, Git state, activity, and worktrees without switching windows.</p>
+<p align="center">One tmux sidebar that tracks every Claude Code, Codex, OpenCode, and Cursor pane across every session and window. See status, background shells, prompts, Git state, activity, and worktrees without switching windows.</p>
 
 <p align="center"><img src="website/src/assets/captures/hero.png" alt="tmux-agent-sidebar hero" /></p>
 
@@ -13,7 +13,7 @@
 ## Features
 
 - **Every pane, one view** 
-  — tracks Claude Code, Codex, and OpenCode panes across all tmux sessions and windows
+  — tracks Claude Code, Codex, OpenCode, and Cursor panes across all tmux sessions and windows
 - **Live metadata** 
   — prompts, tool calls, response previews, background shell state, wait reasons, task progress, and subagent trees refresh as the agents work
 - **Worktrees, included** 
@@ -51,6 +51,7 @@ Reload tmux (`tmux source ~/.tmux.conf`), then press `prefix + I`. The install w
   ```
 
 - **Codex** — open a Codex pane, press `prefix + e`, click the yellow `ⓘ` badge, copy the setup snippet, paste it into the Codex pane.
+- **Cursor** — same flow as Codex, from a Cursor CLI (`agent`) pane. The snippet lands in `~/.cursor/hooks.json`.
 - **OpenCode** — symlink just the plugin file so your existing `~/.config/opencode/plugins/` contents stay untouched:
 
   ```sh
@@ -59,7 +60,7 @@ Reload tmux (`tmux source ~/.tmux.conf`), then press `prefix + I`. The install w
     ~/.config/opencode/plugins/tmux-agent-sidebar.js
   ```
 
-Full walkthroughs: [Claude Code setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/claude-code/) · [Codex setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/codex/) · [OpenCode setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/opencode/)
+Full walkthroughs: [Claude Code setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/claude-code/) · [Codex setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/codex/) · [OpenCode setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/opencode/) · [Cursor setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/cursor/)
 
 ### 3. Toggle the sidebar
 

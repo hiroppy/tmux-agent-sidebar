@@ -96,9 +96,10 @@ impl AppState {
     /// being pinned to the per-tick refresh loop, and the ⓘ badge no
     /// longer depends on which pane happens to be focused.
     ///
-    /// Both Claude and Codex are always evaluated so a user who closes
+    /// Claude, Codex, and Cursor are always evaluated so a user who closes
     /// their last agent pane still sees any outstanding hook setup
-    /// warnings.
+    /// warnings. OpenCode is absent because it wires up through the bundled
+    /// JS plugin bridge rather than a hook config file.
     pub fn refresh_notices(&mut self) {
         self.notices.claude_plugin_notice = compute_claude_plugin_notice(
             &self.notices.claude_plugin_status,
@@ -132,6 +133,7 @@ impl AppState {
                 vec![
                     crate::tmux::CLAUDE_AGENT.to_string(),
                     crate::tmux::CODEX_AGENT.to_string(),
+                    crate::tmux::CURSOR_AGENT.to_string(),
                 ],
                 &resolved_hook.path,
                 load_config,

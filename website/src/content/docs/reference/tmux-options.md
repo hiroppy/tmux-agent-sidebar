@@ -24,7 +24,7 @@ Most options must be set **before** loading the plugin in your `tmux.conf`. Colo
 
 | Option                            | Default     | Description                                               |
 | --------------------------------- | ----------- | --------------------------------------------------------- |
-| `@agent-sidebar-default-agent`    | `claude`    | Agent launched by `n`&nbsp;(also accepts `codex`)         |
+| `@agent-sidebar-default-agent`    | `claude`    | Agent launched by `n`&nbsp;(also accepts `codex`, `opencode`, `cursor`) |
 | `@agent-sidebar-branch-prefix`    | `agent/`    | Branch prefix for new worktrees                           |
 | `@agent-sidebar-worktree-dir`     | `.worktrees` | Repo-relative directory for sidebar-spawned worktrees; absolute paths and `..` are rejected |
 
@@ -55,6 +55,7 @@ Most options must be set **before** loading the plugin in your `tmux.conf`. Colo
 | `@sidebar_color_agent_claude`   | `174`&nbsp;(terracotta) | Claude brand color   |
 | `@sidebar_color_agent_codex`    | `141`&nbsp;(purple)     | Codex brand color    |
 | `@sidebar_color_agent_opencode` | `117`&nbsp;(light blue) | OpenCode brand color |
+| `@sidebar_color_agent_cursor`   | `180`&nbsp;(sand)       | Cursor brand color   |
 
 ## Text colors
 

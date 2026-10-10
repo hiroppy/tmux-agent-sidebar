@@ -137,7 +137,9 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
             tool_name,
             tool_input,
             tool_response,
-        } => activity::handle_activity_log(pane, &tool_name, &tool_input, &tool_response),
+        } => {
+            activity::handle_activity_log(pane, agent_name, &tool_name, &tool_input, &tool_response)
+        }
         AgentEvent::PermissionDenied {
             agent,
             cwd,

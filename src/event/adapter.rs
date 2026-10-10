@@ -2,7 +2,7 @@ use serde_json::Value;
 
 use super::AgentEvent;
 use crate::adapter;
-use crate::tmux::{CLAUDE_AGENT, CODEX_AGENT, OPENCODE_AGENT};
+use crate::tmux::{CLAUDE_AGENT, CODEX_AGENT, CURSOR_AGENT, OPENCODE_AGENT};
 
 /// Adapter that converts external agent events into internal `AgentEvent`.
 pub trait EventAdapter {
@@ -14,6 +14,7 @@ pub fn resolve_adapter(agent_name: &str) -> Option<Box<dyn EventAdapter>> {
         CLAUDE_AGENT => Some(Box::new(adapter::claude::ClaudeAdapter)),
         CODEX_AGENT => Some(Box::new(adapter::codex::CodexAdapter)),
         OPENCODE_AGENT => Some(Box::new(adapter::opencode::OpenCodeAdapter)),
+        CURSOR_AGENT => Some(Box::new(adapter::cursor::CursorAdapter)),
         _ => None,
     }
 }
@@ -45,6 +46,12 @@ mod tests {
     #[test]
     fn resolve_opencode() {
         let adapter = resolve_adapter("opencode");
+        assert!(adapter.is_some());
+    }
+
+    #[test]
+    fn resolve_cursor() {
+        let adapter = resolve_adapter("cursor");
         assert!(adapter.is_some());
     }
 
@@ -89,6 +96,23 @@ mod tests {
         match event {
             AgentEvent::UserPromptSubmit { agent, .. } => assert_eq!(agent, "opencode"),
             other => panic!("expected UserPromptSubmit, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cursor_adapter_sets_agent_cursor() {
+        // Cursor CLI has no working prompt hook, so `session-start` is the
+        // event that stamps `@pane_agent` for a Cursor pane.
+        let adapter = resolve_adapter("cursor").unwrap();
+        let event = adapter
+            .parse("session-start", &json!({"workspace_roots": ["/repo"]}))
+            .unwrap();
+        match event {
+            AgentEvent::SessionStart { agent, cwd, .. } => {
+                assert_eq!(agent, "cursor");
+                assert_eq!(cwd, "/repo");
+            }
+            other => panic!("expected SessionStart, got {:?}", other),
         }
     }
 
