@@ -36,12 +36,12 @@ fn test_agents_auto_scroll_keeps_selected_visible() {
 
     // Render with a small height. With the 2-row header, the first pane
     // still stays visible without needing to scroll.
-    let _ = render_to_string(&mut state, 28, 26);
+    let _ = render_to_string(&mut state, 28, 30);
     assert_eq!(state.scrolls.panes.offset, 0, "initially at top");
 
     // Select last agent and re-render
     state.global.selected_pane_row = 9;
-    let _ = render_to_string(&mut state, 28, 26);
+    let _ = render_to_string(&mut state, 28, 30);
     assert!(
         state.scrolls.panes.offset > 0,
         "should scroll down to show selected agent"
@@ -118,14 +118,12 @@ fn test_running_icon_blink_off() {
     state.focus_state.sidebar_focused = false;
     state.spinner_frame = 0;
 
-    insta::assert_snapshot!(render_to_string(&mut state, 28, 25), @r"
+    insta::assert_snapshot!(render_to_string(&mut state, 28, 25), @"
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
     ⓘ                        — ▾
     project
     ┃ ● claude
-    ╭ Activity │ Git ──────────╮
-    │      No activity yet     │
-    ╰──────────────────────────╯
+     ▸ Activity / Git       [b]
     ");
 }
 
@@ -147,14 +145,12 @@ fn test_running_spinner_frame_advances() {
     state.focus_state.sidebar_focused = false;
     state.spinner_frame = 3;
 
-    insta::assert_snapshot!(render_to_string(&mut state, 28, 25), @r"
+    insta::assert_snapshot!(render_to_string(&mut state, 28, 25), @"
      ≡1  ●1  ◎0  ◐0  ○0  ✕0
     ⓘ                        — ▾
     project
     ┃ ● claude
-    ╭ Activity │ Git ──────────╮
-    │      No activity yet     │
-    ╰──────────────────────────╯
+     ▸ Activity / Git       [b]
     ");
 }
 
@@ -175,14 +171,12 @@ fn test_waiting_icon() {
     state.rebuild_row_targets();
     state.focus_state.sidebar_focused = false;
 
-    insta::assert_snapshot!(render_to_string(&mut state, 28, 25), @r"
+    insta::assert_snapshot!(render_to_string(&mut state, 28, 25), @"
      ≡1  ●0  ◎0  ◐1  ○0  ✕0
     ⓘ                        — ▾
     project
     ┃ ◐ claude
-    ╭ Activity │ Git ──────────╮
-    │      No activity yet     │
-    ╰──────────────────────────╯
+     ▸ Activity / Git       [b]
     ");
 }
 
@@ -203,14 +197,12 @@ fn test_error_icon() {
     state.rebuild_row_targets();
     state.focus_state.sidebar_focused = false;
 
-    insta::assert_snapshot!(render_to_string(&mut state, 28, 25), @r"
+    insta::assert_snapshot!(render_to_string(&mut state, 28, 25), @"
      ≡1  ●0  ◎0  ◐0  ○0  ✕1
     ⓘ                        — ▾
     project
     ┃ ✕ claude
-    ╭ Activity │ Git ──────────╮
-    │      No activity yet     │
-    ╰──────────────────────────╯
+     ▸ Activity / Git       [b]
     ");
 }
 
@@ -251,7 +243,7 @@ fn test_agents_auto_scroll_shows_last_selected_pane() {
     // Select the last agent
     state.global.selected_pane_row = 5;
     // Use a tight height so agents area is small (height - 1 margin - 20 bottom)
-    let _ = render_to_string(&mut state, 28, 26);
+    let _ = render_to_string(&mut state, 28, 30);
 
     // Auto-scroll should have moved forward to keep the last-selected pane visible.
     assert!(
@@ -288,17 +280,21 @@ fn test_agents_auto_scroll_up_shows_group_header() {
 
     // Scroll to bottom
     state.global.selected_pane_row = 7;
-    let _ = render_to_string(&mut state, 28, 26);
+    let _ = render_to_string(&mut state, 28, 30);
     assert!(state.scrolls.panes.offset > 0, "should have scrolled down");
 
     // Now select first agent and re-render
     state.global.selected_pane_row = 0;
     // The snapshot locks in that the `project` repo header is visible after
     // scrolling back up to the first agent.
-    insta::assert_snapshot!(render_to_string(&mut state, 28, 26), @r"
+    insta::assert_snapshot!(render_to_string(&mut state, 28, 30), @"
      ≡8  ●0  ◎0  ◐0  ○8  ✕0
     ⓘ                        — ▾
     project
+      ○ claude
+        Waiting for prompt…
+    ┃ ○ claude
+        Waiting for prompt…
       ○ claude
         Waiting for prompt…
     ╭ Activity │ Git ──────────╮

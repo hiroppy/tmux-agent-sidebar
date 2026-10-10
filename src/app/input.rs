@@ -22,11 +22,23 @@ pub(super) fn handle_event(
         Event::Key(key) => handle_key_event(key, state, git_tab_active),
         Event::Mouse(mouse) => {
             let term_height = terminal.size().map(|s| s.height).unwrap_or(0);
-            let bottom_h = state.bottom_panel_height;
+            // Effective on-screen height of the bottom panel, matching what
+            // `ui::draw` actually rendered: 0 when hidden, the whole viewport
+            // in the compact accordion, else the fixed configured height.
+            let (compact, shown) = state.bottom_visibility(term_height);
+            let bottom_h = if !shown {
+                0
+            } else if compact {
+                term_height
+            } else {
+                state.bottom_panel_height
+            };
             match mouse.kind {
                 MouseEventKind::Down(MouseButton::Left) => {
                     let bottom_start = term_height.saturating_sub(bottom_h);
-                    if mouse.row < bottom_start {
+                    if state.handle_bottom_toggle_click(mouse.row, mouse.column) {
+                        // Drawer handle on a compact window: toggled the panel.
+                    } else if mouse.row < bottom_start {
                         state.handle_mouse_click(mouse.row, mouse.column);
                     } else if mouse.row == bottom_start {
                         state.handle_bottom_tab_click(mouse.column);
@@ -161,6 +173,13 @@ pub(super) fn handle_key_event(
             state.next_bottom_tab();
             git_tab_active.store(state.bottom_tab == BottomTab::GitStatus, Ordering::Relaxed);
         }
+        // Toggle the bottom Activity/Git panel. On a short window it is hidden
+        // by default so the session list stays usable; `b` reveals it as a
+        // full-height accordion (and hides it again). On a tall window `b`
+        // hides it to reclaim list space.
+        KeyCode::Char('b') => {
+            state.toggle_bottom_panel();
+        }
         _ => {}
     }
     true
@@ -174,7 +193,10 @@ fn pane_nav_down(state: &mut AppState) {
         Focus::Panes => {
             if state.move_pane_selection(1) {
                 state.global.queue_cursor_save();
-            } else {
+            } else if state.bottom_panel_visible() {
+                // Only descend into the Activity log when it is actually on
+                // screen; when the panel is auto-hidden on a short window,
+                // focus stays on the (full-height) list.
                 state.focus_state.focus = Focus::ActivityLog;
             }
         }
@@ -340,6 +362,45 @@ mod tests {
         // Past the last entry the popup nav helper is a no-op.
         handle_key_event(ctrl_key('n'), &mut state, &flag);
         assert_eq!(state.repo_popup_selected(), 2);
+    }
+
+    #[test]
+    fn b_toggles_bottom_panel_visibility() {
+        let mut state = AppState::new("%99".into());
+        state.bottom_panel_height = 20;
+        // 25 < 20 + 10 -> compact, so the panel is auto-hidden by default.
+        state.last_viewport_height = 25;
+        let flag = AtomicBool::new(false);
+
+        assert!(!state.bottom_panel_visible());
+        handle_key_event(key(KeyCode::Char('b')), &mut state, &flag);
+        assert!(state.bottom_panel_visible());
+        handle_key_event(key(KeyCode::Char('b')), &mut state, &flag);
+        assert!(!state.bottom_panel_visible());
+    }
+
+    #[test]
+    fn pane_nav_down_does_not_focus_hidden_activity_log() {
+        // One pane, compact window -> Activity log is auto-hidden. Pressing
+        // down at the end of the list must keep focus on Panes, not descend
+        // into the invisible log.
+        let mut state = AppState::new("%99".into());
+        state.layout.pane_row_targets = vec![RowTarget {
+            pane_id: "%1".into(),
+        }];
+        state.global.selected_pane_row = 0;
+        state.focus_state.focus = Focus::Panes;
+        state.bottom_panel_height = 20;
+        state.last_viewport_height = 25; // compact -> hidden
+        let flag = AtomicBool::new(false);
+
+        handle_key_event(key(KeyCode::Down), &mut state, &flag);
+        assert_eq!(state.focus_state.focus, Focus::Panes);
+
+        // On a tall window the log is visible, so the same key descends.
+        state.last_viewport_height = 60;
+        handle_key_event(key(KeyCode::Down), &mut state, &flag);
+        assert_eq!(state.focus_state.focus, Focus::ActivityLog);
     }
 
     #[test]

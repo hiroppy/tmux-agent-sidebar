@@ -509,6 +509,15 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
     popups::render_if_open(frame, state, area);
 }
 
+/// Render the active modal popup (spawn input / remove confirm / repo filter /
+/// notices) as an overlay in `area`, if one is open. `draw_agents` already does
+/// this for the list view; the compact accordion path (which draws the bottom
+/// panel instead of the list) calls this so an open popup stays visible there
+/// too, rendered last so it keeps precedence.
+pub fn render_popups(frame: &mut Frame, state: &mut AppState, area: Rect) {
+    popups::render_if_open(frame, state, area);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
