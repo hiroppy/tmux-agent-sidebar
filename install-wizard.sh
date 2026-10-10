@@ -4,7 +4,38 @@ set -euo pipefail
 
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="$PLUGIN_DIR/bin"
-BINARY="$BIN_DIR/tmux-agent-sidebar"
+function detect_platform() {
+    local os arch
+    os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+    arch="$(uname -m)"
+
+    case "$os" in
+        darwin|linux) ;;
+        *)
+            echo "Unsupported OS: $os" >&2
+            return 1
+            ;;
+    esac
+
+    case "$arch" in
+        x86_64|amd64)  arch="x86_64" ;;
+        arm64|aarch64) arch="aarch64" ;;
+        *)
+            echo "Unsupported architecture: $arch" >&2
+            return 1
+            ;;
+    esac
+
+    echo "${os}-${arch}"
+}
+
+# Use platform suffix to avoid binary conflicts during multi-device sync
+PLATFORM="$(detect_platform 2>/dev/null || echo "")"
+if [[ -n "$PLATFORM" ]]; then
+    BINARY="$BIN_DIR/tmux-agent-sidebar-${PLATFORM}"
+else
+    BINARY="$BIN_DIR/tmux-agent-sidebar"
+fi
 REPO="hiroppy/tmux-agent-sidebar"
 action="${1:-}"
 
@@ -27,30 +58,6 @@ function finish {
 }
 trap finish EXIT
 
-function detect_platform() {
-    local os arch
-    os="$(uname -s | tr '[:upper:]' '[:lower:]')"
-    arch="$(uname -m)"
-
-    case "$os" in
-        darwin|linux) ;;
-        *)
-            echo "Unsupported OS: $os"
-            exit 1
-            ;;
-    esac
-
-    case "$arch" in
-        x86_64|amd64)  arch="x86_64" ;;
-        arm64|aarch64) arch="aarch64" ;;
-        *)
-            echo "Unsupported architecture: $arch"
-            exit 1
-            ;;
-    esac
-
-    echo "${os}-${arch}"
-}
 
 function stop_running_instances() {
     # Kill any running instances so the next launch picks up the new binary.
@@ -78,12 +85,17 @@ function download_binary() {
     local url="https://github.com/$REPO/releases/latest/download/$asset_name"
 
     echo "Downloading binary from $url"
-    if ! curl -fSL "$url" -o "$BINARY"; then
+    # Write to temp file, then atomic rename — avoids the reloader
+    # seeing a partially-written binary and re-triggering the wizard
+    local tmp="${BINARY}.tmp.$$"
+    if ! curl -fSL "$url" -o "$tmp"; then
+        rm -f "$tmp"
         echo ""
         echo "Download failed. No release found or network error."
         echo "Try 'Build from source' instead."
         return 1
     fi
+    mv "$tmp" "$BINARY"
     chmod +x "$BINARY"
 
     post_install_fixups
