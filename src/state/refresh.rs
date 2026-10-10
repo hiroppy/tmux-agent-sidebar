@@ -113,9 +113,21 @@ impl AppState {
         let _ = std::fs::remove_file(activity::log_file_path(pane_id));
     }
 
-    fn filter_sessions_to_live_agent_panes(
+    /// Drop panes in `confirmed_dead_panes` from `sessions`. Deliberately
+    /// keyed on the *debounced* confirmed-dead set (2+ consecutive
+    /// liveness misses), not the raw single-scan alive/dead result —
+    /// excluding a pane the instant one scan misses it, independent of
+    /// `refresh_port_data`'s own miss-counter, made a genuinely dead pane
+    /// flicker in and out of the list every `PORT_REFRESH_INTERVAL`
+    /// forever: excluded (and its runtime state pruned, silently
+    /// resetting the miss counter to 0) on the tick right after a scan
+    /// runs, then back — still showing stale metadata, since nothing had
+    /// actually cleared `@pane_agent` yet — for every tick until the next
+    /// scan. See `refresh_port_data` for where `confirmed_dead_panes` is
+    /// computed.
+    fn filter_sessions_excluding_dead_panes(
         sessions: Vec<SessionInfo>,
-        live_agent_panes: &HashSet<String>,
+        confirmed_dead_panes: &HashSet<String>,
     ) -> Vec<SessionInfo> {
         let mut out = Vec::new();
         for mut session in sessions {
@@ -123,7 +135,7 @@ impl AppState {
             for mut window in session.windows {
                 window
                     .panes
-                    .retain(|pane| live_agent_panes.contains(&pane.pane_id));
+                    .retain(|pane| !confirmed_dead_panes.contains(&pane.pane_id));
                 if !window.panes.is_empty() {
                     windows.push(window);
                 }
@@ -149,12 +161,11 @@ impl AppState {
         let (focused, window_active, _, _) = tmux::get_sidebar_pane_info(&self.tmux_pane);
         let (mut sessions, mut process_snapshot) = tmux::query_sessions_with_process_snapshot();
         self.sweep_dead_bg_shells_if_due(&mut sessions, &mut process_snapshot);
-        if let Some(process_snapshot) = self.refresh_port_data(&sessions, process_snapshot.as_ref())
+        if let Some(confirmed_dead_panes) =
+            self.refresh_port_data(&sessions, process_snapshot.as_ref())
         {
-            let sessions = Self::filter_sessions_to_live_agent_panes(
-                sessions,
-                &process_snapshot.live_agent_panes,
-            );
+            let sessions =
+                Self::filter_sessions_excluding_dead_panes(sessions, &confirmed_dead_panes);
             self.apply_session_snapshot(focused, sessions);
         } else {
             self.apply_session_snapshot(focused, sessions);
@@ -185,24 +196,55 @@ impl AppState {
         }
     }
 
+    /// Run the periodic `ps`-based liveness scan when due. Returns
+    /// `Some(confirmed_dead_panes)` when a scan actually ran this tick —
+    /// the set of pane ids that have now missed [`DEAD_SCAN_THRESHOLD`]
+    /// consecutive scans and had their `@pane_agent` metadata cleared —
+    /// or `None` when the scan interval hasn't elapsed yet (the common
+    /// case, since this only runs once per `PORT_REFRESH_INTERVAL`).
+    ///
+    /// Callers must filter their pane list against the returned set
+    /// (see `filter_sessions_excluding_dead_panes`), not against this
+    /// scan's raw single-tick alive/dead result — a pane that has only
+    /// missed once is deliberately still considered present.
     pub(crate) fn refresh_port_data(
         &mut self,
         sessions: &[SessionInfo],
         process_snapshot: Option<&ProcessSnapshot>,
-    ) -> Option<crate::port::PaneProcessSnapshot> {
+    ) -> Option<HashSet<String>> {
         const PORT_REFRESH_INTERVAL: Duration = Duration::from_secs(10);
+        // A pane must miss this many consecutive liveness scans before its
+        // agent metadata is cleared, and before it's excluded from the
+        // sidebar's pane list. `ps`-based process-tree matching can miss a
+        // genuinely running agent on a single scan — e.g. a transient
+        // fork/exec moment, or the burst of tmux hook activity that fires
+        // around a session/window switch — and reacting to that false
+        // positive on the very same tick made a live agent pane vanish
+        // from the sidebar until it happened to fire another hook event
+        // (metadata clearing) or flicker in and out every scan interval
+        // forever (list exclusion, since excluding a pane also prunes its
+        // runtime state, silently resetting this very counter to 0 before
+        // it could ever reach the threshold). Requiring repeat misses
+        // costs at most one extra scan interval of staleness on a
+        // genuinely dead pane, in exchange for not losing or flickering
+        // live ones.
+        const DEAD_SCAN_THRESHOLD: u32 = 2;
 
         if !self.timers.port_scan_initialized
             || self.timers.last_port_refresh.elapsed() >= PORT_REFRESH_INTERVAL
         {
             let scanned = crate::port::scan_session_process_snapshot(sessions, process_snapshot)?;
             let mut updates: Vec<(String, Vec<u16>, Option<String>)> = Vec::new();
-            let mut dead_panes: Vec<String> = Vec::new();
+            let mut missed_panes: Vec<String> = Vec::new();
             for session in sessions {
                 for window in &session.windows {
                     for pane in &window.panes {
-                        if !scanned.live_agent_panes.contains(&pane.pane_id) {
-                            dead_panes.push(pane.pane_id.clone());
+                        if scanned.live_agent_panes.contains(&pane.pane_id) {
+                            if let Some(state) = self.pane_states.get_mut(&pane.pane_id) {
+                                state.dead_scan_misses = 0;
+                            }
+                        } else {
+                            missed_panes.push(pane.pane_id.clone());
                         }
                         updates.push((
                             pane.pane_id.clone(),
@@ -221,13 +263,21 @@ impl AppState {
                 pane_state.ports = ports;
                 pane_state.command = command;
             }
-            for pane_id in dead_panes {
-                Self::clear_dead_agent_metadata(&pane_id);
-                self.clear_pane_state(&pane_id);
+            let mut confirmed_dead: HashSet<String> = HashSet::new();
+            for pane_id in missed_panes {
+                let pane_state = self.pane_state_mut(&pane_id);
+                pane_state.dead_scan_misses += 1;
+                if pane_state.dead_scan_misses >= DEAD_SCAN_THRESHOLD {
+                    confirmed_dead.insert(pane_id);
+                }
+            }
+            for pane_id in &confirmed_dead {
+                Self::clear_dead_agent_metadata(pane_id);
+                self.clear_pane_state(pane_id);
             }
             self.timers.port_scan_initialized = true;
             self.timers.last_port_refresh = std::time::Instant::now();
-            return Some(scanned);
+            return Some(confirmed_dead);
         }
 
         None
@@ -797,11 +847,11 @@ mod tests {
     }
 
     #[test]
-    fn filter_sessions_to_live_agent_panes_removes_dead_panes() {
+    fn filter_sessions_excluding_dead_panes_removes_confirmed_dead() {
         let sessions = test_session(vec![test_pane("%1"), test_pane("%2")]);
-        let live = HashSet::from(["%2".to_string()]);
+        let confirmed_dead = HashSet::from(["%1".to_string()]);
 
-        let filtered = AppState::filter_sessions_to_live_agent_panes(sessions, &live);
+        let filtered = AppState::filter_sessions_excluding_dead_panes(sessions, &confirmed_dead);
 
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].windows.len(), 1);
@@ -810,13 +860,178 @@ mod tests {
     }
 
     #[test]
-    fn filter_sessions_to_live_agent_panes_drops_empty_sessions() {
+    fn filter_sessions_excluding_dead_panes_keeps_everyone_when_none_confirmed_dead() {
+        // A pane that merely missed one liveness scan (but hasn't reached
+        // `DEAD_SCAN_THRESHOLD`) must NOT be excluded — see the module
+        // doc comment on `filter_sessions_excluding_dead_panes`.
         let sessions = test_session(vec![test_pane("%1")]);
-        let live = HashSet::new();
+        let confirmed_dead = HashSet::new();
 
-        let filtered = AppState::filter_sessions_to_live_agent_panes(sessions, &live);
+        let filtered = AppState::filter_sessions_excluding_dead_panes(sessions, &confirmed_dead);
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].windows[0].panes.len(), 1);
+    }
+
+    #[test]
+    fn filter_sessions_excluding_dead_panes_drops_empty_sessions() {
+        let sessions = test_session(vec![test_pane("%1")]);
+        let confirmed_dead = HashSet::from(["%1".to_string()]);
+
+        let filtered = AppState::filter_sessions_excluding_dead_panes(sessions, &confirmed_dead);
 
         assert!(filtered.is_empty());
+    }
+
+    // ─── refresh_port_data dead-scan debounce ────────────────────────
+    //
+    // Regression coverage for the "agent pane vanishes and stays gone"
+    // bug: a single `ps`-based liveness miss (e.g. a snapshot taken at
+    // an inconvenient moment around a tmux session/window switch) must
+    // not immediately clear a pane's `@pane_agent` metadata. Only a
+    // second consecutive miss should do that.
+
+    fn agent_pane(id: &str, pid: u32) -> PaneInfo {
+        let mut p = test_pane(id);
+        p.pane_pid = Some(pid);
+        p
+    }
+
+    #[test]
+    fn refresh_port_data_does_not_clear_metadata_on_single_miss() {
+        let _guard = tmux::test_mock::install();
+        let pane_id = "%LIVE_BUT_MISSED_ONCE";
+        tmux::test_mock::set(pane_id, tmux::PANE_AGENT, "claude");
+
+        let mut state = AppState::new("%99".into());
+        let sessions = test_session(vec![agent_pane(pane_id, 100)]);
+        // ps output has no process at all for pid 100 — a total miss,
+        // same as a racy/incomplete snapshot would produce.
+        let snapshot = process_snapshot("1 0 launchd /sbin/launchd\n");
+
+        state.refresh_port_data(&sessions, Some(&snapshot));
+
+        assert_eq!(
+            state.pane_state(pane_id).map(|s| s.dead_scan_misses),
+            Some(1),
+            "first miss should be recorded but not yet acted on"
+        );
+        assert!(
+            tmux::test_mock::contains(pane_id, tmux::PANE_AGENT),
+            "a single miss must not clear agent metadata"
+        );
+    }
+
+    #[test]
+    fn refresh_port_data_clears_metadata_after_two_consecutive_misses() {
+        let _guard = tmux::test_mock::install();
+        let pane_id = "%TRULY_DEAD";
+        tmux::test_mock::set(pane_id, tmux::PANE_AGENT, "claude");
+
+        let mut state = AppState::new("%99".into());
+        let sessions = test_session(vec![agent_pane(pane_id, 100)]);
+        let snapshot = process_snapshot("1 0 launchd /sbin/launchd\n");
+
+        state.refresh_port_data(&sessions, Some(&snapshot));
+        // Force the interval gate open again so the second scan runs
+        // immediately instead of waiting out `PORT_REFRESH_INTERVAL`.
+        state.timers.port_scan_initialized = false;
+        state.refresh_port_data(&sessions, Some(&snapshot));
+
+        assert!(
+            !tmux::test_mock::contains(pane_id, tmux::PANE_AGENT),
+            "a second consecutive miss must clear agent metadata"
+        );
+        assert!(state.pane_state(pane_id).is_none());
+    }
+
+    #[test]
+    fn refresh_port_data_resets_miss_counter_once_pane_is_seen_alive_again() {
+        let _guard = tmux::test_mock::install();
+        let pane_id = "%FLAKY";
+        tmux::test_mock::set(pane_id, tmux::PANE_AGENT, "claude");
+
+        let mut state = AppState::new("%99".into());
+        let sessions = test_session(vec![agent_pane(pane_id, 100)]);
+        let dead_snapshot = process_snapshot("1 0 launchd /sbin/launchd\n");
+        let alive_snapshot = process_snapshot("100 1 claude /usr/local/bin/claude\n");
+
+        // Miss once.
+        state.refresh_port_data(&sessions, Some(&dead_snapshot));
+        assert_eq!(
+            state.pane_state(pane_id).map(|s| s.dead_scan_misses),
+            Some(1)
+        );
+
+        // Seen alive again — counter must reset, not merely hold steady.
+        state.timers.port_scan_initialized = false;
+        state.refresh_port_data(&sessions, Some(&alive_snapshot));
+        assert_eq!(
+            state.pane_state(pane_id).map(|s| s.dead_scan_misses),
+            Some(0)
+        );
+
+        // A subsequent single miss must not clear metadata, proving the
+        // counter actually reset instead of continuing to accumulate.
+        state.timers.port_scan_initialized = false;
+        state.refresh_port_data(&sessions, Some(&dead_snapshot));
+        assert!(tmux::test_mock::contains(pane_id, tmux::PANE_AGENT));
+    }
+
+    #[test]
+    fn dead_scan_miss_counter_survives_apply_session_snapshot_between_scans() {
+        // Full regression for the "flickers forever, never actually
+        // clears" bug: `refresh()` calls `apply_session_snapshot` (which
+        // runs `prune_pane_states_to_current_panes`) between every pair
+        // of `refresh_port_data` scans. If the pane list handed to
+        // `apply_session_snapshot` wrongly excluded a pane after only one
+        // miss, `prune_pane_states_to_current_panes` would delete its
+        // runtime state — silently resetting `dead_scan_misses` to 0
+        // before a second miss could ever confirm it dead. This test
+        // drives the exact sequence `refresh()` does and asserts the
+        // counter survives.
+        let _guard = tmux::test_mock::install();
+        let pane_id = "%FLICKER_REGRESSION";
+        tmux::test_mock::set(pane_id, tmux::PANE_AGENT, "claude");
+
+        let mut state = AppState::new("%99".into());
+        let sessions = test_session(vec![agent_pane(pane_id, 100)]);
+        let dead_snapshot = process_snapshot("1 0 launchd /sbin/launchd\n");
+
+        // Scan 1: miss. Mirror `refresh()`'s exact post-scan sequence —
+        // filter using the returned (debounced) confirmed-dead set, then
+        // apply the snapshot (which prunes runtime state to what's left
+        // in the pane list).
+        let confirmed_dead = state
+            .refresh_port_data(&sessions, Some(&dead_snapshot))
+            .expect("first scan always runs");
+        assert!(
+            confirmed_dead.is_empty(),
+            "a single miss must not be confirmed dead yet"
+        );
+        let filtered =
+            AppState::filter_sessions_excluding_dead_panes(sessions.clone(), &confirmed_dead);
+        state.apply_session_snapshot(false, filtered);
+        assert_eq!(
+            state.pane_state(pane_id).map(|s| s.dead_scan_misses),
+            Some(1),
+            "apply_session_snapshot must not have pruned the miss counter"
+        );
+        assert!(
+            state
+                .repo_groups
+                .iter()
+                .any(|g| g.panes.iter().any(|(p, _)| p.pane_id == pane_id)),
+            "pane must still be visible after only one miss"
+        );
+
+        // Scan 2: second consecutive miss confirms it dead.
+        state.timers.port_scan_initialized = false;
+        let confirmed_dead = state
+            .refresh_port_data(&sessions, Some(&dead_snapshot))
+            .expect("second scan runs once interval elapses");
+        assert!(confirmed_dead.contains(pane_id));
+        assert!(!tmux::test_mock::contains(pane_id, tmux::PANE_AGENT));
     }
 
     // ─── refresh_session_names ──────────────────────────────────────

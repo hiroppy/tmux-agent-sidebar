@@ -21,6 +21,13 @@ pub struct PaneRuntimeState {
     /// Used by `refresh_task_progress` to skip the (potentially expensive)
     /// re-parse when the log has not been touched since the previous tick.
     pub task_progress_log_mtime: Option<std::time::SystemTime>,
+    /// Consecutive `refresh_port_data` liveness scans in which this pane's
+    /// process tree did not appear to contain its agent. Reset to 0 the
+    /// moment a scan finds it alive again. `refresh_port_data` only clears
+    /// the pane's agent metadata once this reaches its threshold, so a
+    /// single missed/racy `ps` snapshot can't make a genuinely running
+    /// agent vanish from the sidebar.
+    pub dead_scan_misses: u32,
 }
 
 #[derive(Debug, Clone)]
