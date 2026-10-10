@@ -909,6 +909,41 @@ fn test_selection_bg_color_applied() {
     ");
 }
 
+// ─── Selection under the theme-adaptive ANSI palette ────────────────
+
+#[test]
+fn test_ansi_theme_selection_uses_reverse_video() {
+    let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
+    let mut state = make_state(vec![SessionInfo {
+        session_name: "main".into(),
+        windows: vec![WindowInfo {
+            window_id: "@1".into(),
+            window_name: "project".into(),
+            window_active: true,
+            auto_rename: false,
+            panes: vec![pane.clone()],
+        }],
+    }]);
+    state.repo_groups = vec![make_repo_group("project", vec![pane])];
+    state.rebuild_row_targets();
+    state.focus_state.sidebar_focused = true;
+    state.global.selected_pane_row = 0;
+    state.theme = ColorTheme::ansi();
+    state.bottom_panel_height = 0;
+
+    // Under the ANSI palette the selected row (row 3, below the `project`
+    // header) is a uniform reverse-video bar — every cell carries `rev`, none
+    // carries a fixed `bg:`, legible on light and dark alike — and body text
+    // carries no `fg:` tag because it follows the terminal default (Reset).
+    insta::assert_snapshot!(render_to_styled_string(&mut state, 28, 6), @"
+     ≡[fg:LightBlue]1  ●[fg:DarkGray]0[fg:DarkGray]  ◎[fg:DarkGray]0[fg:DarkGray]  ◐[fg:DarkGray]0[fg:DarkGray]  ○[fg:DarkGray]1  ✕[fg:DarkGray]0[fg:DarkGray]
+    ⓘ[fg:Yellow]                        —[fg:DarkGray] ▾[fg:DarkGray]
+    p[fg:Cyan]r[fg:Cyan]o[fg:Cyan]j[fg:Cyan]e[fg:Cyan]c[fg:Cyan]t[fg:Cyan]
+    ┃[rev] [rev]○[rev] [rev]c[rev]l[rev]a[rev]u[rev]d[rev]e[rev] [rev] [rev] [rev] [rev] [rev] [rev] [rev] [rev] [rev] [rev] [rev] [rev] [rev] [rev] [rev] [rev] [rev] [rev]
+        Waiting for prompt…
+    ");
+}
+
 // ─── Accent (focused) vs border_inactive colors ─────────────────────
 
 #[test]
