@@ -12,7 +12,7 @@ pub struct OpenCodeAdapter;
 /// label extractor in `src/cli/label.rs` keys off Claude-style PascalCase
 /// names. Normalise here so the activity log and its strategy table share
 /// a single vocabulary across agents.
-fn normalize_tool_name(raw: &str) -> String {
+pub(super) fn normalize_tool_name(raw: &str) -> String {
     let canonical = match raw {
         "bash" => CanonicalTool::Bash,
         "read" => CanonicalTool::Read,
