@@ -11,7 +11,7 @@ Most options must be set **before** loading the plugin in your `tmux.conf`. Colo
 | -------------------------------- | ------- | --------------------------------------------------------------------------------------- |
 | `@sidebar_key`                   | `e`     | Prefix-triggered keybinding to toggle the sidebar in the current window                 |
 | `@sidebar_key_all`               | `E`     | Prefix-triggered keybinding to toggle the sidebar in all windows                        |
-| `@sidebar_width`                 | `15%`   | Width in columns or as a percentage                                                     |
+| `@sidebar_width`                 | `15%`   | Width in columns or as a percentage. A percentage may append a clamp range in columns: `15%[20,40]`, `15%[20]` / `15%[20,]` (min only), `15%[,40]` (max only); the bounds are re-applied when the terminal window is resized, while manual pane-border drags are respected |
 | `@sidebar_position`              | `left`  | Sidebar placement (`left` or `right`)                                                   |
 | `@sidebar_bottom_height`         | `20`    | Bottom panel height in lines (set `0` to hide)                                          |
 | `@sidebar_auto_create`           | `on`    | Auto-create the sidebar on new windows (set `off` to disable)                           |
