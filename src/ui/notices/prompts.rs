@@ -1,4 +1,4 @@
-use crate::tmux::{CLAUDE_AGENT, CODEX_AGENT};
+use crate::tmux::{CLAUDE_AGENT, CODEX_AGENT, GROK_AGENT};
 
 /// Build the ready-to-paste LLM prompt for the given agent name.
 ///
@@ -15,6 +15,8 @@ use crate::tmux::{CLAUDE_AGENT, CODEX_AGENT};
 ///   has no plugin mechanism upstream. This branch genuinely needs the
 ///   running executable path, so it returns `None` if `current_exe()`
 ///   cannot be resolved.
+/// - **Grok**: emits a `setup grok` prompt that installs a dedicated hook
+///   file under `~/.grok/hooks/` and reloads it through Grok's `/hooks` view.
 ///
 /// Returns `None` for unknown agents.
 pub(crate) fn prompt_for_agent(agent: &str) -> Option<String> {
@@ -39,6 +41,16 @@ pub(crate) fn prompt_for_agent(agent: &str) -> Option<String> {
                  Add these hooks to ~/.codex/hooks.json. If hooks already \
                  exist, merge them without making destructive changes. Restart \
                  Codex after changing config.toml so the feature flag takes effect."
+            ))
+        }
+        GROK_AGENT => {
+            let exe_path =
+                crate::cli::setup::shell_quote(&std::env::current_exe().ok()?.to_string_lossy());
+            Some(format!(
+                "Run {exe_path} setup grok. Save the generated hooks as \
+                 ~/.grok/hooks/tmux-agent-sidebar.json, creating the hooks directory if needed. \
+                 If hooks already exist in that file, merge them without making destructive \
+                 changes. Reload hooks from Grok's /hooks view, or restart Grok."
             ))
         }
         _ => None,
@@ -136,6 +148,22 @@ mod tests {
         assert!(codex.contains("~/.codex/hooks.json"));
         assert!(codex.contains("codex_hooks = true"));
         assert!(codex.contains("Restart Codex"));
+    }
+
+    #[test]
+    fn prompt_for_agent_grok_uses_dedicated_hook_file() {
+        let exe = std::env::current_exe()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let quoted = crate::cli::setup::shell_quote(&exe);
+        let grok = prompt_for_agent("grok").unwrap();
+
+        assert!(grok.contains(&format!("Run {quoted} setup grok")));
+        assert!(grok.contains("~/.grok/hooks/tmux-agent-sidebar.json"));
+        assert!(grok.contains("merge them without making destructive changes"));
+        assert!(grok.contains("/hooks"));
+        assert!(grok.contains("restart Grok"));
     }
 
     #[test]

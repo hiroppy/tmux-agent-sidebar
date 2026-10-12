@@ -195,6 +195,58 @@ fn snippet_codex_non_session_start_has_empty_matcher() {
 }
 
 #[test]
+fn snippet_grok_covers_complete_busy_idle_lifecycle() {
+    let v = build_agent_snippet("grok", FAKE_HOOK).expect("Grok setup should be supported");
+    let hooks = v.get("hooks").and_then(Value::as_object).unwrap();
+
+    for trigger in [
+        "SessionStart",
+        "SessionEnd",
+        "UserPromptSubmit",
+        "Stop",
+        "StopFailure",
+        "StopCancelled",
+        "Notification",
+        "PermissionDenied",
+        "SubagentStart",
+        "SubagentStop",
+        "PostToolUse",
+        "PostToolUseFailure",
+    ] {
+        assert!(
+            hooks.contains_key(trigger),
+            "missing Grok trigger {trigger}"
+        );
+    }
+
+    assert_eq!(
+        v.pointer("/hooks/StopCancelled/0/hooks/0/command")
+            .and_then(Value::as_str),
+        Some("bash /fake/hook.sh grok turn-settled")
+    );
+    assert_eq!(
+        v.pointer("/hooks/Notification/0/matcher")
+            .and_then(Value::as_str),
+        Some("permission_prompt")
+    );
+    assert_eq!(
+        v.pointer("/hooks/Notification/1/matcher")
+            .and_then(Value::as_str),
+        Some("idle_prompt")
+    );
+    assert_eq!(
+        v.pointer("/hooks/Notification/1/hooks/0/command")
+            .and_then(Value::as_str),
+        Some("bash /fake/hook.sh grok turn-settled")
+    );
+    assert_eq!(
+        v.pointer("/hooks/PostToolUseFailure/0/hooks/0/command")
+            .and_then(Value::as_str),
+        Some("bash /fake/hook.sh grok activity-log")
+    );
+}
+
+#[test]
 fn missing_hooks_is_empty_for_matching_claude_config() {
     let config = build_agent_snippet("claude", FAKE_HOOK).unwrap();
     assert!(missing_hooks("claude", &config, FAKE_HOOK).is_empty());
@@ -457,13 +509,13 @@ fn full_output_has_expected_top_level_keys() {
     let agents = v.get("agents").and_then(Value::as_object).unwrap();
     let mut keys: Vec<&str> = agents.keys().map(String::as_str).collect();
     keys.sort();
-    assert_eq!(keys, vec!["claude", "codex"]);
+    assert_eq!(keys, vec!["claude", "codex", "grok"]);
 }
 
 #[test]
 fn full_output_snippet_matches_single_agent_snippet() {
     let full = build_setup_output(FAKE_HOOK);
-    for agent in ["claude", "codex"] {
+    for agent in ["claude", "codex", "grok"] {
         let from_full = full
             .pointer(&format!("/agents/{}/snippet", agent))
             .unwrap_or_else(|| panic!("missing snippet for {}", agent));
@@ -478,6 +530,7 @@ fn full_output_normalized_hooks_count_matches_table() {
     for (agent, table_len) in [
         ("claude", ClaudeAdapter::HOOK_REGISTRATIONS.len()),
         ("codex", CodexAdapter::HOOK_REGISTRATIONS.len()),
+        ("grok", 13),
     ] {
         let hooks = full
             .pointer(&format!("/agents/{}/hooks", agent))
@@ -522,6 +575,11 @@ fn full_output_config_paths() {
             .and_then(Value::as_str),
         Some("~/.codex/hooks.json")
     );
+    assert_eq!(
+        full.pointer("/agents/grok/config_path")
+            .and_then(Value::as_str),
+        Some("~/.grok/hooks/tmux-agent-sidebar.json")
+    );
 }
 
 #[test]
@@ -552,6 +610,15 @@ fn run_setup_codex_returns_only_snippet() {
 }
 
 #[test]
+fn run_setup_grok_returns_only_snippet() {
+    let (code, json) = run_setup(&["grok".to_string()], FAKE_HOOK);
+    assert_eq!(code, 0);
+    let v = json.unwrap();
+    assert!(v.get("hooks").is_some());
+    assert!(v.get("version").is_none());
+}
+
+#[test]
 fn run_setup_unknown_agent_returns_err_exit_2() {
     let (code, json) = run_setup(&["gemini".to_string()], FAKE_HOOK);
     assert_eq!(code, 2);
@@ -566,8 +633,12 @@ fn run_setup_too_many_args_returns_err_exit_2() {
 }
 
 #[test]
-fn full_output_snapshot() {
-    let v = build_setup_output(FAKE_HOOK);
+fn existing_agent_output_snapshot() {
+    let mut v = build_setup_output(FAKE_HOOK);
+    v.pointer_mut("/agents")
+        .and_then(Value::as_object_mut)
+        .expect("agents object")
+        .remove("grok");
     let actual = serde_json::to_string_pretty(&v).unwrap();
     // Version-independent snapshot: substitute the placeholder at test
     // time so a version bump in Cargo.toml does not break this test.

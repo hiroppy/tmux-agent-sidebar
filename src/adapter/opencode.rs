@@ -4,7 +4,7 @@ use crate::event::{AgentEvent, EventAdapter};
 use crate::tmux::OPENCODE_AGENT;
 use crate::tool_name::CanonicalTool;
 
-use super::{json_str, json_value_or_null, optional_str};
+use super::{is_system_message, json_str, json_value_or_null, optional_str};
 
 pub struct OpenCodeAdapter;
 
@@ -66,6 +66,7 @@ impl EventAdapter for OpenCodeAdapter {
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: String::new(),
                 source: json_str(input, "source").into(),
+                top_level: true,
                 worktree: None,
                 agent_id: None,
                 session_id: optional_str(input, "session_id"),
@@ -75,6 +76,9 @@ impl EventAdapter for OpenCodeAdapter {
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: String::new(),
                 prompt: json_str(input, "prompt").into(),
+                prompt_is_system_message: is_system_message(json_str(input, "prompt")),
+                requires_existing_session: false,
+                prompt_id: None,
                 worktree: None,
                 agent_id: None,
                 session_id: optional_str(input, "session_id"),
@@ -85,6 +89,7 @@ impl EventAdapter for OpenCodeAdapter {
                 permission_mode: String::new(),
                 wait_reason: json_str(input, "wait_reason").into(),
                 meta_only: false,
+                requires_existing_session: false,
                 worktree: None,
                 agent_id: None,
                 session_id: optional_str(input, "session_id"),
@@ -95,6 +100,9 @@ impl EventAdapter for OpenCodeAdapter {
                 permission_mode: String::new(),
                 last_message: json_str(input, "last_message").into(),
                 response: None,
+                prompt_id: None,
+                requires_existing_session: false,
+                children_may_outlive_turn: false,
                 worktree: None,
                 agent_id: None,
                 session_id: optional_str(input, "session_id"),
@@ -104,6 +112,8 @@ impl EventAdapter for OpenCodeAdapter {
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: String::new(),
                 error: json_str(input, "error").into(),
+                prompt_id: None,
+                requires_existing_session: false,
                 worktree: None,
                 agent_id: None,
                 session_id: optional_str(input, "session_id"),
@@ -117,6 +127,9 @@ impl EventAdapter for OpenCodeAdapter {
                 let tool_input =
                     normalize_tool_input(&tool_name, json_value_or_null(input, "tool_input"));
                 Some(AgentEvent::ActivityLog {
+                    agent: OPENCODE_AGENT.into(),
+                    session_id: optional_str(input, "session_id"),
+                    requires_existing_session: false,
                     tool_name,
                     tool_input,
                     tool_response: json_value_or_null(input, "tool_response"),
@@ -148,6 +161,7 @@ mod tests {
                 cwd: "/tmp".into(),
                 permission_mode: "".into(),
                 source: "startup".into(),
+                top_level: true,
                 worktree: None,
                 agent_id: None,
                 session_id: Some("ses-1".into()),
@@ -171,6 +185,9 @@ mod tests {
                 cwd: "/tmp".into(),
                 permission_mode: "".into(),
                 prompt: "hello".into(),
+                prompt_is_system_message: false,
+                requires_existing_session: false,
+                prompt_id: None,
                 worktree: None,
                 agent_id: None,
                 session_id: None,
@@ -196,6 +213,7 @@ mod tests {
                 tool_name,
                 tool_input,
                 tool_response,
+                ..
             } => {
                 assert_eq!(tool_name, "Bash");
                 assert_eq!(tool_input["command"], "ls");
@@ -321,6 +339,8 @@ mod tests {
                 cwd: "/tmp".into(),
                 permission_mode: "".into(),
                 error: "boom".into(),
+                prompt_id: None,
+                requires_existing_session: false,
                 worktree: None,
                 agent_id: None,
                 session_id: Some("ses-1".into()),

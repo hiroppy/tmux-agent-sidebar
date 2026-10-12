@@ -8,8 +8,8 @@ use crate::time::now_epoch_secs;
 use crate::tmux;
 
 pub(crate) const DESKTOP_NOTIFICATION_COOLDOWN_SECS: u64 = 120;
-const DESKTOP_NOTIFICATION_TIMEOUT: Duration = Duration::from_secs(3);
-const DESKTOP_NOTIFICATION_PROBE_TIMEOUT: Duration = Duration::from_secs(1);
+pub(crate) const DESKTOP_NOTIFICATION_TIMEOUT: Duration = Duration::from_secs(3);
+pub(crate) const DESKTOP_NOTIFICATION_PROBE_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DesktopNotificationKind {

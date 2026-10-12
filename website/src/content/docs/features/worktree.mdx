@@ -28,7 +28,7 @@ The modal's `NAME` field is slugified (lowercase, non-alphanumeric → `-`) and 
 
 - **Branch** — `<prefix><slug>`, where `<prefix>` defaults to `agent/` (e.g. `add login form` → `agent/add-login-form`). Colliding slugs get an incrementing suffix (`-2`, `-3`, …).
 - **Worktree path** — `<repo>/.worktrees/<slug>` by default. Change the repo-relative directory with `@agent-sidebar-worktree-dir`; absolute paths and `..` are rejected.
-- **tmux window** — the slug is used as the window name; the agent you picked in the modal (`claude` / `codex` / `opencode`) launches inside it with the selected permission `MODE`.
+- **tmux window** — the slug is used as the window name; the agent you picked in the modal (`claude` / `codex` / `grok` / `opencode`) launches inside it with the selected permission `MODE`.
 
 Defaults for the agent, branch prefix, and worktree directory live in tmux options — see [tmux options](/tmux-agent-sidebar/reference/tmux-options/) for the full list.
 
