@@ -216,9 +216,12 @@ impl AppState {
                     }
                 }
             }
+            let ports_enabled = self.ports_enabled;
             for (pane_id, ports, command) in updates {
                 let pane_state = self.pane_state_mut(&pane_id);
-                pane_state.ports = ports;
+                // The scan still runs when display is off -- `live_agent_panes`
+                // from the same snapshot drives dead-pane cleanup below.
+                pane_state.ports = if ports_enabled { ports } else { Vec::new() };
                 pane_state.command = command;
             }
             for pane_id in dead_panes {
