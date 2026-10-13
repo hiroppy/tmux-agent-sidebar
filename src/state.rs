@@ -123,13 +123,15 @@ pub struct AppState {
     /// the `@sidebar_bottom_height` tmux option. A value of 0 hides the panel.
     pub bottom_panel_height: u16,
     /// Maps session_id → session name, refreshed periodically from
-    /// `~/.claude/sessions/*.json` files. The `dirty` flag is `true` when
-    /// the map has changed since the last `refresh_session_names`
-    /// application. Set by the main loop after receiving a fresh map from
-    /// `session_poll_loop`, cleared by `refresh_session_names` once the
-    /// map has been propagated to every pane. Avoids re-walking every
-    /// pane each tick when the map is unchanged (the polling thread only
-    /// updates it every 10s).
+    /// `~/.claude/sessions/*.json` files by `session_poll_loop`.
+    ///
+    /// The `dirty` flag records that the map, or some pane's session_id,
+    /// changed since the last application. It does *not* gate the per-pane
+    /// label walk: `apply_session_snapshot` rebuilds `repo_groups` with an
+    /// empty `session_name` on every pane, so `refresh` has to re-apply the
+    /// map each tick whether or not anything changed. The walk itself is one
+    /// HashMap lookup per pane; the filesystem scan lives in the polling
+    /// thread.
     pub sessions: SessionNamesState,
     /// Whether the pet animation is drawn and ticked. Loaded once at startup
     /// from the `@sidebar_pet` tmux option. Defaults to `false`.

@@ -159,10 +159,16 @@ impl AppState {
         } else {
             self.apply_session_snapshot(focused, sessions);
         }
-        if self.sessions.dirty {
-            self.refresh_session_names();
-            self.sessions.dirty = false;
-        }
+        // `apply_session_snapshot` rebuilds `repo_groups` from a fresh tmux
+        // query, and every freshly parsed `PaneInfo` carries an empty
+        // `session_name`. Guarding the re-application on `dirty` therefore
+        // labelled each pane for exactly one frame and lost the label on the
+        // next tick -- the optimisation was protecting state the rebuild had
+        // already destroyed. The lookup is a pure in-memory `HashMap` hit (the
+        // filesystem scan lives in `session_poll_loop`), so re-apply
+        // unconditionally.
+        self.refresh_session_names();
+        self.sessions.dirty = false;
         self.refresh_activity_data();
         window_active
     }
@@ -916,6 +922,49 @@ mod tests {
         assert!(
             !state.sessions.dirty,
             "session_names_dirty must remain clear when nothing changed"
+        );
+    }
+
+    #[test]
+    fn snapshot_rebuild_drops_labels_so_refresh_must_reapply_unconditionally() {
+        // Regression for the `/rename` label reverting to the default
+        // agent name one tick after it appeared.
+        //
+        // `apply_session_snapshot` rebuilds `repo_groups` from a fresh
+        // tmux query, and a freshly parsed `PaneInfo` always carries an
+        // empty `session_name` — tmux does not know about Claude's
+        // session names. When the session ids are unchanged the rebuild
+        // also (correctly) leaves `dirty` clear. So `refresh` cannot gate
+        // `refresh_session_names` on `dirty`: the gate was protecting
+        // state the rebuild had just destroyed, which labelled each pane
+        // for exactly one frame.
+        //
+        // This pins the precondition. If a future change makes the
+        // rebuild carry labels over, the gate becomes safe again and this
+        // test is the place that says so.
+        let mut state = state_with_panes(vec![pane_with_session("%1", "sess-a")]);
+        state.sessions.names.insert("sess-a".into(), "alpha".into());
+        state.refresh_session_names();
+        assert_eq!(state.repo_groups[0].panes[0].0.session_name, "alpha");
+
+        state.sessions.dirty = false;
+        let next_sessions = test_session(vec![pane_with_session("%1", "sess-a")]);
+        state.apply_session_snapshot(false, next_sessions);
+
+        assert!(
+            !state.sessions.dirty,
+            "unchanged session ids must leave the dirty flag clear",
+        );
+        assert!(
+            state.repo_groups[0].panes[0].0.session_name.is_empty(),
+            "the rebuild drops the label, so a dirty-gated re-apply would lose it",
+        );
+
+        state.refresh_session_names();
+
+        assert_eq!(
+            state.repo_groups[0].panes[0].0.session_name, "alpha",
+            "an unconditional re-apply restores the label the rebuild dropped",
         );
     }
 
