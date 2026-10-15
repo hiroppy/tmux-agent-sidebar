@@ -91,13 +91,37 @@ impl AppState {
             // repo header highlight move without waiting for the next
             // periodic tmux refresh.
             self.focus_state.focused_pane_id = Some(target_pane_id.clone());
+
+            // Interacting with the sidebar makes it the active pane of its own
+            // window (tmux's MouseDown1Pane runs `select-pane` before handing
+            // the click to us). Jumping to another window would then leave the
+            // sidebar as the origin window's active pane, so returning there
+            // lands the cursor in the sidebar instead of the pane the user was
+            // working in. Note where to hand focus back before jumping away.
+            let origin = tmux::display_message(&self.tmux_pane, "#{window_id} #{pane_active}");
+            let origin_window = origin
+                .split_once(' ')
+                .filter(|(window, active)| !window.is_empty() && *active == "1")
+                .map(|(window, _)| window.to_string());
+
             tmux::select_pane(&target_pane_id);
+
+            let window_id = tmux::display_message(&target_pane_id, "#{window_id}");
+            // Restore only on a cross-window jump: an in-window jump already
+            // ended on the right pane, and an unknown target window means we
+            // can't tell the two apart — leave focus alone rather than risk
+            // yanking it away from the pane we were asked to activate.
+            if let Some(origin_window) = origin_window
+                && !window_id.is_empty()
+                && origin_window != window_id
+            {
+                tmux::last_pane(&origin_window);
+            }
 
             // The jump may land on a window that has no sidebar of its own
             // (e.g. with @sidebar_auto_create off). Summon one there so the
             // sidebar "follows" the jump instead of disappearing. create-only
             // is a no-op when that window already has a sidebar.
-            let window_id = tmux::display_message(&target_pane_id, "#{window_id}");
             if !window_id.is_empty() {
                 let pane_path = tmux::display_message(&target_pane_id, "#{pane_current_path}");
                 let pane_path = if pane_path.is_empty() {
