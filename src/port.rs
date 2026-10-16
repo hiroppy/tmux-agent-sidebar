@@ -141,6 +141,11 @@ pub(crate) fn scan_session_process_snapshot(
         for window in &session.windows {
             for pane in &window.panes {
                 let Some(&pane_pid) = pane_pids.get(&pane.pane_id) else {
+                    // No pid to probe. `live_agent_panes` drives a teardown
+                    // (`clear_dead_agent_metadata`), so leaving the pane out
+                    // would wipe a running agent on missing evidence rather
+                    // than on evidence of exit. Treat it as alive instead.
+                    live_agent_panes.insert(pane.pane_id.clone());
                     continue;
                 };
                 let descendant_set = process_snapshot.descendants(&[pane_pid]);

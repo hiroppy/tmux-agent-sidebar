@@ -7,7 +7,7 @@ pub const AGENT_OPTION: &str = "@agent-sidebar-default-agent";
 pub const BRANCH_PREFIX_OPTION: &str = "@agent-sidebar-branch-prefix";
 pub const WORKTREE_DIR_OPTION: &str = "@agent-sidebar-worktree-dir";
 
-pub const AGENTS: &[&str] = &["claude", "codex", "opencode"];
+pub const AGENTS: &[&str] = &["claude", "codex", "opencode", "cursor"];
 pub const CLAUDE_MODES: &[&str] = &[
     "default",
     "plan",
@@ -17,11 +17,15 @@ pub const CLAUDE_MODES: &[&str] = &[
 ];
 pub const CODEX_MODES: &[&str] = &["default", "auto", "bypassPermissions"];
 pub const OPENCODE_MODES: &[&str] = &["default"];
+/// Cursor CLI's `--force` skips every confirmation prompt; there is no
+/// intermediate plan/accept-edits tier to expose.
+pub const CURSOR_MODES: &[&str] = &["default", "bypassPermissions"];
 
 pub fn modes_for(agent: &str) -> &'static [&'static str] {
     match agent {
         "codex" => CODEX_MODES,
         "opencode" => OPENCODE_MODES,
+        "cursor" => CURSOR_MODES,
         _ => CLAUDE_MODES,
     }
 }
@@ -44,8 +48,20 @@ pub fn agent_command(agent: &str, mode: &str) -> String {
         ("codex", "bypassPermissions") => "codex --dangerously-bypass-approvals-and-sandbox".into(),
         ("codex", _) => "codex".into(),
         ("opencode", _) => "opencode".into(),
+        // Cursor CLI now installs as `agent`, while older installations use
+        // `cursor-agent`. Prefer the current executable and fall back so a
+        // worktree spawn still works after an older installation is detected.
+        // `--force` is its only prompt-bypassing switch.
+        ("cursor", "bypassPermissions") => cursor_command(" --force"),
+        ("cursor", _) => cursor_command(""),
         (a, _) => a.to_string(),
     }
+}
+
+fn cursor_command(flags: &str) -> String {
+    format!(
+        "if command -v agent >/dev/null 2>&1; then agent{flags}; else cursor-agent{flags}; fi"
+    )
 }
 
 /// How much to clean up when the user presses `x` on a spawn-created pane.
@@ -114,6 +130,32 @@ mod tests {
         assert_eq!(agent_command("opencode", "default"), "opencode");
         assert_eq!(agent_command("opencode", "plan"), "opencode");
         assert_eq!(agent_command("opencode", ""), "opencode");
+    }
+
+    #[test]
+    fn modes_for_cursor_returns_cursor_modes() {
+        assert_eq!(modes_for("cursor"), CURSOR_MODES);
+    }
+
+    #[test]
+    fn agent_command_cursor_prefers_agent_with_fallback() {
+        assert_eq!(
+            agent_command("cursor", "default"),
+            "if command -v agent >/dev/null 2>&1; then agent; else cursor-agent; fi"
+        );
+        assert_eq!(
+            agent_command("cursor", ""),
+            "if command -v agent >/dev/null 2>&1; then agent; else cursor-agent; fi"
+        );
+        assert_eq!(
+            agent_command("cursor", "bypassPermissions"),
+            "if command -v agent >/dev/null 2>&1; then agent --force; else cursor-agent --force; fi"
+        );
+        // Stale modes from an older build use the same executable fallback.
+        assert_eq!(
+            agent_command("cursor", "plan"),
+            "if command -v agent >/dev/null 2>&1; then agent; else cursor-agent; fi"
+        );
     }
 
     #[test]

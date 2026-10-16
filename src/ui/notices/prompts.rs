@@ -1,4 +1,4 @@
-use crate::tmux::{CLAUDE_AGENT, CODEX_AGENT};
+use crate::tmux::{CLAUDE_AGENT, CODEX_AGENT, CURSOR_AGENT};
 
 /// Build the ready-to-paste LLM prompt for the given agent name.
 ///
@@ -15,6 +15,8 @@ use crate::tmux::{CLAUDE_AGENT, CODEX_AGENT};
 ///   has no plugin mechanism upstream. This branch genuinely needs the
 ///   running executable path, so it returns `None` if `current_exe()`
 ///   cannot be resolved.
+/// - **Cursor**: same shape as Codex — Cursor CLI reads hooks from
+///   `~/.cursor/hooks.json` and has no plugin mechanism for this.
 ///
 /// Returns `None` for unknown agents.
 pub(crate) fn prompt_for_agent(agent: &str) -> Option<String> {
@@ -22,27 +24,40 @@ pub(crate) fn prompt_for_agent(agent: &str) -> Option<String> {
         CLAUDE_AGENT => Some(build_claude_migration_prompt(
             plugin_root_from_exe().as_deref(),
         )),
-        CODEX_AGENT => {
-            // Shell-quote the path so an install location containing
-            // spaces (e.g. macOS `/Applications/tmux-agent-sidebar/…`)
-            // still yields a runnable command when the user pastes
-            // this prompt into their shell.
-            let exe_path =
-                crate::cli::setup::shell_quote(&std::env::current_exe().ok()?.to_string_lossy());
-            Some(format!(
-                "Run {exe_path} setup codex. Before pasting the hooks, make sure \
-                 ~/.codex/config.toml contains:\n\
-                 \n\
-                 [features]\n\
-                 codex_hooks = true\n\
-                 \n\
-                 Add these hooks to ~/.codex/hooks.json. If hooks already \
-                 exist, merge them without making destructive changes. Restart \
-                 Codex after changing config.toml so the feature flag takes effect."
-            ))
-        }
+        CODEX_AGENT => Some(format!(
+            "Run {} setup codex. Before pasting the hooks, make sure \
+             ~/.codex/config.toml contains:\n\
+             \n\
+             [features]\n\
+             codex_hooks = true\n\
+             \n\
+             Add these hooks to ~/.codex/hooks.json. If hooks already \
+             exist, merge them without making destructive changes. Restart \
+             Codex after changing config.toml so the feature flag takes effect.",
+            quoted_exe_path()?
+        )),
+        CURSOR_AGENT => Some(format!(
+            "Run {} setup cursor and add the resulting hooks to \
+             ~/.cursor/hooks.json. If the file already exists, merge the \
+             entries without making destructive changes — keep any existing \
+             \"version\" value and append to the per-trigger arrays rather \
+             than replacing them. Restart the Cursor CLI afterwards so it \
+             re-reads the file.",
+            quoted_exe_path()?
+        )),
         _ => None,
     }
+}
+
+/// Shell-quote the running binary's path so an install location containing
+/// spaces (e.g. macOS `/Applications/tmux-agent-sidebar/…`) still yields a
+/// runnable command when the user pastes the prompt into their shell.
+/// Returns `None` when `current_exe()` cannot be resolved — the prompts that
+/// embed a command are useless without it.
+fn quoted_exe_path() -> Option<String> {
+    Some(crate::cli::setup::shell_quote(
+        &std::env::current_exe().ok()?.to_string_lossy(),
+    ))
 }
 
 /// Walk up from the running binary looking for `.claude-plugin/plugin.json`,

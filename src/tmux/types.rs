@@ -1,6 +1,7 @@
 pub const CLAUDE_AGENT: &str = "claude";
 pub const CODEX_AGENT: &str = "codex";
 pub const OPENCODE_AGENT: &str = "opencode";
+pub const CURSOR_AGENT: &str = "cursor";
 
 #[derive(Debug, Clone)]
 pub struct PaneInfo {
@@ -92,6 +93,7 @@ pub enum AgentType {
     Claude,
     Codex,
     OpenCode,
+    Cursor,
     #[allow(dead_code)]
     Unknown,
 }
@@ -119,6 +121,7 @@ impl AgentType {
             CLAUDE_AGENT => Some(Self::Claude),
             CODEX_AGENT => Some(Self::Codex),
             OPENCODE_AGENT => Some(Self::OpenCode),
+            CURSOR_AGENT => Some(Self::Cursor),
             _ => None,
         }
     }
@@ -128,12 +131,30 @@ impl AgentType {
             Self::Claude => CLAUDE_AGENT,
             Self::Codex => CODEX_AGENT,
             Self::OpenCode => OPENCODE_AGENT,
+            Self::Cursor => CURSOR_AGENT,
             Self::Unknown => "unknown",
         }
     }
 
     pub fn label(&self) -> &str {
         self.as_str()
+    }
+
+    /// Executable names to look for when probing a pane's process tree for a
+    /// live agent. Usually just [`Self::as_str`], but Cursor CLI installs its
+    /// binary as `agent` (older installs use `cursor-agent`) while the hook
+    /// label — and every `@pane_agent` value, tmux option, and doc reference
+    /// — stays `cursor`. The probe is always seeded from a pane already
+    /// labelled with this agent, so the generic `agent` name cannot pull in
+    /// an unrelated process from another pane.
+    pub fn process_names(&self) -> &'static [&'static str] {
+        match self {
+            Self::Claude => &[CLAUDE_AGENT],
+            Self::Codex => &[CODEX_AGENT],
+            Self::OpenCode => &[OPENCODE_AGENT],
+            Self::Cursor => &["agent", "cursor-agent"],
+            Self::Unknown => &[],
+        }
     }
 }
 
@@ -200,6 +221,7 @@ mod tests {
         assert_eq!(AgentType::from_label("claude"), Some(AgentType::Claude));
         assert_eq!(AgentType::from_label("codex"), Some(AgentType::Codex));
         assert_eq!(AgentType::from_label("opencode"), Some(AgentType::OpenCode));
+        assert_eq!(AgentType::from_label("cursor"), Some(AgentType::Cursor));
         assert_eq!(AgentType::from_label("unknown"), None);
         assert_eq!(AgentType::from_label(""), None);
     }
@@ -209,6 +231,7 @@ mod tests {
         assert_eq!(AgentType::Claude.label(), "claude");
         assert_eq!(AgentType::Codex.label(), "codex");
         assert_eq!(AgentType::OpenCode.label(), "opencode");
+        assert_eq!(AgentType::Cursor.label(), "cursor");
         assert_eq!(AgentType::Unknown.label(), "unknown");
     }
 
@@ -217,6 +240,23 @@ mod tests {
         assert_eq!(AgentType::Claude.as_str(), CLAUDE_AGENT);
         assert_eq!(AgentType::Codex.as_str(), CODEX_AGENT);
         assert_eq!(AgentType::OpenCode.as_str(), OPENCODE_AGENT);
+        assert_eq!(AgentType::Cursor.as_str(), CURSOR_AGENT);
+    }
+
+    #[test]
+    fn agent_type_process_names_diverge_only_for_cursor() {
+        // Cursor CLI installs as `agent` (`cursor-agent` on older installs);
+        // every other agent's executable name matches its label, so the
+        // process probe in `ProcessSnapshot::tree_has_agent` must key off
+        // `process_names()` rather than `as_str()`.
+        assert_eq!(
+            AgentType::Cursor.process_names(),
+            &["agent", "cursor-agent"]
+        );
+        assert_eq!(AgentType::Claude.process_names(), &[CLAUDE_AGENT]);
+        assert_eq!(AgentType::Codex.process_names(), &[CODEX_AGENT]);
+        assert_eq!(AgentType::OpenCode.process_names(), &[OPENCODE_AGENT]);
+        assert!(AgentType::Unknown.process_names().is_empty());
     }
 
     #[test]
