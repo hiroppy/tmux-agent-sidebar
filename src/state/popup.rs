@@ -210,11 +210,15 @@ impl AppState {
         repo_root: String,
         anchor_y: Option<u16>,
     ) {
+        let default_agent = crate::tmux::get_option(crate::worktree::AGENT_OPTION)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| crate::worktree::DEFAULT_AGENT.to_string());
+        let agent_idx = crate::worktree::agent_index_for(&default_agent);
         self.popup = PopupState::SpawnInput {
             input: String::new(),
             target_repo: repo_name,
             target_repo_root: repo_root,
-            agent_idx: 0,
+            agent_idx,
             mode_idx: 0,
             field: SpawnField::Task,
             anchor_y,
