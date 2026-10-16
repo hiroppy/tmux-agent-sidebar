@@ -6,6 +6,16 @@ pub use kind::AgentEventKind;
 
 use serde_json::Value;
 
+/// Execution-loop state, independent of user prompt and session lifecycle hooks.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExecutionState {
+    Running,
+    /// The model stopped, but asynchronous work remains active.
+    Background,
+    Idle,
+    Failed(String),
+}
+
 /// Worktree metadata from Claude Code hook payloads.
 /// Present only when the agent is running in a worktree; `None` otherwise.
 #[derive(Debug, Clone, PartialEq)]
@@ -20,6 +30,12 @@ pub struct WorktreeInfo {
 /// The core handler never reads raw JSON or checks agent names.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentEvent {
+    ExecutionUpdate {
+        agent: String,
+        cwd: String,
+        session_id: String,
+        state: ExecutionState,
+    },
     SessionStart {
         agent: String,
         cwd: String,
@@ -125,6 +141,7 @@ impl AgentEvent {
     /// Project an `AgentEvent` down to its `AgentEventKind` discriminant.
     pub fn kind(&self) -> AgentEventKind {
         match self {
+            Self::ExecutionUpdate { .. } => AgentEventKind::ExecutionUpdate,
             Self::SessionStart { .. } => AgentEventKind::SessionStart,
             Self::SessionEnd { .. } => AgentEventKind::SessionEnd,
             Self::UserPromptSubmit { .. } => AgentEventKind::UserPromptSubmit,
