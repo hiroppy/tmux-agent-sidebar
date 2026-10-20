@@ -40,7 +40,6 @@ pub(super) fn init_state(tmux_pane: String) -> AppState {
     // `/rename`-assigned labels show up without waiting for the first
     // background scan tick.
     state.sessions.names = session::scan_session_names();
-    state.sessions.dirty = true;
     state.refresh();
 
     state
