@@ -16,11 +16,80 @@ pub(super) struct CollectedRows {
     pub pending_remove: Vec<(usize, u16, String)>,
 }
 
+/// Render one session's rows and record its line→row mapping and any
+/// `×` remove-marker click target. Shared by the grouped (repo) and flat
+/// (started) layouts so both produce identical per-pane output.
+fn push_pane_row(
+    collected: &mut CollectedRows,
+    state: &AppState,
+    pane: &crate::tmux::PaneInfo,
+    git_info: &crate::group::PaneGitInfo,
+    row_index: usize,
+    width: usize,
+) {
+    let theme = &state.theme;
+    let is_selected = state.focus_state.sidebar_focused
+        && state.focus_state.focus == Focus::Panes
+        && row_index == state.global.selected_pane_row;
+
+    let is_active = state.focus_state.focused_pane_id.as_ref() == Some(&pane.pane_id);
+
+    let pane_state = state.pane_state(&pane.pane_id);
+    let ports = pane_state.map(|s| s.ports.as_slice());
+    let task_progress = pane_state.and_then(|s| s.task_progress.as_ref());
+    let status_line_idx = collected.lines.len();
+    let pane_lines = row::render_pane_lines_with_ports(
+        pane,
+        git_info,
+        ports,
+        task_progress,
+        is_selected,
+        is_active,
+        width,
+        &state.icons,
+        theme,
+        state.spinner_frame,
+        state.now,
+    );
+    let pane_line_count = pane_lines.len();
+    collected.lines.extend(pane_lines);
+    for _ in 0..pane_line_count {
+        collected.line_to_row.push(Some(row_index));
+    }
+
+    // The branch row is always `status_line_idx + 1` when
+    // `branch_ports_row` emits a line (which requires a non-empty
+    // branch). Look up the exact column of the trailing `×` from the row
+    // helper so the click target lines up with the rendered glyph even
+    // when the branch name truncates.
+    if pane.sidebar_spawned
+        && git_info.is_worktree
+        && pane_line_count >= 2
+        && let Some(x) =
+            row::sidebar_remove_marker_col(git_info, ports, true, width.saturating_sub(2))
+    {
+        collected
+            .pending_remove
+            .push((status_line_idx + 1, x, pane.pane_id.clone()));
+    }
+}
+
 pub(super) fn collect(state: &AppState, width: u16) -> CollectedRows {
     let width = width as usize;
-    let theme = &state.theme;
-
     let mut collected = CollectedRows::default();
+
+    // Flat list mode: one row per session, oldest first, no repo headers
+    // (and therefore no per-repo spawn button). Order comes straight from
+    // `flat_started_order`, the same source `rebuild_row_targets` uses.
+    if state.sort_mode == crate::ui::SortMode::Started {
+        for (row_index, (gi, pi)) in state.flat_started_order().into_iter().enumerate() {
+            let (pane, git_info) = &state.repo_groups[gi].panes[pi];
+            push_pane_row(&mut collected, state, pane, git_info, row_index, width);
+        }
+        return collected;
+    }
+
+    let theme = &state.theme;
     let filter = state.global.status_filter;
     let mut first_group = true;
     let mut row_index: usize = 0;
@@ -94,52 +163,7 @@ pub(super) fn collect(state: &AppState, width: u16) -> CollectedRows {
         collected.line_to_row.push(None);
 
         for (pane, git_info) in filtered_panes.iter() {
-            let is_selected = state.focus_state.sidebar_focused
-                && state.focus_state.focus == Focus::Panes
-                && row_index == state.global.selected_pane_row;
-
-            let is_active = state.focus_state.focused_pane_id.as_ref() == Some(&pane.pane_id);
-
-            let pane_state = state.pane_state(&pane.pane_id);
-            let ports = pane_state.map(|s| s.ports.as_slice());
-            let task_progress = pane_state.and_then(|s| s.task_progress.as_ref());
-            let status_line_idx = collected.lines.len();
-            let pane_lines = row::render_pane_lines_with_ports(
-                pane,
-                git_info,
-                ports,
-                task_progress,
-                is_selected,
-                is_active,
-                width,
-                &state.icons,
-                theme,
-                state.spinner_frame,
-                state.now,
-            );
-            let pane_line_count = pane_lines.len();
-            collected.lines.extend(pane_lines);
-            for _ in 0..pane_line_count {
-                collected.line_to_row.push(Some(row_index));
-            }
-
-            // The branch row is always `status_line_idx + 1` when
-            // `branch_ports_row` emits a line (which requires a
-            // non-empty branch). Look up the exact column of the
-            // trailing `×` from the row helper so the click target
-            // lines up with the rendered glyph even when the branch
-            // name truncates.
-            if pane.sidebar_spawned
-                && git_info.is_worktree
-                && pane_line_count >= 2
-                && let Some(x) =
-                    row::sidebar_remove_marker_col(git_info, ports, true, width.saturating_sub(2))
-            {
-                collected
-                    .pending_remove
-                    .push((status_line_idx + 1, x, pane.pane_id.clone()));
-            }
-
+            push_pane_row(&mut collected, state, pane, git_info, row_index, width);
             row_index += 1;
         }
     }
