@@ -14,7 +14,7 @@ tmux show -t "$pane_id" -pv @pane_status
 
 # Get agent type
 tmux show -t "$pane_id" -pv @pane_agent
-# → claude / codex / opencode / (empty)
+# → claude / codex / grok / opencode / (empty)
 ```
 
 ## Available pane options
@@ -23,15 +23,17 @@ tmux show -t "$pane_id" -pv @pane_agent
 | -------------------------- | ------------------------------------------------------------------ |
 | `@pane_status`             | `running` / `background` / `waiting` / `idle` / `error` / empty    |
 | `@pane_attention`          | `1` while the pane is flagged for attention, otherwise empty        |
-| `@pane_agent`              | `claude` / `codex` / `opencode` / empty                             |
+| `@pane_agent`              | `claude` / `codex` / `grok` / `opencode` / empty                    |
 | `@pane_name`               | Friendly agent/session name (from `/rename` on Claude)              |
 | `@pane_role`               | `sidebar` for the sidebar pane itself; empty for agent panes        |
 | `@pane_prompt`             | Latest user prompt text or response preview                         |
+| `@pane_prompt_id`          | Latest turn ID when exposed; retained after settlement to ignore stale or duplicate completion hooks |
+| `@pane_turn_active`        | `1` while the parent turn is active; empty after it settles          |
 | `@pane_prompt_source`      | `user` when the prompt field holds the user's prompt, `response` when it holds the agent's last reply |
 | `@pane_started_at`         | Epoch seconds of the last `UserPromptSubmit`                        |
 | `@pane_wait_reason`        | Wait-reason text (populated only when waiting)                      |
 | `@pane_bg_cmd`             | Latest sanitized background Bash command (Claude `run_in_background`); empty when no bg shell is tracked. Cleared automatically by a `ps` liveness sweep when the process exits. |
-| `@pane_subagents`          | Comma-separated subagent labels (Claude only)                       |
+| `@pane_subagents`          | Comma-separated subagent labels (Claude and Grok)                   |
 | `@pane_cwd`                | Working directory reported by the agent (preferred over `pane_current_path`) |
 | `@pane_permission_mode`    | Permission-mode string for the badge (`plan` / `edit` / `auto` / `!` / …) |
 | `@pane_worktree_name`      | Worktree label when the pane was spawned from the sidebar           |

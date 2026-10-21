@@ -16,23 +16,25 @@ pub(in crate::cli::hook) fn on_session_start(
     pane: &str,
     ctx: &AgentContext<'_>,
     source: &str,
+    top_level: bool,
 ) -> i32 {
+    // A child SessionStart shares the parent's pane and can race ahead of its
+    // SubagentStart registration, so it must never mutate parent-owned state.
+    if !top_level {
+        return 0;
+    }
+    tmux::unset_pane_option(pane, tmux::PANE_SUBAGENTS);
     set_agent_meta(pane, ctx);
     set_attention(pane, "clear");
     clear_run_state(pane);
     set_notification_run_id(pane);
     tmux::unset_pane_option(pane, tmux::PANE_PROMPT);
+    tmux::unset_pane_option(pane, tmux::PANE_PROMPT_ID);
     tmux::unset_pane_option(pane, tmux::PANE_PROMPT_SOURCE);
-    // `@pane_subagents` is deliberately preserved across SessionStart.
-    // Subagents share the parent's `$TMUX_PANE`, so when a subagent
-    // fires its own SessionStart after SubagentStart has populated the
-    // list, clearing it here would drop the marker that
-    // `should_update_cwd` and `drain_pending_teardowns` rely on. The
-    // normal teardown paths (`run_session_end_teardown` via
-    // `clear_all_meta`) already clear the list when a real session
-    // ends, so the only state this would skip clearing is a subagent
-    // list stranded by a hard crash — acceptable vs. racing against
-    // legitimate subagent activity.
+    if pane_writes_allowed(pane) {
+        tmux::unset_pane_option(pane, tmux::PANE_TURN_ACTIVE);
+    }
+    tmux::unset_pane_option(pane, tmux::PANE_PENDING_STOP_NOTIFICATION_BODY);
     // A fresh session overrides any deferred teardown that was waiting
     // for the previous run's subagents to drain.
     tmux::unset_pane_option(pane, PENDING_SESSION_END);
@@ -50,12 +52,12 @@ pub(in crate::cli::hook) fn on_session_end(
     pane: &str,
     agent_name: &str,
     end_reason: &str,
+    top_level: bool,
     notifications: &desktop_notification::DesktopNotificationSettings,
 ) -> i32 {
-    // Subagents share the parent's `$TMUX_PANE`, so a SessionEnd fired
-    // while `@pane_subagents` is populated is almost certainly a child's
-    // (we have no way to distinguish parent vs. child events otherwise).
-    // Bail out early before:
+    // Ambiguous SessionEnd events fired while `@pane_subagents` is populated
+    // are likely to belong to a child sharing the parent's `$TMUX_PANE`.
+    // Bail out early unless the adapter supplied a top-level guarantee, before:
     //
     //   1. the notification path consumes the run-scoped fingerprint,
     //      which would silently deduplicate the parent's real SessionEnd
@@ -64,12 +66,10 @@ pub(in crate::cli::hook) fn on_session_end(
     //      would later turn into `run_session_end_teardown` — wiping a
     //      still-running parent pane the moment the last subagent stops.
     //
-    // The tradeoff is that a parent SessionEnd that genuinely races
-    // ahead of every SubagentStop will be ignored too, leaving stale
-    // metadata until the next SessionStart clears it. Compared to
-    // clobbering a live parent, the stale-metadata failure mode is
-    // far safer and the one the user can recover from.
-    if !pane_writes_allowed(pane) {
+    // For ambiguous adapters, the tradeoff is that a parent SessionEnd that
+    // races ahead of every SubagentStop is ignored too. Adapters that can
+    // distinguish the host event set `top_level` and teardown immediately.
+    if !top_level && !pane_writes_allowed(pane) {
         return 0;
     }
 
@@ -131,7 +131,7 @@ mod tests {
         let _ = fs::create_dir_all(log_path.parent().unwrap());
         fs::write(&log_path, "1234567890|Read|main.rs\n").unwrap();
 
-        let exit = on_session_end(pane, "claude", "", &default_notifications());
+        let exit = on_session_end(pane, "claude", "", false, &default_notifications());
 
         assert_eq!(exit, 0);
         assert!(
@@ -162,7 +162,7 @@ mod tests {
         tmux::test_mock::set(pane, tmux::PANE_CWD, "/repo");
         tmux::test_mock::set(pane, tmux::PANE_STATUS, "running");
 
-        let exit = on_session_end(pane, "claude", "", &default_notifications());
+        let exit = on_session_end(pane, "claude", "", false, &default_notifications());
 
         assert_eq!(exit, 0);
         assert!(
@@ -174,9 +174,33 @@ mod tests {
     }
 
     #[test]
+    fn top_level_grok_session_end_clears_state_while_subagent_is_tracked() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%GROK_HOST_END_WITH_CHILD";
+        tmux::test_mock::set(pane, tmux::PANE_AGENT, tmux::GROK_AGENT);
+        tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "explore:sub-1");
+        tmux::test_mock::set(pane, tmux::PANE_CWD, "/repo");
+        tmux::test_mock::set(pane, tmux::PANE_STATUS, "running");
+
+        on_session_end(
+            pane,
+            tmux::GROK_AGENT,
+            "shutdown",
+            true,
+            &default_notifications(),
+        );
+
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_AGENT));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_SUBAGENTS));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_CWD));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_STATUS));
+    }
+
+    #[test]
     fn on_session_start_sets_agent_and_idle_status() {
         let _guard = tmux::test_mock::install();
         let pane = "%NEW_SESSION";
+        tmux::test_mock::set(pane, tmux::PANE_TURN_ACTIVE, "1");
         let ctx = AgentContext {
             agent: "claude",
             cwd: "/repo",
@@ -185,7 +209,7 @@ mod tests {
             session_id: &Some("sess-123".into()),
         };
 
-        let exit = on_session_start(pane, &ctx, "");
+        let exit = on_session_start(pane, &ctx, "", true);
         assert_eq!(exit, 0);
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_AGENT).as_deref(),
@@ -203,10 +227,11 @@ mod tests {
             !tmux::test_mock::contains(pane, tmux::PANE_PROMPT),
             "SessionStart should clear any stale prompt"
         );
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_TURN_ACTIVE));
     }
 
     #[test]
-    fn on_session_start_preserves_subagents_list() {
+    fn ambiguous_child_session_start_preserves_parent_turn_state() {
         // Regression: a subagent's own SessionStart arriving after
         // SubagentStart seeded @pane_subagents must NOT drop the
         // parent's list. If it did, should_update_cwd would start
@@ -215,14 +240,107 @@ mod tests {
         let _guard = tmux::test_mock::install();
         let pane = "%SUBAGENT_LIVE";
         tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "Explore:sub-1");
+        tmux::test_mock::set(pane, tmux::PANE_TURN_ACTIVE, "1");
+        tmux::test_mock::set(pane, tmux::PANE_AGENT, "claude");
+        tmux::test_mock::set(pane, tmux::PANE_CWD, "/repo/parent");
+        tmux::test_mock::set(pane, tmux::PANE_SESSION_ID, "parent-session");
+        tmux::test_mock::set(pane, tmux::PANE_STATUS, "running");
+        tmux::test_mock::set(pane, tmux::PANE_PROMPT, "Parent request");
+        tmux::test_mock::set(pane, tmux::PANE_PROMPT_ID, "parent-prompt");
+        tmux::test_mock::set(pane, tmux::PANE_PROMPT_SOURCE, "user");
 
-        on_session_start(pane, &basic_ctx(), "");
+        on_session_start(pane, &basic_ctx(), "", false);
 
-        assert_eq!(
-            tmux::test_mock::get(pane, tmux::PANE_SUBAGENTS).as_deref(),
-            Some("Explore:sub-1"),
-            "SessionStart must not wipe an active subagent list"
-        );
+        for (key, expected) in [
+            (tmux::PANE_SUBAGENTS, "Explore:sub-1"),
+            (tmux::PANE_TURN_ACTIVE, "1"),
+            (tmux::PANE_AGENT, "claude"),
+            (tmux::PANE_CWD, "/repo/parent"),
+            (tmux::PANE_SESSION_ID, "parent-session"),
+            (tmux::PANE_STATUS, "running"),
+            (tmux::PANE_PROMPT, "Parent request"),
+            (tmux::PANE_PROMPT_ID, "parent-prompt"),
+            (tmux::PANE_PROMPT_SOURCE, "user"),
+        ] {
+            assert_eq!(
+                tmux::test_mock::get(pane, key).as_deref(),
+                Some(expected),
+                "ambiguous child SessionStart changed parent-owned {key}"
+            );
+        }
+    }
+
+    #[test]
+    fn unregistered_child_session_start_preserves_parent_turn_state() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%SUBAGENT_START_RACE";
+        tmux::test_mock::set(pane, tmux::PANE_TURN_ACTIVE, "1");
+        tmux::test_mock::set(pane, tmux::PANE_AGENT, "claude");
+        tmux::test_mock::set(pane, tmux::PANE_CWD, "/repo/parent");
+        tmux::test_mock::set(pane, tmux::PANE_SESSION_ID, "parent-session");
+        tmux::test_mock::set(pane, tmux::PANE_STATUS, "running");
+        tmux::test_mock::set(pane, tmux::PANE_PROMPT, "Parent request");
+        tmux::test_mock::set(pane, tmux::PANE_PROMPT_ID, "parent-prompt");
+        tmux::test_mock::set(pane, tmux::PANE_PROMPT_SOURCE, "user");
+
+        on_session_start(pane, &basic_ctx(), "startup", false);
+
+        for (key, expected) in [
+            (tmux::PANE_TURN_ACTIVE, "1"),
+            (tmux::PANE_AGENT, "claude"),
+            (tmux::PANE_CWD, "/repo/parent"),
+            (tmux::PANE_SESSION_ID, "parent-session"),
+            (tmux::PANE_STATUS, "running"),
+            (tmux::PANE_PROMPT, "Parent request"),
+            (tmux::PANE_PROMPT_ID, "parent-prompt"),
+            (tmux::PANE_PROMPT_SOURCE, "user"),
+        ] {
+            assert_eq!(
+                tmux::test_mock::get(pane, key).as_deref(),
+                Some(expected),
+                "unregistered child SessionStart changed parent-owned {key}"
+            );
+        }
+    }
+
+    #[test]
+    fn top_level_grok_session_start_clears_stale_subagents() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%GROK_RESTART";
+        tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "explore:stale-child");
+        tmux::test_mock::set(pane, tmux::PANE_TURN_ACTIVE, "1");
+        let ctx = AgentContext {
+            agent: tmux::GROK_AGENT,
+            cwd: "/repo",
+            permission_mode: "default",
+            worktree: &None,
+            session_id: &None,
+        };
+
+        on_session_start(pane, &ctx, "startup", true);
+
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_SUBAGENTS));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_TURN_ACTIVE));
+    }
+
+    #[test]
+    fn top_level_codex_session_start_clears_stale_subagents() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%CODEX_RESTART";
+        tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "explore:stale-child");
+        tmux::test_mock::set(pane, tmux::PANE_TURN_ACTIVE, "1");
+        let ctx = AgentContext {
+            agent: tmux::CODEX_AGENT,
+            cwd: "/repo",
+            permission_mode: "default",
+            worktree: &None,
+            session_id: &None,
+        };
+
+        on_session_start(pane, &ctx, "startup", true);
+
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_SUBAGENTS));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_TURN_ACTIVE));
     }
 
     #[test]
@@ -239,7 +357,7 @@ mod tests {
             worktree: &None,
             session_id: &None,
         };
-        on_session_start(pane, &ctx, "");
+        on_session_start(pane, &ctx, "", true);
 
         assert!(
             !tmux::test_mock::contains(pane, PENDING_SESSION_END),
@@ -252,7 +370,7 @@ mod tests {
     fn on_session_start_resume_writes_wait_reason() {
         let _guard = tmux::test_mock::install();
         let pane = "%RESUME";
-        on_session_start(pane, &basic_ctx(), "resume");
+        on_session_start(pane, &basic_ctx(), "resume", true);
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_WAIT_REASON).as_deref(),
             Some("session_resumed"),
@@ -263,7 +381,7 @@ mod tests {
     fn on_session_start_compact_writes_compact_wait_reason() {
         let _guard = tmux::test_mock::install();
         let pane = "%COMPACT";
-        on_session_start(pane, &basic_ctx(), "compact");
+        on_session_start(pane, &basic_ctx(), "compact", true);
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_WAIT_REASON).as_deref(),
             Some("session_resumed_compact"),
@@ -275,7 +393,7 @@ mod tests {
         let _guard = tmux::test_mock::install();
         let pane = "%FRESH";
         tmux::test_mock::set(pane, tmux::PANE_WAIT_REASON, "session_resumed");
-        on_session_start(pane, &basic_ctx(), "startup");
+        on_session_start(pane, &basic_ctx(), "startup", true);
         assert!(
             !tmux::test_mock::contains(pane, tmux::PANE_WAIT_REASON),
             "startup source should drop a stale resume marker"
@@ -300,7 +418,7 @@ mod tests {
     fn on_session_end_routine_reason_does_not_notify() {
         let _guard = tmux::test_mock::install();
         let pane = "%END_ROUTINE";
-        on_session_end(pane, "claude", "clear", &notifications_enabled_all());
+        on_session_end(pane, "claude", "clear", false, &notifications_enabled_all());
         // The notification helper writes a dedup stamp only when a notification
         // actually goes out; a missing stamp is proof the gate rejected it.
         assert!(
@@ -322,6 +440,7 @@ mod tests {
             pane,
             "cargo-test: on_session_end_logout",
             "logout",
+            false,
             &notifications_enabled_all(),
         );
         // If `send_desktop_notification` succeeds (local dev with notify-send
@@ -348,6 +467,7 @@ mod tests {
             pane,
             "cargo-test: on_session_end_bypass_disabled",
             "bypass_permissions_disabled",
+            false,
             &notifications_enabled_all(),
         );
         let stamp_key = tmux::PANE_OS_NOTIFY_TASK_COMPLETED;

@@ -1,5 +1,6 @@
 pub mod claude;
 pub mod codex;
+pub mod grok;
 pub mod opencode;
 
 use crate::event::AgentEventKind;
@@ -15,6 +16,12 @@ pub(crate) fn optional_str(val: &serde_json::Value, key: &str) -> Option<String>
 
 pub(crate) fn json_value_or_null(val: &serde_json::Value, key: &str) -> serde_json::Value {
     val.get(key).cloned().unwrap_or(serde_json::Value::Null)
+}
+
+pub(crate) fn is_system_message(value: &str) -> bool {
+    value.contains("<task-notification>")
+        || value.contains("<system-reminder>")
+        || value.contains("<task-")
 }
 
 /// Binding between an upstream agent-side hook trigger (as it appears in the
@@ -40,10 +47,13 @@ pub struct HookRegistration {
 }
 
 #[cfg(test)]
-pub(crate) fn minimal_payload(kind: AgentEventKind) -> serde_json::Value {
+pub(crate) fn minimal_payload(agent: &str, kind: AgentEventKind) -> serde_json::Value {
     use serde_json::json;
     match kind {
         AgentEventKind::ActivityLog => json!({"tool_name": "Read"}),
+        AgentEventKind::SubagentStart | AgentEventKind::SubagentStop if agent == "grok" => {
+            json!({"subagentId": "subagent-1", "subagentType": "Explore"})
+        }
         AgentEventKind::SubagentStart | AgentEventKind::SubagentStop => {
             json!({"agent_type": "Explore"})
         }
@@ -60,7 +70,7 @@ pub(crate) fn assert_table_drift_free(agent: &str, table: &[HookRegistration]) {
     // produce an `AgentEvent` whose kind matches the registration.
     for reg in table {
         let event_name = reg.kind.external_name();
-        let payload = minimal_payload(reg.kind);
+        let payload = minimal_payload(agent, reg.kind);
         let produced = adapter.parse(event_name, &payload).unwrap_or_else(|| {
             panic!(
                 "{agent}: HOOK_REGISTRATIONS lists {:?} but parse() returned None — parse arm missing",
@@ -80,7 +90,7 @@ pub(crate) fn assert_table_drift_free(agent: &str, table: &[HookRegistration]) {
     // Catches "added parse arm, forgot to update HOOK_REGISTRATIONS".
     for kind in AgentEventKind::ALL {
         let accepted = adapter
-            .parse(kind.external_name(), &minimal_payload(*kind))
+            .parse(kind.external_name(), &minimal_payload(agent, *kind))
             .is_some();
         let in_table = table.iter().any(|r| r.kind == *kind);
         assert!(
