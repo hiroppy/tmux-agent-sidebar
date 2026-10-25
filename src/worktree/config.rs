@@ -7,7 +7,7 @@ pub const AGENT_OPTION: &str = "@agent-sidebar-default-agent";
 pub const BRANCH_PREFIX_OPTION: &str = "@agent-sidebar-branch-prefix";
 pub const WORKTREE_DIR_OPTION: &str = "@agent-sidebar-worktree-dir";
 
-pub const AGENTS: &[&str] = &["claude", "codex", "opencode"];
+pub const AGENTS: &[&str] = &["claude", "codex", "opencode", "pi"];
 pub const CLAUDE_MODES: &[&str] = &[
     "default",
     "plan",
@@ -17,11 +17,13 @@ pub const CLAUDE_MODES: &[&str] = &[
 ];
 pub const CODEX_MODES: &[&str] = &["default", "auto", "bypassPermissions"];
 pub const OPENCODE_MODES: &[&str] = &["default"];
+pub const PI_MODES: &[&str] = &["default"];
 
 pub fn modes_for(agent: &str) -> &'static [&'static str] {
     match agent {
         "codex" => CODEX_MODES,
         "opencode" => OPENCODE_MODES,
+        "pi" => PI_MODES,
         _ => CLAUDE_MODES,
     }
 }
@@ -44,6 +46,7 @@ pub fn agent_command(agent: &str, mode: &str) -> String {
         ("codex", "bypassPermissions") => "codex --dangerously-bypass-approvals-and-sandbox".into(),
         ("codex", _) => "codex".into(),
         ("opencode", _) => "opencode".into(),
+        ("pi", _) => "pi".into(),
         (a, _) => a.to_string(),
     }
 }
@@ -74,6 +77,11 @@ mod tests {
     #[test]
     fn modes_for_opencode_returns_opencode_modes() {
         assert_eq!(modes_for("opencode"), OPENCODE_MODES);
+    }
+
+    #[test]
+    fn modes_for_pi_returns_pi_modes() {
+        assert_eq!(modes_for("pi"), PI_MODES);
     }
 
     #[test]
@@ -114,6 +122,13 @@ mod tests {
         assert_eq!(agent_command("opencode", "default"), "opencode");
         assert_eq!(agent_command("opencode", "plan"), "opencode");
         assert_eq!(agent_command("opencode", ""), "opencode");
+    }
+
+    #[test]
+    fn agent_command_pi_ignores_mode() {
+        assert_eq!(agent_command("pi", "default"), "pi");
+        assert_eq!(agent_command("pi", "plan"), "pi");
+        assert_eq!(agent_command("pi", ""), "pi");
     }
 
     #[test]
