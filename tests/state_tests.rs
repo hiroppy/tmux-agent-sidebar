@@ -331,6 +331,7 @@ fn test_apply_git_data() {
 
     let mut state = make_state(vec![]);
     let data = GitData {
+        repo_root: "/repo".into(),
         diff_stat: Some((10, 5)),
         branch: "feature/test".into(),
         ahead_behind: Some((2, 1)),
@@ -343,6 +344,7 @@ fn test_apply_git_data() {
         }],
         unstaged_files: vec![],
         untracked_files: vec![],
+        untracked_paths: vec![],
         remote_url: "https://github.com/user/repo".into(),
         pr_number: Some("42".into()),
     };

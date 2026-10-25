@@ -89,6 +89,12 @@ pub const SIDEBAR_FILTER: &str = "@sidebar_filter";
 pub const SIDEBAR_CURSOR: &str = "@sidebar_cursor";
 pub const SIDEBAR_REPO_FILTER: &str = "@sidebar_repo_filter";
 pub const SIDEBAR_BOTTOM_HEIGHT: &str = "@sidebar_bottom_height";
+/// Command template used when opening a Git file row.
+pub const SIDEBAR_GIT_OPEN_COMMAND: &str = "@sidebar_git_open_command";
+/// Target used for Git file opening: popup or right-pane.
+pub const SIDEBAR_GIT_OPEN_TARGET: &str = "@sidebar_git_open_target";
+/// Pane-local cache of the reusable right-pane target.
+pub const SIDEBAR_GIT_OPEN_PANE: &str = "@sidebar_git_open_pane";
 pub const SIDEBAR_PET: &str = "@sidebar_pet";
 pub const SIDEBAR_NOTIFICATIONS: &str = "@sidebar_notifications";
 pub const SIDEBAR_NOTIFICATIONS_EVENTS: &str = "@sidebar_notifications_events";

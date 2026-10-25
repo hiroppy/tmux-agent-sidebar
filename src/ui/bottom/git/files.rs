@@ -1,5 +1,5 @@
 use ratatui::{
-    style::Style,
+    style::{Modifier, Style},
     text::{Line, Span},
 };
 
@@ -7,6 +7,24 @@ use crate::ui::colors::ColorTheme;
 use crate::ui::text::{display_width, pad_to, truncate_to_width};
 
 pub(super) const MAX_CHANGED_FILES: usize = 10;
+
+/// Rendered file rows plus their per-row open targets.
+pub(super) struct RenderedFileSection {
+    /// Lines to draw in the Git panel.
+    pub lines: Vec<Line<'static>>,
+    /// Open targets aligned to visible file-name spans.
+    pub targets: Vec<RenderedFileTarget>,
+}
+
+/// File metadata needed to register a clickable target after layout.
+pub(super) struct RenderedFileTarget {
+    /// Row index within the rendered file section.
+    pub line_index: usize,
+    /// Repository-relative path to open.
+    pub file_path: String,
+    /// Display width of the rendered file name.
+    pub name_width: usize,
+}
 
 fn render_more_indicator(remaining: usize, inner_w: usize, theme: &ColorTheme) -> Line<'static> {
     let more_text = format!("+{} more", remaining);
@@ -25,11 +43,12 @@ pub(super) fn render_file_section(
     inner_w: usize,
     theme: &ColorTheme,
     show_diff: bool,
-) -> Vec<Line<'static>> {
+) -> RenderedFileSection {
     let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut targets: Vec<RenderedFileTarget> = Vec::new();
 
     if files.is_empty() {
-        return lines;
+        return RenderedFileSection { lines, targets };
     }
 
     // Section header
@@ -76,8 +95,19 @@ pub(super) fn render_file_section(
 
         spans.push(Span::styled(
             truncated_name,
-            Style::default().fg(theme.text_muted),
+            Style::default()
+                .fg(theme.pr_link)
+                .add_modifier(Modifier::UNDERLINED),
         ));
+        targets.push(RenderedFileTarget {
+            line_index: lines.len(),
+            file_path: if entry.path.is_empty() {
+                entry.name.clone()
+            } else {
+                entry.path.clone()
+            },
+            name_width: name_w,
+        });
 
         if !diff_spans.is_empty() {
             spans.push(Span::raw(" "));
@@ -97,19 +127,21 @@ pub(super) fn render_file_section(
         ));
     }
 
-    lines
+    RenderedFileSection { lines, targets }
 }
 
 /// Render untracked files section.
 pub(super) fn render_untracked_section(
     files: &[String],
+    paths: &[String],
     inner_w: usize,
     theme: &ColorTheme,
-) -> Vec<Line<'static>> {
+) -> RenderedFileSection {
     let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut targets: Vec<RenderedFileTarget> = Vec::new();
 
     if files.is_empty() {
-        return lines;
+        return RenderedFileSection { lines, targets };
     }
 
     lines.push(Line::from(Span::styled(
@@ -120,10 +152,24 @@ pub(super) fn render_untracked_section(
     for name in files.iter().take(MAX_CHANGED_FILES) {
         let max_name_w = inner_w.saturating_sub(2); // "? " prefix
         let truncated_name = truncate_to_width(name, max_name_w);
+        let name_w = display_width(&truncated_name);
+        targets.push(RenderedFileTarget {
+            line_index: lines.len(),
+            file_path: paths
+                .get(targets.len())
+                .cloned()
+                .unwrap_or_else(|| name.clone()),
+            name_width: name_w,
+        });
         lines.push(Line::from(vec![
             Span::styled("?", Style::default().fg(theme.text_muted)),
             Span::raw(" "),
-            Span::styled(truncated_name, Style::default().fg(theme.text_muted)),
+            Span::styled(
+                truncated_name,
+                Style::default()
+                    .fg(theme.pr_link)
+                    .add_modifier(Modifier::UNDERLINED),
+            ),
         ]));
     }
 
@@ -135,5 +181,5 @@ pub(super) fn render_untracked_section(
         ));
     }
 
-    lines
+    RenderedFileSection { lines, targets }
 }

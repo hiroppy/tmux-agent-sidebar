@@ -19,6 +19,12 @@ description: Every shortcut in the sidebar, the worktree spawn modal, and the cl
 | `Shift+Tab`    | Switch bottom panel tab (Activity ⇄ Git)                      |
 | `Esc`          | Return focus or close the popup                               |
 
+## Git tab
+
+| Key                  | Action                                                        |
+| -------------------- | ------------------------------------------------------------- |
+| `Ctrl + Left Click`  | Open the clicked visible file row with the configured command |
+
 ## Repo filter popup
 
 Opened with `r` or by clicking the repo filter button in the sidebar header.

@@ -19,12 +19,14 @@ pub struct GitFileEntry {
 /// All git information gathered in a single background pass
 #[derive(Debug, Clone, Default)]
 pub struct GitData {
+    pub repo_root: String,
     pub diff_stat: Option<(usize, usize)>,
     pub branch: String,
     pub ahead_behind: Option<(usize, usize)>,
     pub staged_files: Vec<GitFileEntry>,
     pub unstaged_files: Vec<GitFileEntry>,
     pub untracked_files: Vec<String>,
+    pub untracked_paths: Vec<String>,
     pub remote_url: String,
     pub pr_number: Option<String>,
 }
@@ -38,7 +40,10 @@ impl GitData {
 /// Fetch all git data for a given path. Runs blocking subprocess calls.
 /// Designed to be called from a background thread.
 pub fn fetch_git_data(path: &str) -> GitData {
-    let mut data = GitData::default();
+    let mut data = GitData {
+        repo_root: repo_root(path).unwrap_or_else(|| path.to_string()),
+        ..GitData::default()
+    };
 
     // Parse git status --short to classify files into staged/unstaged/untracked
     if let Some(text) = run_git(path, &["status", "--short"]) {
@@ -211,6 +216,7 @@ pub(crate) fn parse_status_short(text: &str, data: &mut GitData) {
 
         if x == '?' && y == '?' {
             data.untracked_files.push(basename);
+            data.untracked_paths.push(full_path);
             continue;
         }
 
@@ -516,6 +522,7 @@ mod tests {
         assert!(data.staged_files.is_empty());
         assert!(data.unstaged_files.is_empty());
         assert_eq!(data.untracked_files, vec!["debug.log"]);
+        assert_eq!(data.untracked_paths, vec!["tmp/debug.log"]);
     }
 
     #[test]

@@ -8,7 +8,7 @@ use super::options::{
     PANE_AGENT, PANE_ATTENTION, PANE_BG_CMD, PANE_CWD, PANE_NAME, PANE_PENDING_SESSION_END,
     PANE_PENDING_WORKTREE_REMOVE, PANE_PERMISSION_MODE, PANE_PROMPT, PANE_PROMPT_SOURCE, PANE_ROLE,
     PANE_SESSION_ID, PANE_STARTED_AT, PANE_STATUS, PANE_SUBAGENTS, PANE_WAIT_REASON,
-    PANE_WORKTREE_BRANCH, PANE_WORKTREE_NAME, unset_pane_option,
+    PANE_WORKTREE_BRANCH, PANE_WORKTREE_NAME, SIDEBAR_GIT_OPEN_PANE, unset_pane_option,
 };
 use super::types::{
     AgentType, CODEX_AGENT, PaneInfo, PaneStatus, PermissionMode, SessionInfo, WindowInfo,
@@ -372,6 +372,7 @@ fn clear_agent_pane_state(pane_id: &str) {
         PANE_SESSION_ID,
         PANE_PENDING_SESSION_END,
         PANE_PENDING_WORKTREE_REMOVE,
+        SIDEBAR_GIT_OPEN_PANE,
         PANE_STARTED_AT,
         PANE_WAIT_REASON,
         PANE_ATTENTION,
@@ -1073,6 +1074,7 @@ mod tests {
         test_mock::set(pane, PANE_STARTED_AT, "1700000000");
         test_mock::set(pane, PANE_CWD, "/repo/codex");
         test_mock::set(pane, PANE_WAIT_REASON, "permission");
+        test_mock::set(pane, SIDEBAR_GIT_OPEN_PANE, "%RIGHT");
         let log = crate::activity::log_file_path(pane);
         let _ = std::fs::create_dir_all(log.parent().unwrap());
         std::fs::write(&log, "1234|Bash|pytest\n").unwrap();
@@ -1092,6 +1094,7 @@ mod tests {
             PANE_STARTED_AT,
             PANE_CWD,
             PANE_WAIT_REASON,
+            SIDEBAR_GIT_OPEN_PANE,
         ] {
             assert!(
                 !test_mock::contains(pane, key),
@@ -1120,6 +1123,7 @@ mod tests {
         test_mock::set(pane, PANE_STARTED_AT, "1700000000");
         test_mock::set(pane, PANE_CWD, "/repo");
         test_mock::set(pane, PANE_SESSION_ID, "ses-1");
+        test_mock::set(pane, SIDEBAR_GIT_OPEN_PANE, "%RIGHT");
         let log = crate::activity::log_file_path(pane);
         let _ = std::fs::create_dir_all(log.parent().unwrap());
         std::fs::write(&log, "1234|Bash|ls\n").unwrap();
@@ -1139,6 +1143,7 @@ mod tests {
             PANE_STARTED_AT,
             PANE_CWD,
             PANE_SESSION_ID,
+            SIDEBAR_GIT_OPEN_PANE,
         ] {
             assert!(
                 !test_mock::contains(pane, key),
