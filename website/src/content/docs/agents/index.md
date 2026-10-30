@@ -1,9 +1,9 @@
 ---
 title: Agent support overview
-description: What the sidebar shows for Claude Code, Codex, and OpenCode, side by side.
+description: What the sidebar shows for Claude Code, Codex, OpenCode, and Antigravity CLI.
 ---
 
-Claude Code, Codex, and OpenCode work with the sidebar, but they expose different sets of hooks — so the sidebar's surface area is narrower for Codex and OpenCode than it is for Claude Code.
+Claude Code, Codex, OpenCode, and Antigravity CLI work with the sidebar, but expose different sets of hooks. The supported metadata varies by agent.
 
 ## Feature support by agent
 
@@ -23,3 +23,14 @@ Claude Code, Codex, and OpenCode work with the sidebar, but they expose differen
 | Sub-agent display                        | ✓           | —            | —            | Requires `SubagentStart` / `SubagentStop`                                                                                        |
 | Activity log                             | ✓           | ✓ (Bash only) | ✓            | Codex's `PostToolUse` fires only for `Bash`; OpenCode records the tool events the plugin bridge receives                         |
 | Worktree lifecycle tracking              | ✓           | —            | —            | Requires `WorktreeCreate` / `WorktreeRemove`                                                                                     |
+
+## Antigravity CLI (`agy`)
+
+The native plugin supports running/idle/error status, elapsed execution time,
+tool activity, Git information, and completion/failure notifications. Successful
+stops remain running until `fullyIdle: true`. The pane becomes visible on its
+first model invocation. The spawn dialog supports `agy` in default mode.
+
+Prompt/response previews, waiting/permission badges, task progress, subagent
+attribution, and native worktree lifecycle events are not supported.
+See [Antigravity CLI](./antigravity/) for details.

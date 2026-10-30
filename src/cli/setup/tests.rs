@@ -457,13 +457,13 @@ fn full_output_has_expected_top_level_keys() {
     let agents = v.get("agents").and_then(Value::as_object).unwrap();
     let mut keys: Vec<&str> = agents.keys().map(String::as_str).collect();
     keys.sort();
-    assert_eq!(keys, vec!["claude", "codex"]);
+    assert_eq!(keys, vec!["agy", "claude", "codex"]);
 }
 
 #[test]
 fn full_output_snippet_matches_single_agent_snippet() {
     let full = build_setup_output(FAKE_HOOK);
-    for agent in ["claude", "codex"] {
+    for agent in ["agy", "claude", "codex"] {
         let from_full = full
             .pointer(&format!("/agents/{}/snippet", agent))
             .unwrap_or_else(|| panic!("missing snippet for {}", agent));
@@ -478,6 +478,7 @@ fn full_output_normalized_hooks_count_matches_table() {
     for (agent, table_len) in [
         ("claude", ClaudeAdapter::HOOK_REGISTRATIONS.len()),
         ("codex", CodexAdapter::HOOK_REGISTRATIONS.len()),
+        ("agy", AntigravityAdapter::HOOK_REGISTRATIONS.len()),
     ] {
         let hooks = full
             .pointer(&format!("/agents/{}/hooks", agent))
@@ -552,6 +553,59 @@ fn run_setup_codex_returns_only_snippet() {
 }
 
 #[test]
+fn antigravity_setup_uses_native_schema_and_detects_missing_hooks() {
+    let (code, snippet) = run_setup(&["agy".into()], FAKE_HOOK);
+    assert_eq!(code, 0);
+    let mut snippet = snippet.unwrap();
+    assert_eq!(snippet["tmux-agent-sidebar"].as_object().unwrap().len(), 3);
+    assert!(
+        snippet["tmux-agent-sidebar"]["PreInvocation"][0]
+            .get("command")
+            .is_some()
+    );
+    assert!(
+        snippet["tmux-agent-sidebar"]["PostToolUse"][0]["hooks"][0]
+            .get("command")
+            .is_some()
+    );
+    assert!(!has_missing_hooks("agy", &snippet, FAKE_HOOK));
+    snippet["tmux-agent-sidebar"]
+        .as_object_mut()
+        .unwrap()
+        .remove("Stop");
+    assert_eq!(missing_hooks("agy", &snippet, FAKE_HOOK), vec!["Stop"]);
+}
+
+#[test]
+fn antigravity_generated_hooks_quote_paths_and_return_json_without_tmux() {
+    let snippet = build_agent_snippet("agy", "/missing path/'$hook.sh").unwrap();
+    for reg in AntigravityAdapter::HOOK_REGISTRATIONS {
+        let entries = &snippet["tmux-agent-sidebar"][reg.trigger];
+        let action = if reg.matcher.is_some() {
+            &entries[0]["hooks"][0]
+        } else {
+            &entries[0]
+        };
+        let command = action["command"].as_str().unwrap();
+        let output = std::process::Command::new("bash")
+            .args(["-c", command])
+            .env_remove("TMUX_PANE")
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert!(output.stderr.is_empty());
+        assert_eq!(
+            serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+            if reg.trigger == "Stop" {
+                json!({"decision":"stop"})
+            } else {
+                json!({})
+            }
+        );
+    }
+}
+
+#[test]
 fn run_setup_unknown_agent_returns_err_exit_2() {
     let (code, json) = run_setup(&["gemini".to_string()], FAKE_HOOK);
     assert_eq!(code, 2);
@@ -583,6 +637,56 @@ fn full_output_snapshot() {
 
 const EXPECTED_FULL_OUTPUT: &str = r#"{
   "agents": {
+    "agy": {
+      "config_path": "~/.gemini/antigravity-cli/plugins/tmux-agent-sidebar/hooks.json",
+      "hooks": [
+        {
+          "command": "bash /fake/hook.sh agy execution-update >/dev/null 2>&1; printf '%s\\n' '{}'",
+          "event": "execution-update",
+          "matcher": null,
+          "trigger": "PreInvocation"
+        },
+        {
+          "command": "bash /fake/hook.sh agy activity-log >/dev/null 2>&1; printf '%s\\n' '{}'",
+          "event": "activity-log",
+          "matcher": "",
+          "trigger": "PostToolUse"
+        },
+        {
+          "command": "bash /fake/hook.sh agy execution-update >/dev/null 2>&1; printf '%s\\n' '{\"decision\":\"stop\"}'",
+          "event": "execution-update",
+          "matcher": null,
+          "trigger": "Stop"
+        }
+      ],
+      "snippet": {
+        "tmux-agent-sidebar": {
+          "PostToolUse": [
+            {
+              "hooks": [
+                {
+                  "command": "bash /fake/hook.sh agy activity-log >/dev/null 2>&1; printf '%s\\n' '{}'",
+                  "type": "command"
+                }
+              ],
+              "matcher": ""
+            }
+          ],
+          "PreInvocation": [
+            {
+              "command": "bash /fake/hook.sh agy execution-update >/dev/null 2>&1; printf '%s\\n' '{}'",
+              "type": "command"
+            }
+          ],
+          "Stop": [
+            {
+              "command": "bash /fake/hook.sh agy execution-update >/dev/null 2>&1; printf '%s\\n' '{\"decision\":\"stop\"}'",
+              "type": "command"
+            }
+          ]
+        }
+      }
+    },
     "claude": {
       "config_path": "~/.claude/settings.json",
       "hooks": [
