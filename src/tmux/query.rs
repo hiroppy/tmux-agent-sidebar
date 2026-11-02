@@ -267,16 +267,17 @@ fn parse_pane_fields_with_processes(
     let current_command = parts[pane_line_field::PANE_CURRENT_COMMAND].as_str();
     let pane_pid: Option<u32> = parts[pane_line_field::PANE_PID].parse().ok();
 
-    // Codex / OpenCode panes can leave stale tmux metadata behind after the
+    // Codex / OpenCode / Pi panes can leave stale tmux metadata behind after the
     // agent exits and the pane falls back to the user's shell. Neither
     // agent exposes a reliable "process exit" hook (Codex has no such
     // hook, OpenCode runs under Bun where `process.on("exit")` does not
-    // fire our handlers), so the Rust polling side must own teardown:
-    // wipe pane options + activity log the first poll after the agent
-    // is gone. Subsequent polls short-circuit at the `AgentType::from_label`
-    // check above once `@pane_agent` has been cleared. Claude is excluded
-    // because its SessionEnd hook drives cleanup instead.
-    if matches!(agent, AgentType::Codex | AgentType::OpenCode) && is_shell_command(current_command)
+    // fire our handlers, Pi has no exit hook), so the Rust polling side
+    // must own teardown: wipe pane options + activity log the first poll
+    // after the agent is gone. Subsequent polls short-circuit at the
+    // `AgentType::from_label` check above once `@pane_agent` has been
+    // cleared. Claude is excluded because its SessionEnd hook drives
+    // cleanup instead.
+    if matches!(agent, AgentType::Codex | AgentType::OpenCode | AgentType::Pi) && is_shell_command(current_command)
     {
         let agent_still_alive = pane_pid
             .and_then(|pid| {
@@ -445,7 +446,7 @@ fn pane_output_needs_process_snapshot(all_panes_output: &str) -> bool {
         }
         let pane_fields = &parts[session_line_field::PANE_LINE_OFFSET..];
         AgentType::from_label(&pane_fields[pane_line_field::AGENT])
-            .is_some_and(|agent| matches!(agent, AgentType::Codex | AgentType::OpenCode))
+            .is_some_and(|agent| matches!(agent, AgentType::Codex | AgentType::OpenCode | AgentType::Pi))
     })
 }
 
