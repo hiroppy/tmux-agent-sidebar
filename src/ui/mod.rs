@@ -51,6 +51,22 @@ pub fn pet_enabled_from_tmux() -> bool {
     pet_enabled_from_options(&opts)
 }
 
+/// Read `@sidebar_ports` from tmux global options, defaulting to `true` (on).
+/// Accepts `on`/`off`, `true`/`false`, `1`/`0` (case-insensitive). Unlike
+/// `@sidebar_pet` this is opt-out, so anything that is not a recognised
+/// negative keeps the current behaviour.
+pub fn ports_enabled_from_options(opts: &HashMap<String, String>) -> bool {
+    opts.get(tmux::SIDEBAR_PORTS)
+        .map(|s| s.trim().to_ascii_lowercase())
+        .map(|s| !matches!(s.as_str(), "off" | "false" | "0" | "no"))
+        .unwrap_or(true)
+}
+
+pub fn ports_enabled_from_tmux() -> bool {
+    let opts = crate::tmux::get_all_global_options();
+    ports_enabled_from_options(&opts)
+}
+
 // ── public entry point ──────────────────────────────────────────────
 
 pub fn draw(frame: &mut Frame, state: &mut AppState) {
@@ -158,6 +174,36 @@ mod tests {
             assert!(
                 !pet_enabled_from_options(&opts),
                 "expected {value} to disable"
+            );
+        }
+    }
+
+    #[test]
+    fn ports_default_on_when_option_missing() {
+        let opts = HashMap::new();
+        assert!(ports_enabled_from_options(&opts));
+    }
+
+    #[test]
+    fn ports_disabled_when_off() {
+        for value in ["off", "OFF", "false", "0", "no", " off "] {
+            let opts = opts_with(tmux::SIDEBAR_PORTS, value);
+            assert!(
+                !ports_enabled_from_options(&opts),
+                "expected {value:?} to disable"
+            );
+        }
+    }
+
+    #[test]
+    fn ports_stay_on_for_anything_that_is_not_a_negative() {
+        // Opt-out option: an unrecognised or empty value must not silently
+        // turn off a feature that was on by default.
+        for value in ["on", "true", "1", "yes", "", "banana"] {
+            let opts = opts_with(tmux::SIDEBAR_PORTS, value);
+            assert!(
+                ports_enabled_from_options(&opts),
+                "expected {value:?} to leave ports enabled"
             );
         }
     }
