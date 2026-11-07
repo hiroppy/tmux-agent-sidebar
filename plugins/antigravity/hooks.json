@@ -1,0 +1,27 @@
+{
+  "tmux-agent-sidebar": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "bash \"${TMUX_AGENT_SIDEBAR_HOOK:-$HOME/.tmux/plugins/tmux-agent-sidebar/hook.sh}\" agy execution-update >/dev/null 2>&1; printf '%s\\n' '{}'"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${TMUX_AGENT_SIDEBAR_HOOK:-$HOME/.tmux/plugins/tmux-agent-sidebar/hook.sh}\" agy activity-log >/dev/null 2>&1; printf '%s\\n' '{}'"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "bash \"${TMUX_AGENT_SIDEBAR_HOOK:-$HOME/.tmux/plugins/tmux-agent-sidebar/hook.sh}\" agy execution-update >/dev/null 2>&1; printf '%s\\n' '{\"decision\":\"stop\"}'"
+      }
+    ]
+  }
+}

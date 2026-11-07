@@ -4,6 +4,7 @@
 /// this enum — not on bare strings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AgentEventKind {
+    ExecutionUpdate,
     SessionStart,
     SessionEnd,
     UserPromptSubmit,
@@ -27,6 +28,7 @@ impl AgentEventKind {
     /// variant without extending this list fails the
     /// `all_contains_every_variant` test below.
     pub const ALL: &'static [Self] = &[
+        Self::ExecutionUpdate,
         Self::SessionStart,
         Self::SessionEnd,
         Self::UserPromptSubmit,
@@ -50,6 +52,7 @@ impl AgentEventKind {
     /// a variant without assigning a name is a compile error.
     pub const fn external_name(self) -> &'static str {
         match self {
+            Self::ExecutionUpdate => "execution-update",
             Self::SessionStart => "session-start",
             Self::SessionEnd => "session-end",
             Self::UserPromptSubmit => "user-prompt-submit",
@@ -89,6 +92,7 @@ mod tests {
         for kind in AgentEventKind::ALL {
             match kind {
                 AgentEventKind::SessionStart
+                | AgentEventKind::ExecutionUpdate
                 | AgentEventKind::SessionEnd
                 | AgentEventKind::UserPromptSubmit
                 | AgentEventKind::Notification
@@ -106,7 +110,7 @@ mod tests {
                 | AgentEventKind::WorktreeRemove => {}
             }
         }
-        assert_eq!(AgentEventKind::ALL.len(), 16);
+        assert_eq!(AgentEventKind::ALL.len(), 17);
     }
 
     #[test]

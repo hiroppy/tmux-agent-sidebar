@@ -7,6 +7,34 @@ use tmux_agent_sidebar::tmux::{AgentType, PaneStatus, SessionInfo, WindowInfo};
 use tmux_agent_sidebar::ui::colors::ColorTheme;
 use tmux_agent_sidebar::ui::icons::StatusIcons;
 
+#[test]
+fn antigravity_running_pane_snapshot() {
+    let pane = make_pane(AgentType::Antigravity, PaneStatus::Running);
+    let mut state = make_state(vec![SessionInfo {
+        session_name: "main".into(),
+        windows: vec![WindowInfo {
+            window_id: "@1".into(),
+            window_name: "project".into(),
+            window_active: true,
+            auto_rename: false,
+            panes: vec![pane.clone()],
+        }],
+    }]);
+    state.repo_groups = vec![make_repo_group("project", vec![pane])];
+    state.rebuild_row_targets();
+    state.focus_state.sidebar_focused = false;
+    state.spinner_frame = 0;
+    insta::assert_snapshot!(render_to_string(&mut state, 28, 25), @r"
+     ≡1  ●1  ◎0  ◐0  ○0  ✕0
+    ⓘ                        — ▾
+    project
+    ┃ ● agy
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
+}
+
 // ─── Agents: auto-scroll behavior Tests ─────────────────────────────
 
 #[test]
