@@ -134,6 +134,11 @@ pub struct AppState {
     /// Whether the pet animation is drawn and ticked. Loaded once at startup
     /// from the `@sidebar_pet` tmux option. Defaults to `false`.
     pub pet_enabled: bool,
+    /// Whether detected listening ports are surfaced on the branch/ports
+    /// row. Loaded once at startup from `@sidebar_ports`. Defaults to
+    /// `true`. The port scan itself always runs -- it also drives dead-pane
+    /// cleanup -- this only suppresses the display.
+    pub ports_enabled: bool,
 }
 
 impl AppState {
@@ -181,6 +186,7 @@ impl AppState {
             bottom_panel_height: crate::ui::BOTTOM_PANEL_HEIGHT,
             sessions: SessionNamesState::new(),
             pet_enabled: false,
+            ports_enabled: true,
         };
         crate::state::pet::reseed_pet_idle_motion(&mut state);
         state
