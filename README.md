@@ -1,6 +1,6 @@
 <h1 align="center">tmux-agent-sidebar</h1>
 
-<p align="center">One tmux sidebar that tracks every Claude Code, Codex, and OpenCode pane across every session and window. See status, background shells, prompts, Git state, activity, and worktrees without switching windows.</p>
+<p align="center">One tmux sidebar that tracks every Claude Code, Codex, OpenCode, and omp pane across every session and window. See status, background shells, prompts, Git state, activity, and worktrees without switching windows.</p>
 
 <p align="center"><img src="website/src/assets/captures/hero.png" alt="tmux-agent-sidebar hero" /></p>
 
@@ -13,7 +13,7 @@
 ## Features
 
 - **Every pane, one view** 
-  — tracks Claude Code, Codex, and OpenCode panes across all tmux sessions and windows
+  — tracks Claude Code, Codex, OpenCode, and omp panes across all tmux sessions and windows
 - **Live metadata** 
   — prompts, tool calls, response previews, background shell state, wait reasons, task progress, and subagent trees refresh as the agents work
 - **Worktrees, included** 
@@ -21,7 +21,7 @@
 - **Desktop notifications** 
   — native alerts when an agent finishes, needs permission, or errors out
 
-OpenCode uses a small local plugin bridge instead of per-event hook config. The plugin lives at `.opencode/plugins/tmux-agent-sidebar.js` and can be symlinked as a single file into `~/.config/opencode/plugins/` so it coexists with any existing plugins.
+OpenCode and omp both use a small local plugin/extension bridge instead of per-event hook config, since neither exposes a hooks-JSON config the way Claude Code and Codex do. The OpenCode plugin lives at `.opencode/plugins/tmux-agent-sidebar.js` (symlink as a single file into `~/.config/opencode/plugins/`); the omp extension lives at `.omp/extensions/tmux-agent-sidebar.ts` (symlink as a single file into `~/.omp/agent/extensions/`).
 
 ## Requirements
 
@@ -59,7 +59,15 @@ Reload tmux (`tmux source ~/.tmux.conf`), then press `prefix + I`. The install w
     ~/.config/opencode/plugins/tmux-agent-sidebar.js
   ```
 
-Full walkthroughs: [Claude Code setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/claude-code/) · [Codex setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/codex/) · [OpenCode setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/opencode/)
+- **omp** ([oh-my-pi](https://github.com/can1357/oh-my-pi)) — symlink just the extension file so your existing `~/.omp/agent/extensions/` contents stay untouched:
+
+  ```sh
+  mkdir -p ~/.omp/agent/extensions
+  ln -sf ~/.tmux/plugins/tmux-agent-sidebar/.omp/extensions/tmux-agent-sidebar.ts \
+    ~/.omp/agent/extensions/tmux-agent-sidebar.ts
+  ```
+
+Full walkthroughs: [Claude Code setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/claude-code/) · [Codex setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/codex/) · [OpenCode setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/opencode/) · [omp setup](https://hiroppy.github.io/tmux-agent-sidebar/getting-started/omp/)
 
 ### 3. Toggle the sidebar
 
