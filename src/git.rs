@@ -294,7 +294,10 @@ pub(crate) fn run_git(path: &str, args: &[&str]) -> Option<String> {
         .output()
         .ok()?;
     if output.status.success() {
-        let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        // trim_end, not trim: `status --short` lines start with a meaningful
+        // space (" M file" = unstaged only). Trimming it shifted the first
+        // line's columns, so it showed as staged and lost its first character.
+        let s = String::from_utf8_lossy(&output.stdout).trim_end().to_string();
         if s.is_empty() { None } else { Some(s) }
     } else {
         None
@@ -408,6 +411,38 @@ pub(crate) fn normalize_git_url(url: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The first line of `git status --short` for an unstaged-only change is
+    /// " M name". run_git used to trim that leading space, so the entry came
+    /// back as staged and named "ame".
+    #[test]
+    fn run_git_keeps_leading_space_of_first_status_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().to_str().unwrap();
+        let git = |args: &[&str]| {
+            let ok = Command::new("git")
+                .args(["-C", p, "-c", "user.name=t", "-c", "user.email=t@t"])
+                .args(args)
+                .status()
+                .unwrap()
+                .success();
+            assert!(ok, "git {args:?} failed");
+        };
+        git(&["init", "-q"]);
+        std::fs::write(dir.path().join("sandbox.conf"), "a\n").unwrap();
+        git(&["add", "sandbox.conf"]);
+        git(&["commit", "-qm", "init"]);
+        std::fs::write(dir.path().join("sandbox.conf"), "b\n").unwrap();
+
+        let text = run_git(p, &["status", "--short"]).unwrap();
+        assert_eq!(text, " M sandbox.conf");
+
+        let mut data = GitData::default();
+        parse_status_short(&text, &mut data);
+        assert!(data.staged_files.is_empty());
+        assert_eq!(data.unstaged_files.len(), 1);
+        assert_eq!(data.unstaged_files[0].name, "sandbox.conf");
+    }
 
     #[test]
     fn parse_diff_stat_both() {
