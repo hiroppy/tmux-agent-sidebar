@@ -57,33 +57,37 @@ impl AppState {
         sessions: Vec<SessionInfo>,
     ) {
         self.focus_state.sidebar_focused = sidebar_focused;
-        // Capture the prior `pane_id → session_id` map so we can detect
-        // anything that should re-trigger `refresh_session_names`:
+        // The snapshot arrives with every `session_name` empty, and the
+        // per-pane label walk only runs while the map is dirty — so carry
+        // the resolved label over for each pane that still belongs to the
+        // same session, and flag the cases that need the walk:
         //   - a brand-new pane_id (first appearance)
         //   - an existing pane whose session_id changed (e.g. /clear or
         //     a Codex session swap reuses the same pane_id but binds a
         //     new session label)
-        let prev_session_ids: HashMap<String, Option<String>> = self
+        // Without the carry-over a label is only visible on the tick right
+        // after the map refreshed and falls back to the agent name on
+        // every other tick.
+        let prev_labels: HashMap<String, (Option<String>, String)> = self
             .repo_groups
             .iter()
             .flat_map(|g| {
-                g.panes
-                    .iter()
-                    .map(|(p, _)| (p.pane_id.clone(), p.session_id.clone()))
+                g.panes.iter().map(|(p, _)| {
+                    (
+                        p.pane_id.clone(),
+                        (p.session_id.clone(), p.session_name.clone()),
+                    )
+                })
             })
             .collect();
         self.repo_groups = crate::group::group_panes_by_repo(&sessions);
-        if !self.sessions.dirty
-            && self
-                .repo_groups
-                .iter()
-                .flat_map(|g| g.panes.iter())
-                .any(|(p, _)| match prev_session_ids.get(&p.pane_id) {
-                    None => true,
-                    Some(prev_sid) => *prev_sid != p.session_id,
-                })
-        {
-            self.sessions.dirty = true;
+        for (pane, _) in self.repo_groups.iter_mut().flat_map(|g| g.panes.iter_mut()) {
+            match prev_labels.get(&pane.pane_id) {
+                Some((prev_sid, prev_name)) if *prev_sid == pane.session_id => {
+                    pane.session_name.clone_from(prev_name);
+                }
+                _ => self.sessions.dirty = true,
+            }
         }
         self.prune_pane_states_to_current_panes();
         self.rebuild_row_targets();
@@ -916,6 +920,52 @@ mod tests {
         assert!(
             !state.sessions.dirty,
             "session_names_dirty must remain clear when nothing changed"
+        );
+    }
+
+    #[test]
+    fn apply_session_snapshot_keeps_session_name_across_unchanged_ticks() {
+        // The 1s refresh rebuilds every pane from the tmux snapshot, which
+        // arrives with an empty session_name. When nothing changed the
+        // dirty flag stays clear and refresh_session_names is skipped, so
+        // the label has to survive the rebuild on its own — otherwise the
+        // row flips back to the bare agent name on every non-dirty tick.
+        let mut state = state_with_panes(vec![pane_with_session("%1", "sess-a")]);
+        state.sessions.names.insert("sess-a".into(), "alpha".into());
+        state.refresh_session_names();
+        state.sessions.dirty = false;
+        assert_eq!(state.repo_groups[0].panes[0].0.session_name, "alpha");
+
+        for tick in 1..=2 {
+            let next = test_session(vec![pane_with_session("%1", "sess-a")]);
+            state.apply_session_snapshot(false, next);
+
+            assert!(
+                !state.sessions.dirty,
+                "an unchanged snapshot must not re-dirty on tick {tick}"
+            );
+            assert_eq!(
+                state.repo_groups[0].panes[0].0.session_name, "alpha",
+                "the session label must survive non-dirty refresh tick {tick}"
+            );
+        }
+    }
+
+    #[test]
+    fn apply_session_snapshot_drops_stale_name_when_session_id_changes() {
+        // A session swap on the same pane must not inherit the previous
+        // session's label while it waits for the dirty refresh.
+        let mut state = state_with_panes(vec![pane_with_session("%1", "sess-old")]);
+        state.repo_groups[0].panes[0].0.session_name = "old-label".into();
+        state.sessions.dirty = false;
+
+        let next = test_session(vec![pane_with_session("%1", "sess-new")]);
+        state.apply_session_snapshot(false, next);
+
+        assert!(state.sessions.dirty);
+        assert!(
+            state.repo_groups[0].panes[0].0.session_name.is_empty(),
+            "a swapped session must not wear the previous session's label"
         );
     }
 
