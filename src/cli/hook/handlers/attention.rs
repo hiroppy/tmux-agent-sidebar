@@ -3,34 +3,50 @@ use crate::desktop_notification;
 use crate::desktop_notification::DesktopNotificationKind;
 use crate::tmux;
 
-use super::super::context::{AgentContext, set_agent_meta};
+use super::super::context::{AgentContext, pane_tracks_session, set_agent_meta};
 use super::super::notifications::{
     NotifyLabels, NotifyPayload, notification_body, notification_fingerprint, notify_lifecycle,
 };
 use super::status_priority::resolve_notification_status;
+
+fn settled_failed_parent_with_children(pane: &str) -> bool {
+    // Child permission hooks still raise attention and notifications, but
+    // must not erase the parent turn's terminal failure state.
+    tmux::get_pane_option_value(pane, tmux::PANE_STATUS) == "error"
+        && tmux::get_pane_option_value(pane, tmux::PANE_TURN_ACTIVE).is_empty()
+        && !tmux::get_pane_option_value(pane, tmux::PANE_SUBAGENTS).is_empty()
+}
 
 pub(in crate::cli::hook) fn on_notification(
     pane: &str,
     ctx: &AgentContext<'_>,
     wait_reason: &str,
     meta_only: bool,
+    requires_existing_session: bool,
     notifications: &desktop_notification::DesktopNotificationSettings,
 ) -> i32 {
+    if requires_existing_session && !pane_tracks_session(pane, ctx.agent, ctx.session_id.as_deref())
+    {
+        return 0;
+    }
     set_agent_meta(pane, ctx);
     if meta_only {
         return 0;
     }
-    let bg_shell_live = !tmux::get_pane_option_value(pane, tmux::PANE_BG_CMD).is_empty();
-    set_status(
-        pane,
-        resolve_notification_status(wait_reason, bg_shell_live),
-    );
-    set_attention(pane, "notification");
-    if wait_reason.is_empty() {
-        tmux::unset_pane_option(pane, tmux::PANE_WAIT_REASON);
-    } else {
-        tmux::set_pane_option(pane, tmux::PANE_WAIT_REASON, wait_reason);
+    let preserve_parent_failure = settled_failed_parent_with_children(pane);
+    if !preserve_parent_failure {
+        let bg_shell_live = !tmux::get_pane_option_value(pane, tmux::PANE_BG_CMD).is_empty();
+        set_status(
+            pane,
+            resolve_notification_status(wait_reason, bg_shell_live),
+        );
+        if wait_reason.is_empty() {
+            tmux::unset_pane_option(pane, tmux::PANE_WAIT_REASON);
+        } else {
+            tmux::set_pane_option(pane, tmux::PANE_WAIT_REASON, wait_reason);
+        }
     }
+    set_attention(pane, "notification");
     let _ = notify_lifecycle(
         pane,
         NotifyLabels::FromCtx(ctx),
@@ -49,12 +65,20 @@ pub(in crate::cli::hook) fn on_notification(
 pub(in crate::cli::hook) fn on_permission_denied(
     pane: &str,
     ctx: &AgentContext<'_>,
+    requires_existing_session: bool,
     notifications: &desktop_notification::DesktopNotificationSettings,
 ) -> i32 {
+    if requires_existing_session && !pane_tracks_session(pane, ctx.agent, ctx.session_id.as_deref())
+    {
+        return 0;
+    }
     set_agent_meta(pane, ctx);
-    set_status(pane, "waiting");
+    let preserve_parent_failure = settled_failed_parent_with_children(pane);
+    if !preserve_parent_failure {
+        set_status(pane, "waiting");
+        tmux::set_pane_option(pane, tmux::PANE_WAIT_REASON, "permission_denied");
+    }
     set_attention(pane, "notification");
-    tmux::set_pane_option(pane, tmux::PANE_WAIT_REASON, "permission_denied");
     let _ = notify_lifecycle(
         pane,
         NotifyLabels::FromCtx(ctx),
@@ -136,6 +160,7 @@ mod tests {
             &ctx,
             "permission",
             /* meta_only */ true,
+            /* requires_existing_session */ false,
             &notifications,
         );
         // meta_only=true must short-circuit before status/attention/wait_reason writes.
@@ -169,6 +194,7 @@ mod tests {
             &ctx,
             "permission",
             /* meta_only */ false,
+            /* requires_existing_session */ false,
             &notifications,
         );
         assert_eq!(
@@ -182,6 +208,119 @@ mod tests {
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_WAIT_REASON).as_deref(),
             Some("permission")
+        );
+    }
+
+    #[test]
+    fn notification_requiring_existing_session_does_not_recreate_torn_down_pane() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%NOTIF_AFTER_SESSION_END";
+        let ctx = AgentContext {
+            agent: "grok",
+            cwd: "/repo",
+            permission_mode: "auto",
+            worktree: &None,
+            session_id: &Some("ended-session".into()),
+        };
+        let notifications = desktop_notification::DesktopNotificationSettings {
+            enabled: false,
+            events: Default::default(),
+        };
+
+        on_notification(
+            pane,
+            &ctx,
+            "permission_prompt",
+            /* meta_only */ false,
+            /* requires_existing_session */ true,
+            &notifications,
+        );
+
+        for key in [
+            tmux::PANE_AGENT,
+            tmux::PANE_STATUS,
+            tmux::PANE_ATTENTION,
+            tmux::PANE_WAIT_REASON,
+            tmux::PANE_SESSION_ID,
+        ] {
+            assert!(
+                !tmux::test_mock::contains(pane, key),
+                "delayed notification recreated {key}"
+            );
+        }
+    }
+
+    #[test]
+    fn notification_requiring_existing_session_rejects_previous_session_id() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%NOTIF_PREVIOUS_SESSION";
+        tmux::test_mock::set(pane, tmux::PANE_AGENT, "grok");
+        tmux::test_mock::set(pane, tmux::PANE_SESSION_ID, "current-session");
+        tmux::test_mock::set(pane, tmux::PANE_STATUS, "idle");
+        let ctx = AgentContext {
+            agent: "grok",
+            cwd: "/old-repo",
+            permission_mode: "auto",
+            worktree: &None,
+            session_id: &Some("previous-session".into()),
+        };
+
+        on_notification(
+            pane,
+            &ctx,
+            "permission_prompt",
+            /* meta_only */ false,
+            /* requires_existing_session */ true,
+            &desktop_notification::DesktopNotificationSettings {
+                enabled: false,
+                events: Default::default(),
+            },
+        );
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_SESSION_ID).as_deref(),
+            Some("current-session")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("idle")
+        );
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_ATTENTION));
+    }
+
+    #[test]
+    fn notification_requiring_existing_session_accepts_matching_session() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%NOTIF_CURRENT_SESSION";
+        tmux::test_mock::set(pane, tmux::PANE_AGENT, "grok");
+        tmux::test_mock::set(pane, tmux::PANE_SESSION_ID, "current-session");
+        let ctx = AgentContext {
+            agent: "grok",
+            cwd: "/repo",
+            permission_mode: "auto",
+            worktree: &None,
+            session_id: &Some("current-session".into()),
+        };
+
+        on_notification(
+            pane,
+            &ctx,
+            "permission_prompt",
+            /* meta_only */ false,
+            /* requires_existing_session */ true,
+            &desktop_notification::DesktopNotificationSettings {
+                enabled: false,
+                events: Default::default(),
+            },
+        );
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("waiting")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_ATTENTION).as_deref(),
+            Some("notification")
         );
     }
 
@@ -206,6 +345,7 @@ mod tests {
             &ctx,
             "auth_success",
             /* meta_only */ false,
+            /* requires_existing_session */ false,
             &notifications,
         );
         assert_eq!(
@@ -235,6 +375,7 @@ mod tests {
             &ctx,
             "permission_prompt",
             /* meta_only */ false,
+            /* requires_existing_session */ false,
             &notifications,
         );
         assert_eq!(
@@ -267,6 +408,7 @@ mod tests {
             &ctx,
             "permission",
             /* meta_only */ false,
+            /* requires_existing_session */ false,
             &notifications,
         );
         assert_eq!(
@@ -295,6 +437,7 @@ mod tests {
             &ctx,
             "auth_success",
             /* meta_only */ false,
+            /* requires_existing_session */ false,
             &notifications,
         );
         assert_eq!(
@@ -325,7 +468,14 @@ mod tests {
             enabled: false,
             events: Default::default(),
         };
-        on_notification(pane, &ctx, "", /* meta_only */ false, &notifications);
+        on_notification(
+            pane,
+            &ctx,
+            "",
+            /* meta_only */ false,
+            /* requires_existing_session */ false,
+            &notifications,
+        );
 
         assert!(
             !tmux::test_mock::contains(pane, tmux::PANE_WAIT_REASON),
@@ -348,7 +498,12 @@ mod tests {
             enabled: false,
             events: Default::default(),
         };
-        on_permission_denied(pane, &ctx, &notifications);
+        on_permission_denied(
+            pane,
+            &ctx,
+            /* requires_existing_session */ false,
+            &notifications,
+        );
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_WAIT_REASON).as_deref(),
             Some("permission_denied")
@@ -356,6 +511,161 @@ mod tests {
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
             Some("waiting")
+        );
+    }
+
+    #[test]
+    fn permission_denied_requiring_existing_session_does_not_recreate_torn_down_pane() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%PD_AFTER_SESSION_END";
+        let ctx = AgentContext {
+            agent: "grok",
+            cwd: "/repo",
+            permission_mode: "auto",
+            worktree: &None,
+            session_id: &Some("ended-session".into()),
+        };
+
+        on_permission_denied(
+            pane,
+            &ctx,
+            /* requires_existing_session */ true,
+            &desktop_notification::DesktopNotificationSettings {
+                enabled: false,
+                events: Default::default(),
+            },
+        );
+
+        for key in [
+            tmux::PANE_AGENT,
+            tmux::PANE_STATUS,
+            tmux::PANE_ATTENTION,
+            tmux::PANE_WAIT_REASON,
+            tmux::PANE_SESSION_ID,
+        ] {
+            assert!(
+                !tmux::test_mock::contains(pane, key),
+                "delayed permission denial recreated {key}"
+            );
+        }
+    }
+
+    #[test]
+    fn permission_denied_requiring_existing_session_accepts_tracked_child() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%PD_CURRENT_CHILD";
+        tmux::test_mock::set(pane, tmux::PANE_AGENT, "grok");
+        tmux::test_mock::set(pane, tmux::PANE_SESSION_ID, "host-session");
+        tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "Review PR:child-session");
+        let ctx = AgentContext {
+            agent: "grok",
+            cwd: "/repo",
+            permission_mode: "auto",
+            worktree: &None,
+            session_id: &Some("child-session".into()),
+        };
+
+        on_permission_denied(
+            pane,
+            &ctx,
+            /* requires_existing_session */ true,
+            &desktop_notification::DesktopNotificationSettings {
+                enabled: false,
+                events: Default::default(),
+            },
+        );
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("waiting")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_ATTENTION).as_deref(),
+            Some("notification")
+        );
+    }
+
+    #[test]
+    fn on_notification_preserves_settled_parent_failure() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%NOTIF_FAILED_PARENT";
+        tmux::test_mock::set(pane, tmux::PANE_STATUS, "error");
+        tmux::test_mock::set(pane, tmux::PANE_WAIT_REASON, "rate_limit");
+        tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "Explore:sub-1");
+        tmux::test_mock::set(pane, tmux::PANE_AGENT, "grok");
+        tmux::test_mock::set(pane, tmux::PANE_SESSION_ID, "host-session");
+        let ctx = AgentContext {
+            agent: "grok",
+            cwd: "/repo",
+            permission_mode: "default",
+            worktree: &None,
+            session_id: &Some("host-session".into()),
+        };
+
+        on_notification(
+            pane,
+            &ctx,
+            "permission",
+            /* meta_only */ false,
+            /* requires_existing_session */ true,
+            &desktop_notification::DesktopNotificationSettings {
+                enabled: false,
+                events: Default::default(),
+            },
+        );
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("error")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_WAIT_REASON).as_deref(),
+            Some("rate_limit")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_ATTENTION).as_deref(),
+            Some("notification")
+        );
+    }
+
+    #[test]
+    fn on_permission_denied_preserves_settled_parent_failure() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%PD_FAILED_PARENT";
+        tmux::test_mock::set(pane, tmux::PANE_STATUS, "error");
+        tmux::test_mock::set(pane, tmux::PANE_WAIT_REASON, "rate_limit");
+        tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "Explore:sub-1");
+        tmux::test_mock::set(pane, tmux::PANE_AGENT, "grok");
+        tmux::test_mock::set(pane, tmux::PANE_SESSION_ID, "host-session");
+        let ctx = AgentContext {
+            agent: "grok",
+            cwd: "/repo",
+            permission_mode: "default",
+            worktree: &None,
+            session_id: &Some("host-session".into()),
+        };
+
+        on_permission_denied(
+            pane,
+            &ctx,
+            /* requires_existing_session */ true,
+            &desktop_notification::DesktopNotificationSettings {
+                enabled: false,
+                events: Default::default(),
+            },
+        );
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("error")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_WAIT_REASON).as_deref(),
+            Some("rate_limit")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_ATTENTION).as_deref(),
+            Some("notification")
         );
     }
 }

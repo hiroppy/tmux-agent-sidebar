@@ -96,7 +96,7 @@ impl AppState {
     /// being pinned to the per-tick refresh loop, and the ⓘ badge no
     /// longer depends on which pane happens to be focused.
     ///
-    /// Both Claude and Codex are always evaluated so a user who closes
+    /// Claude, Codex, and Grok are always evaluated so a user who closes
     /// their last agent pane still sees any outstanding hook setup
     /// warnings.
     pub fn refresh_notices(&mut self) {
@@ -132,6 +132,7 @@ impl AppState {
                 vec![
                     crate::tmux::CLAUDE_AGENT.to_string(),
                     crate::tmux::CODEX_AGENT.to_string(),
+                    crate::tmux::GROK_AGENT.to_string(),
                 ],
                 &resolved_hook.path,
                 load_config,
@@ -151,7 +152,7 @@ impl AppState {
             .map(|t| t.agent.as_str())
     }
 
-    /// Copy the LLM setup prompt for the given agent (`claude` / `codex`)
+    /// Copy the LLM setup prompt for the given agent (`claude` / `codex` / `grok`)
     /// to every clipboard-reachable surface: `arboard` for the local OS
     /// clipboard, `tmux set-buffer` for the tmux paste buffer, and a
     /// queued OSC 52 escape (flushed by the main loop) for upstream
@@ -195,8 +196,8 @@ impl AppState {
 /// `Plugin / claude` section reports stale-version state instead). When
 /// the plugin is **not** installed, Claude must surface concrete
 /// missing-hook diagnostics for users still on the manual
-/// `~/.claude/settings.json` path. Codex is unaffected — Codex CLI has
-/// no plugin mechanism upstream.
+/// `~/.claude/settings.json` path. Codex and Grok are unaffected because
+/// their hook configuration is managed outside the Claude plugin.
 ///
 /// Pure function: takes the agent list and a config loader as inputs so
 /// tests do not need to manipulate `/tmp` files or `~/.claude/`.
@@ -308,34 +309,40 @@ mod tests {
     }
 
     #[test]
-    fn missing_hook_groups_keeps_codex_regardless_of_plugin() {
-        let agents = vec!["codex".to_string()];
-
-        let without = compute_missing_hook_groups(
-            false,
-            agents.clone(),
-            "/fake/hook.sh",
-            empty_config_loader(),
-        );
-        let with =
-            compute_missing_hook_groups(true, agents, "/fake/hook.sh", empty_config_loader());
-        assert_eq!(without, with);
-        assert_eq!(without.len(), 1);
-        assert_eq!(without[0].agent, "codex");
+    fn missing_hook_groups_keeps_non_claude_agents_regardless_of_plugin() {
+        for agent in ["codex", "grok"] {
+            let agents = vec![agent.to_string()];
+            let without = compute_missing_hook_groups(
+                false,
+                agents.clone(),
+                "/fake/hook.sh",
+                empty_config_loader(),
+            );
+            let with =
+                compute_missing_hook_groups(true, agents, "/fake/hook.sh", empty_config_loader());
+            assert_eq!(without, with);
+            assert_eq!(without.len(), 1);
+            assert_eq!(without[0].agent, agent);
+        }
     }
 
     #[test]
-    fn missing_hook_groups_drops_only_claude_when_both_agents_present_and_plugin_installed() {
-        // Forced-debug rendering passes both agents; verify the filter
-        // hits Claude alone without affecting the Codex row.
+    fn missing_hook_groups_drops_only_claude_when_all_agents_present_and_plugin_installed() {
+        // Forced-debug rendering passes every agent; verify the filter
+        // hits Claude alone without affecting the Codex or Grok rows.
         let groups = compute_missing_hook_groups(
             true,
-            vec!["claude".to_string(), "codex".to_string()],
+            vec![
+                "claude".to_string(),
+                "codex".to_string(),
+                "grok".to_string(),
+            ],
             "/fake/hook.sh",
             empty_config_loader(),
         );
-        assert_eq!(groups.len(), 1);
+        assert_eq!(groups.len(), 2);
         assert_eq!(groups[0].agent, "codex");
+        assert_eq!(groups[1].agent, "grok");
     }
 
     // ─── compute_claude_plugin_notice ────────────────────────────────

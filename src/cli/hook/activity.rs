@@ -54,7 +54,10 @@ pub(super) fn handle_activity_log(
     }
 
     let current_status = tmux::get_pane_option_value(pane, tmux::PANE_STATUS);
-    if current_status != "running" && !current_status.is_empty() {
+    let settled_parent_with_children = matches!(current_status.as_str(), "background" | "error")
+        && tmux::get_pane_option_value(pane, tmux::PANE_TURN_ACTIVE).is_empty()
+        && !tmux::get_pane_option_value(pane, tmux::PANE_SUBAGENTS).is_empty();
+    if current_status != "running" && !current_status.is_empty() && !settled_parent_with_children {
         set_status(pane, "running");
         if current_status == "waiting" {
             tmux::unset_pane_option(pane, tmux::PANE_ATTENTION);
@@ -87,7 +90,7 @@ pub(super) fn handle_activity_log(
 
 fn is_background_bash(tool_name: &str, tool_input: &serde_json::Value) -> bool {
     tool_name == CanonicalTool::Bash.as_str()
-        && ["run_in_background", "runInBackground"]
+        && ["run_in_background", "runInBackground", "background"]
             .iter()
             .any(|key| tool_input.get(key).and_then(|v| v.as_bool()) == Some(true))
 }
@@ -254,6 +257,22 @@ mod tests {
     }
 
     #[test]
+    fn handle_activity_log_marks_grok_background_bash() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%GROK_BG_BASH";
+        handle_activity_log(
+            pane,
+            "Bash",
+            &json!({"command": "npm run dev", "background": true}),
+            &Value::Null,
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_BG_CMD).as_deref(),
+            Some("npm run dev")
+        );
+    }
+
+    #[test]
     fn handle_activity_log_background_bash_without_command_falls_back_to_placeholder() {
         let _guard = tmux::test_mock::install();
         let pane_id = "%CLI_BG_BASH_NO_CMD";
@@ -319,6 +338,93 @@ mod tests {
         assert_eq!(
             tmux::test_mock::get(pane_id, tmux::PANE_BG_CMD).as_deref(),
             Some("npm run dev")
+        );
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn handle_activity_log_preserves_settled_background_parent_for_child_tool() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%GROK_CHILD_ACTIVITY";
+        let path = crate::activity::log_file_path(pane);
+        let _ = fs::remove_file(&path);
+        tmux::test_mock::set(pane, tmux::PANE_STATUS, "background");
+        tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "explore:sub-1");
+        tmux::test_mock::set(pane, tmux::PANE_STARTED_AT, "1700");
+
+        handle_activity_log(
+            pane,
+            "Read",
+            &json!({"file_path": "/home/user/src/child.rs"}),
+            &Value::Null,
+        );
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("background"),
+            "child activity must not revive a parent turn that already settled"
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STARTED_AT).as_deref(),
+            Some("1700")
+        );
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains("|Read|child.rs"));
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn handle_activity_log_preserves_settled_failure_for_child_tool() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%GROK_FAILED_PARENT_CHILD_ACTIVITY";
+        let path = crate::activity::log_file_path(pane);
+        let _ = fs::remove_file(&path);
+        tmux::test_mock::set(pane, tmux::PANE_STATUS, "error");
+        tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "explore:sub-1");
+        tmux::test_mock::set(pane, tmux::PANE_WAIT_REASON, "rate_limit");
+
+        handle_activity_log(
+            pane,
+            "Read",
+            &json!({"file_path": "/home/user/src/child.rs"}),
+            &Value::Null,
+        );
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("error"),
+            "child activity must not revive a parent turn that failed"
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_WAIT_REASON).as_deref(),
+            Some("rate_limit")
+        );
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_STARTED_AT));
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains("|Read|child.rs"));
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn handle_activity_log_can_resume_active_parent_with_subagents() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%GROK_ACTIVE_PARENT_ACTIVITY";
+        let path = crate::activity::log_file_path(pane);
+        let _ = fs::remove_file(&path);
+        tmux::test_mock::set(pane, tmux::PANE_STATUS, "background");
+        tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "explore:sub-1");
+        tmux::test_mock::set(pane, tmux::PANE_TURN_ACTIVE, "1");
+
+        handle_activity_log(
+            pane,
+            "Read",
+            &json!({"file_path": "/home/user/src/parent.rs"}),
+            &Value::Null,
+        );
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("running")
         );
         fs::remove_file(&path).ok();
     }

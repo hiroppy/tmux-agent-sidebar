@@ -9,6 +9,7 @@ pub enum AgentEventKind {
     UserPromptSubmit,
     Notification,
     Stop,
+    TurnSettled,
     StopFailure,
     PermissionDenied,
     CwdChanged,
@@ -32,6 +33,7 @@ impl AgentEventKind {
         Self::UserPromptSubmit,
         Self::Notification,
         Self::Stop,
+        Self::TurnSettled,
         Self::StopFailure,
         Self::PermissionDenied,
         Self::CwdChanged,
@@ -55,6 +57,7 @@ impl AgentEventKind {
             Self::UserPromptSubmit => "user-prompt-submit",
             Self::Notification => "notification",
             Self::Stop => "stop",
+            Self::TurnSettled => "turn-settled",
             Self::StopFailure => "stop-failure",
             Self::PermissionDenied => "permission-denied",
             Self::CwdChanged => "cwd-changed",
@@ -93,6 +96,7 @@ mod tests {
                 | AgentEventKind::UserPromptSubmit
                 | AgentEventKind::Notification
                 | AgentEventKind::Stop
+                | AgentEventKind::TurnSettled
                 | AgentEventKind::StopFailure
                 | AgentEventKind::PermissionDenied
                 | AgentEventKind::CwdChanged
@@ -106,7 +110,7 @@ mod tests {
                 | AgentEventKind::WorktreeRemove => {}
             }
         }
-        assert_eq!(AgentEventKind::ALL.len(), 16);
+        assert_eq!(AgentEventKind::ALL.len(), 17);
     }
 
     #[test]

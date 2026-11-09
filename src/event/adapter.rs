@@ -2,7 +2,7 @@ use serde_json::Value;
 
 use super::AgentEvent;
 use crate::adapter;
-use crate::tmux::{CLAUDE_AGENT, CODEX_AGENT, OPENCODE_AGENT};
+use crate::tmux::{CLAUDE_AGENT, CODEX_AGENT, GROK_AGENT, OPENCODE_AGENT};
 
 /// Adapter that converts external agent events into internal `AgentEvent`.
 pub trait EventAdapter {
@@ -13,6 +13,7 @@ pub fn resolve_adapter(agent_name: &str) -> Option<Box<dyn EventAdapter>> {
     match agent_name {
         CLAUDE_AGENT => Some(Box::new(adapter::claude::ClaudeAdapter)),
         CODEX_AGENT => Some(Box::new(adapter::codex::CodexAdapter)),
+        GROK_AGENT => Some(Box::new(adapter::grok::GrokAdapter)),
         OPENCODE_AGENT => Some(Box::new(adapter::opencode::OpenCodeAdapter)),
         _ => None,
     }
@@ -31,7 +32,11 @@ mod tests {
         assert_eq!(
             event,
             Some(AgentEvent::SessionEnd {
-                end_reason: "".into()
+                agent: "claude".into(),
+                session_id: None,
+                requires_existing_session: false,
+                end_reason: "".into(),
+                top_level: false,
             })
         );
     }
@@ -46,6 +51,66 @@ mod tests {
     fn resolve_opencode() {
         let adapter = resolve_adapter("opencode");
         assert!(adapter.is_some());
+    }
+
+    #[test]
+    fn resolve_grok_parses_camel_case_session_start() {
+        let adapter = resolve_adapter("grok").expect("Grok adapter should resolve");
+        let event = adapter
+            .parse(
+                "session-start",
+                &json!({
+                    "cwd": "/tmp/project",
+                    "permissionMode": "auto",
+                    "sessionId": "grok-session-1",
+                    "source": "resume"
+                }),
+            )
+            .expect("Grok SessionStart should parse");
+
+        assert_eq!(
+            event,
+            AgentEvent::SessionStart {
+                agent: "grok".into(),
+                cwd: "/tmp/project".into(),
+                permission_mode: "auto".into(),
+                source: "resume".into(),
+                top_level: true,
+                worktree: None,
+                agent_id: None,
+                session_id: Some("grok-session-1".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_grok_normalizes_native_tool_payload() {
+        let adapter = resolve_adapter("grok").expect("Grok adapter should resolve");
+        let event = adapter
+            .parse(
+                "activity-log",
+                &json!({
+                    "toolName": "read_file",
+                    "toolInput": {"path": "/tmp/project/src/main.rs"},
+                    "toolResult": {"content": "fn main() {}"}
+                }),
+            )
+            .expect("Grok PostToolUse should parse");
+
+        assert_eq!(
+            event,
+            AgentEvent::ActivityLog {
+                agent: "grok".into(),
+                session_id: None,
+                requires_existing_session: true,
+                tool_name: "Read".into(),
+                tool_input: json!({
+                    "path": "/tmp/project/src/main.rs",
+                    "file_path": "/tmp/project/src/main.rs"
+                }),
+                tool_response: json!({"content": "fn main() {}"}),
+            }
+        );
     }
 
     #[test]
@@ -93,6 +158,31 @@ mod tests {
     }
 
     #[test]
+    fn adapters_normalize_prompt_system_classification() {
+        for (agent_name, expected) in [
+            ("claude", true),
+            ("codex", true),
+            ("opencode", true),
+            ("grok", false),
+        ] {
+            let event = resolve_adapter(agent_name)
+                .unwrap()
+                .parse(
+                    "user-prompt-submit",
+                    &json!({"prompt": "explain <system-reminder>this tag</system-reminder>"}),
+                )
+                .unwrap();
+            assert!(matches!(
+                event,
+                AgentEvent::UserPromptSubmit {
+                    prompt_is_system_message,
+                    ..
+                } if prompt_is_system_message == expected
+            ));
+        }
+    }
+
+    #[test]
     fn claude_stop_has_no_response() {
         let adapter = resolve_adapter("claude").unwrap();
         let event = adapter.parse("stop", &json!({})).unwrap();
@@ -111,6 +201,63 @@ mod tests {
                 assert_eq!(response, Some("{\"continue\":true}".into()));
             }
             other => panic!("expected Stop, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn adapters_normalize_child_turn_lifetime_policy() {
+        for (agent_name, expected) in [
+            ("claude", false),
+            ("codex", false),
+            ("opencode", false),
+            ("grok", true),
+        ] {
+            let event = resolve_adapter(agent_name)
+                .unwrap()
+                .parse("stop", &json!({}))
+                .unwrap();
+            assert!(
+                matches!(
+                    event,
+                    AgentEvent::Stop {
+                        children_may_outlive_turn,
+                        ..
+                    } if children_may_outlive_turn == expected
+                ),
+                "unexpected child-turn lifetime policy for {agent_name}: {event:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn adapters_normalize_subagent_start_child_turn_lifetime_policy() {
+        // A child registering after its parent settled may only revive the
+        // background lifecycle for agents whose children outlive the turn,
+        // so SubagentStart must carry the same policy its Stop arm declares.
+        // Only Claude and Grok construct the variant; Codex returns None for
+        // `subagent-start` (pinned by `codex_ignores_claude_only_events`).
+        for (agent_name, payload, expected) in [
+            ("claude", json!({"agent_type": "Explore"}), false),
+            (
+                "grok",
+                json!({"subagentType": "explore", "subagentId": "sub-1"}),
+                true,
+            ),
+        ] {
+            let event = resolve_adapter(agent_name)
+                .unwrap()
+                .parse("subagent-start", &payload)
+                .unwrap();
+            assert!(
+                matches!(
+                    event,
+                    AgentEvent::SubagentStart {
+                        children_may_outlive_turn,
+                        ..
+                    } if children_may_outlive_turn == expected
+                ),
+                "unexpected child-turn lifetime policy for {agent_name}: {event:?}"
+            );
         }
     }
 
@@ -183,7 +330,11 @@ mod tests {
         assert_eq!(
             claude.parse("session-end", &json!({})),
             Some(AgentEvent::SessionEnd {
-                end_reason: "".into()
+                agent: "claude".into(),
+                session_id: None,
+                requires_existing_session: false,
+                end_reason: "".into(),
+                top_level: false,
             }),
         );
         assert!(

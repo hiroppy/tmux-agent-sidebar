@@ -1,20 +1,47 @@
 /// Append a subagent entry to the comma-separated `@pane_subagents` list.
 ///
-/// Format: each entry is `agent_type:agent_id`. The id suffix lets
+/// Format: each entry is `display_label:agent_id`. The id suffix lets
 /// `remove_subagent` match the exact instance on stop, and also lets the
-/// UI render a stable `#<id-prefix>` tag that does not shift when siblings
+/// UI render a stable compact id tag that does not shift when siblings
 /// stop.
 pub(in crate::cli::hook) fn append_subagent(
     current: &str,
     agent_type: &str,
+    display_name: Option<&str>,
     agent_id: &str,
 ) -> String {
-    let entry = format!("{}:{}", agent_type, agent_id);
+    let display_label = display_name
+        .map(sanitize_subagent_label)
+        .filter(|label| !label.is_empty())
+        .unwrap_or_else(|| sanitize_subagent_label(agent_type));
+    let entry = format!("{}:{}", display_label, agent_id);
     if current.is_empty() {
         entry
     } else {
         format!("{},{}", current, entry)
     }
+}
+
+fn sanitize_subagent_label(label: &str) -> String {
+    let flattened: String = label
+        .chars()
+        .map(|ch| {
+            if ch == ',' || ch == ':' || ch == '|' || ch.is_control() {
+                ' '
+            } else {
+                ch
+            }
+        })
+        .collect();
+    flattened.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+pub(in crate::cli::hook) fn contains_subagent(current: &str, agent_id: &str) -> bool {
+    if current.is_empty() || agent_id.is_empty() {
+        return false;
+    }
+    let needle = format!(":{}", agent_id);
+    current.split(',').any(|entry| entry.ends_with(&needle))
 }
 
 /// Remove the entry with the given `agent_id` from the comma-separated list.
@@ -43,14 +70,30 @@ mod tests {
 
     #[test]
     fn append_subagent_to_empty() {
-        assert_eq!(append_subagent("", "Explore", "sub-1"), "Explore:sub-1");
+        assert_eq!(
+            append_subagent("", "Explore", None, "sub-1"),
+            "Explore:sub-1"
+        );
     }
 
     #[test]
     fn append_subagent_to_existing() {
         assert_eq!(
-            append_subagent("Explore:sub-1", "Plan", "sub-2"),
+            append_subagent("Explore:sub-1", "Plan", None, "sub-2"),
             "Explore:sub-1,Plan:sub-2"
+        );
+    }
+
+    #[test]
+    fn append_subagent_prefers_and_sanitizes_display_name() {
+        assert_eq!(
+            append_subagent(
+                "",
+                "general-purpose",
+                Some("Code review: tests, types\nand errors"),
+                "sub-1",
+            ),
+            "Code review tests types and errors:sub-1"
         );
     }
 
@@ -58,13 +101,22 @@ mod tests {
     fn append_subagent_same_type_parallel() {
         // Two Explore subagents running in parallel must be stored as
         // distinct entries — the ids disambiguate them.
-        let list = append_subagent("Explore:sub-1", "Explore", "sub-2");
+        let list = append_subagent("Explore:sub-1", "Explore", None, "sub-2");
         assert_eq!(list, "Explore:sub-1,Explore:sub-2");
     }
 
     #[test]
     fn remove_subagent_empty_list() {
         assert_eq!(remove_subagent("", "sub-1"), None);
+    }
+
+    #[test]
+    fn contains_subagent_matches_exact_tracked_id() {
+        let current = "Code reviewer:child-1,Type reviewer:child-2";
+        assert!(contains_subagent(current, "child-1"));
+        assert!(contains_subagent(current, "child-2"));
+        assert!(!contains_subagent(current, "child"));
+        assert!(!contains_subagent(current, ""));
     }
 
     #[test]
@@ -141,8 +193,8 @@ mod tests {
         // Regression for the parallel-same-type bug. Two Explore subagents
         // start, then the FIRST one (sub-1) completes — id-based removal
         // must leave sub-2 in place.
-        let list = append_subagent("", "Explore", "sub-1");
-        let list = append_subagent(&list, "Explore", "sub-2");
+        let list = append_subagent("", "Explore", None, "sub-1");
+        let list = append_subagent(&list, "Explore", None, "sub-2");
         assert_eq!(list, "Explore:sub-1,Explore:sub-2");
 
         let remaining = remove_subagent(&list, "sub-1").unwrap();
@@ -154,8 +206,8 @@ mod tests {
 
     #[test]
     fn subagent_lifecycle_mixed_types() {
-        let list = append_subagent("", "Explore", "sub-1");
-        let list = append_subagent(&list, "Plan", "sub-2");
+        let list = append_subagent("", "Explore", None, "sub-1");
+        let list = append_subagent(&list, "Plan", None, "sub-2");
         assert_eq!(list, "Explore:sub-1,Plan:sub-2");
 
         // Plan completes, Explore still running
@@ -165,14 +217,14 @@ mod tests {
 
     #[test]
     fn subagent_lifecycle_stop_unknown_id_is_noop() {
-        let list = append_subagent("", "Explore", "sub-1");
+        let list = append_subagent("", "Explore", None, "sub-1");
         assert_eq!(remove_subagent(&list, "sub-999"), None);
     }
 
     #[test]
     fn should_update_cwd_lifecycle_subagent_start_then_stop() {
         let no_subagents = "";
-        let one_subagent = append_subagent(no_subagents, "Explore", "sub-1");
+        let one_subagent = append_subagent(no_subagents, "Explore", None, "sub-1");
 
         assert!(should_update_cwd(no_subagents));
         assert!(!should_update_cwd(&one_subagent));
@@ -183,8 +235,8 @@ mod tests {
 
     #[test]
     fn should_update_cwd_nested_subagents_require_all_stopped() {
-        let list = append_subagent("", "Explore", "sub-1");
-        let list = append_subagent(&list, "Plan", "sub-2");
+        let list = append_subagent("", "Explore", None, "sub-1");
+        let list = append_subagent(&list, "Plan", None, "sub-2");
         assert!(!should_update_cwd(&list));
 
         let list = remove_subagent(&list, "sub-2").unwrap();
