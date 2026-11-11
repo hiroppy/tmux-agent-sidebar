@@ -1,6 +1,6 @@
 ## Project Overview
 
-A tmux sidebar TUI (built with Ratatui + Crossterm) that monitors AI coding agents (Claude Code, Codex) across all tmux sessions/windows/panes in real-time. Distributed as a single binary via tmux plugin managers.
+A tmux sidebar TUI (built with Ratatui + Crossterm) that monitors AI coding agents (Claude Code, Codex, OpenCode, pi) across all tmux sessions/windows/panes in real-time. Distributed as a single binary via tmux plugin managers.
 
 ## Build & Development Commands
 
@@ -53,7 +53,7 @@ TUI event loop (app::run) → AppState::sync_global_state()
 - **`state.rs` + `state/`** — `AppState` central struct plus topical submodules (`activity`, `session`, `focus`, `scroll`, `pane_runtime`, `layout`, `popup`, `notices`, `timers`, `filter`, `global`, `refresh`, `tab`). All UI is computed from this state.
 - **`app.rs` + `app/`** — TUI orchestration: `setup` (prime `AppState`), `workers` (background git/session/version threads), `input` (keyboard/mouse handling), `render` (per-frame render entry). Split out from `main.rs` so the binary entry point only handles CLI dispatch, signal wiring, and TUI session setup.
 - **`tmux.rs`** — Tmux integration: queries all panes via single `list-panes -a` call, defines `PaneInfo`/`PaneStatus`/`AgentType`/`PermissionMode`/`WorktreeMetadata`.
-- **`adapter/`** — Per-agent hook adapters (`claude`, `codex`, `opencode`). Each exposes a `HOOK_REGISTRATIONS` table binding upstream hook triggers to an internal `AgentEventKind`, plus a `parse()` that maps raw JSON payloads into `AgentEvent`. Single source of truth consumed by the setup wizard, README snippets, and tests.
+- **`adapter/`** — Per-agent hook adapters (`claude`, `codex`, `opencode`, `pi`). Each exposes a `parse()` that maps raw JSON payloads into `AgentEvent`. Claude and Codex additionally expose a `HOOK_REGISTRATIONS` table binding upstream hook triggers to an internal `AgentEventKind` — the single source of truth consumed by the `setup` wizard, README snippets, and drift tests, since both have native hooks-JSON config. OpenCode and pi have no such config; they're driven by a bundled plugin/extension bridge (`.opencode/plugins/`, `.pi/extensions/`) instead, so their adapters only implement `parse()`.
 - **`event.rs` + `event/`** — Internal event layer: `AgentEvent` (pre-extracted fields; handlers never touch raw JSON or agent names), `AgentEventKind` (compile-time enum for hook kinds), `EventAdapter` trait + `resolve_adapter`.
 - **`cli/hook.rs` + `cli/hook/`** — Receives real-time status updates from agent hooks; dispatch in `hook.rs`, with submodules `context` (shared helpers + `AgentContext`), `handlers` (per-event `on_*` handlers), `activity` (activity log writing), `notifications` (desktop notification helpers).
 - **`git.rs`** — Git operations (branch, ahead/behind, PR numbers via `gh` CLI, diff stats). Runs in a background polling thread.
