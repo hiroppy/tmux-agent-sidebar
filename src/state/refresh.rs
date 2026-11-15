@@ -57,32 +57,38 @@ impl AppState {
         sessions: Vec<SessionInfo>,
     ) {
         self.focus_state.sidebar_focused = sidebar_focused;
-        // Capture the prior `pane_id → session_id` map so we can detect
-        // anything that should re-trigger `refresh_session_names`:
+        // Capture the prior `pane_id → (session_id, session_name)` map so we
+        // can detect anything that should re-trigger `refresh_session_names`:
         //   - a brand-new pane_id (first appearance)
         //   - an existing pane whose session_id changed (e.g. /clear or
         //     a Codex session swap reuses the same pane_id but binds a
         //     new session label)
-        let prev_session_ids: HashMap<String, Option<String>> = self
+        // and carry the resolved label over for panes whose session_id is
+        // unchanged, since the rebuilt panes start with an empty
+        // `session_name`.
+        let prev_sessions: HashMap<String, (Option<String>, String)> = self
             .repo_groups
-            .iter()
+            .iter_mut()
             .flat_map(|g| {
-                g.panes
-                    .iter()
-                    .map(|(p, _)| (p.pane_id.clone(), p.session_id.clone()))
+                g.panes.iter_mut().map(|(p, _)| {
+                    (
+                        p.pane_id.clone(),
+                        (p.session_id.clone(), std::mem::take(&mut p.session_name)),
+                    )
+                })
             })
             .collect();
         self.repo_groups = crate::group::group_panes_by_repo(&sessions);
-        if !self.sessions.dirty
-            && self
-                .repo_groups
-                .iter()
-                .flat_map(|g| g.panes.iter())
-                .any(|(p, _)| match prev_session_ids.get(&p.pane_id) {
-                    None => true,
-                    Some(prev_sid) => *prev_sid != p.session_id,
-                })
-        {
+        let mut changed = false;
+        for (pane, _) in self.repo_groups.iter_mut().flat_map(|g| g.panes.iter_mut()) {
+            match prev_sessions.get(&pane.pane_id) {
+                Some((prev_sid, prev_name)) if *prev_sid == pane.session_id => {
+                    pane.session_name.clone_from(prev_name);
+                }
+                _ => changed = true,
+            }
+        }
+        if changed {
             self.sessions.dirty = true;
         }
         self.prune_pane_states_to_current_panes();
@@ -901,6 +907,36 @@ mod tests {
             state.sessions.dirty,
             "session_names_dirty must be set when an existing pane's session_id changes"
         );
+    }
+
+    #[test]
+    fn apply_session_snapshot_keeps_session_name_when_session_id_unchanged() {
+        // Regression: every 1s refresh rebuilds panes with an empty
+        // session_name, while refresh_session_names only runs when the
+        // dirty flag is set. Without carrying the label over, `/rename`
+        // names flash for one tick after each 10s poll and then vanish.
+        let mut state = state_with_panes(vec![pane_with_session("%1", "sess-a")]);
+        state.repo_groups[0].panes[0].0.session_name = "alpha".into();
+        state.sessions.dirty = false;
+
+        let next_sessions = test_session(vec![pane_with_session("%1", "sess-a")]);
+        state.apply_session_snapshot(false, next_sessions);
+
+        assert_eq!(state.repo_groups[0].panes[0].0.session_name, "alpha");
+        assert!(!state.sessions.dirty);
+    }
+
+    #[test]
+    fn apply_session_snapshot_drops_session_name_when_session_id_changes() {
+        let mut state = state_with_panes(vec![pane_with_session("%1", "sess-old")]);
+        state.repo_groups[0].panes[0].0.session_name = "old-label".into();
+        state.sessions.dirty = false;
+
+        let next_sessions = test_session(vec![pane_with_session("%1", "sess-new")]);
+        state.apply_session_snapshot(false, next_sessions);
+
+        assert!(state.repo_groups[0].panes[0].0.session_name.is_empty());
+        assert!(state.sessions.dirty);
     }
 
     #[test]
