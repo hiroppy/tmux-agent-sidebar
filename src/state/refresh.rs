@@ -72,7 +72,10 @@ impl AppState {
                     .map(|(p, _)| (p.pane_id.clone(), p.session_id.clone()))
             })
             .collect();
-        self.repo_groups = crate::group::group_panes_by_repo(&sessions);
+        let group_by = crate::group::GroupBy::from_setting(
+            &tmux::get_option(tmux::SIDEBAR_GROUP_BY).unwrap_or_default(),
+        );
+        self.repo_groups = crate::group::group_panes(&sessions, group_by);
         if !self.sessions.dirty
             && self
                 .repo_groups
