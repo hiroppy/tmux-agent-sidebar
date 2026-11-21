@@ -37,6 +37,24 @@ pub fn bottom_panel_height_from_tmux() -> u16 {
     bottom_panel_height_from_options(&opts)
 }
 
+/// Read `@sidebar_show_branch` from tmux global options, defaulting to `true`
+/// (branch line shown). `off`/`false`/`0`/`no` (case-insensitive) hide it.
+pub fn show_branch_from_options(opts: &HashMap<String, String>) -> bool {
+    opts.get(tmux::SIDEBAR_SHOW_BRANCH)
+        .map(|s| {
+            !matches!(
+                s.trim().to_ascii_lowercase().as_str(),
+                "off" | "false" | "0" | "no"
+            )
+        })
+        .unwrap_or(true)
+}
+
+pub fn show_branch_from_tmux() -> bool {
+    let opts = tmux::get_all_global_options();
+    show_branch_from_options(&opts)
+}
+
 /// Read `@sidebar_pet` from tmux global options, defaulting to `false` (off).
 /// Accepts `on`/`off`, `true`/`false`, `1`/`0` (case-insensitive).
 pub fn pet_enabled_from_options(opts: &HashMap<String, String>) -> bool {

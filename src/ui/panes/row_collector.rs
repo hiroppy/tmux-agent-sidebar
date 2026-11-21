@@ -116,6 +116,7 @@ pub(super) fn collect(state: &AppState, width: u16) -> CollectedRows {
                 theme,
                 state.spinner_frame,
                 state.now,
+                state.show_branch,
             );
             let pane_line_count = pane_lines.len();
             collected.lines.extend(pane_lines);
@@ -133,7 +134,13 @@ pub(super) fn collect(state: &AppState, width: u16) -> CollectedRows {
                 && git_info.is_worktree
                 && pane_line_count >= 2
                 && let Some(x) =
-                    row::sidebar_remove_marker_col(git_info, ports, true, width.saturating_sub(2))
+                    row::sidebar_remove_marker_col(
+                        git_info,
+                        ports,
+                        true,
+                        width.saturating_sub(2),
+                        state.show_branch,
+                    )
             {
                 collected
                     .pending_remove
