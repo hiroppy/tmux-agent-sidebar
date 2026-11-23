@@ -71,7 +71,7 @@ pub(crate) fn cmd_toggle(args: &[String]) -> i32 {
         if create_only {
             return 0;
         }
-        let _ = tmux::run_tmux(&["kill-pane", "-t", &sidebar_pane]);
+        close_sidebar_pane(window_id, &sidebar_pane);
         return 0;
     }
 
@@ -90,6 +90,19 @@ pub(crate) fn cmd_toggle(args: &[String]) -> i32 {
 
     // Remember active pane
     let active_pane = tmux::display_message(window_id, "#{pane_id}");
+
+    // Snapshot the pre-sidebar layout so `close_sidebar_pane` can restore it
+    // exactly on close. `split-window` with a `-f` (full-window) flag below
+    // proportionally shrinks *every* existing pane to make room for the
+    // sidebar, not just `target_pane` — but `kill-pane` on close only
+    // returns the freed columns to the sidebar's one structural sibling.
+    // Without this snapshot, repeated open/close cycles bleed columns from
+    // every other pane a little at a time and never give them back. See
+    // `SIDEBAR_SAVED_LAYOUT`'s doc comment for the full story.
+    let pre_layout = tmux::display_message(window_id, "#{window_layout}");
+    if !pre_layout.is_empty() {
+        let _ = tmux::set_window_option(window_id, tmux::SIDEBAR_SAVED_LAYOUT, &pre_layout);
+    }
 
     // Find our own binary path
     let self_bin = std::env::current_exe()
@@ -129,6 +142,22 @@ pub(crate) fn cmd_toggle(args: &[String]) -> i32 {
     0
 }
 
+/// Kill a sidebar pane and restore the window layout captured just before
+/// it was created (if any), undoing the proportional shrink `split-window`
+/// applied to every other pane at open time. See `SIDEBAR_SAVED_LAYOUT`'s
+/// doc comment for why this can't just rely on `kill-pane`'s default
+/// merge-into-sibling behavior.
+fn close_sidebar_pane(window_id: &str, sidebar_pane: &str) {
+    let _ = tmux::run_tmux(&["kill-pane", "-t", sidebar_pane]);
+
+    let saved_layout =
+        tmux::display_message(window_id, &format!("#{{{}}}", tmux::SIDEBAR_SAVED_LAYOUT));
+    if !saved_layout.is_empty() {
+        let _ = tmux::run_tmux(&["select-layout", "-t", window_id, &saved_layout]);
+        tmux::unset_window_option(window_id, tmux::SIDEBAR_SAVED_LAYOUT);
+    }
+}
+
 pub(crate) fn cmd_toggle_all(_args: &[String]) -> i32 {
     let pane_id_role_format = pane_id_role_format();
     let has_sidebar = tmux::run_tmux(&["list-panes", "-a", "-F", &pane_id_role_format])
@@ -136,12 +165,14 @@ pub(crate) fn cmd_toggle_all(_args: &[String]) -> i32 {
         .unwrap_or(false);
 
     if has_sidebar {
-        let all_panes =
-            tmux::run_tmux(&["list-panes", "-a", "-F", &pane_id_role_format]).unwrap_or_default();
+        let pane_id_role_window_format =
+            format!("#{{pane_id}}|#{{{}}}|#{{window_id}}", tmux::PANE_ROLE);
+        let all_panes = tmux::run_tmux(&["list-panes", "-a", "-F", &pane_id_role_window_format])
+            .unwrap_or_default();
         for line in all_panes.lines() {
-            let parts: Vec<&str> = line.splitn(2, '|').collect();
-            if parts.len() >= 2 && parts[1] == "sidebar" {
-                let _ = tmux::run_tmux(&["kill-pane", "-t", parts[0]]);
+            let parts: Vec<&str> = line.splitn(3, '|').collect();
+            if parts.len() >= 3 && parts[1] == "sidebar" {
+                close_sidebar_pane(parts[2], parts[0]);
             }
         }
     } else {

@@ -92,6 +92,15 @@ pub const SIDEBAR_BOTTOM_HEIGHT: &str = "@sidebar_bottom_height";
 pub const SIDEBAR_PET: &str = "@sidebar_pet";
 pub const SIDEBAR_NOTIFICATIONS: &str = "@sidebar_notifications";
 pub const SIDEBAR_NOTIFICATIONS_EVENTS: &str = "@sidebar_notifications_events";
+/// Window-scoped snapshot of `#{window_layout}` taken right before the
+/// sidebar pane is created. `split-window -hfb`/`-hf` (full-window split)
+/// proportionally shrinks every existing pane to make room for the
+/// sidebar, but `kill-pane` only returns the freed columns to the
+/// sidebar's immediate structural sibling — so without this snapshot,
+/// repeated open/close cycles bleed columns from any other pane one
+/// column at a time. Restoring this exact layout string on close undoes
+/// the open-time shrink precisely. See `cmd_toggle` in `cli/toggle.rs`.
+pub const SIDEBAR_SAVED_LAYOUT: &str = "@sidebar_saved_layout";
 
 pub const SIDEBAR_COLOR_ACCENT: &str = "@sidebar_color_accent";
 pub const SIDEBAR_COLOR_BORDER: &str = "@sidebar_color_border";

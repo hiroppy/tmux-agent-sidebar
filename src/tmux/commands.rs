@@ -79,6 +79,13 @@ pub fn set_window_option(window: &str, key: &str, value: &str) -> Result<(), Str
     run_tmux_capture(&["set", "-w", "-t", window, key, value]).map(|_| ())
 }
 
+/// Clear a window-scoped user option previously set by [`set_window_option`].
+/// Best-effort: failures (e.g. the window is already gone) are swallowed,
+/// matching the fire-and-forget style of the other tmux write helpers here.
+pub fn unset_window_option(window: &str, key: &str) {
+    let _ = run_tmux(&["set", "-w", "-u", "-t", window, key]);
+}
+
 /// Send a command line to `target` (a pane id) and press Enter so the shell
 /// executes it. Used to launch the agent binary right after window creation.
 /// The text is sent with `-l` (literal) so nothing in `command` can collide
